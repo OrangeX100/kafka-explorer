@@ -10,7 +10,6 @@ package main
 
 import (
 	"embed"
-	"os"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -23,11 +22,6 @@ var engineExe []byte
 
 func main() {
 	winOptions := application.WindowsOptions{}
-	// KE_DEBUG_CDP=1 exposes a WebView2 DevTools port for automated UI
-	// testing (same switch as the main app). Never set in release installs.
-	if os.Getenv("KE_DEBUG_CDP") == "1" {
-		winOptions.AdditionalBrowserArgs = []string{"--remote-debugging-port=9225"}
-	}
 
 	app := application.New(application.Options{
 		Name:    "Kafka Explorer Setup",

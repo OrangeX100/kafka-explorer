@@ -17,3 +17,7 @@ kafka-explorer.exe
 Kafka Explorer/
 docs/
 build/preview/
+
+# local-only dev probes (require a debug build with the CDP flag re-added)
+scripts/cdp_*.mjs
+scripts/av-whitelist.ps1

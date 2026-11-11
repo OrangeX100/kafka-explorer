@@ -47,8 +47,8 @@ tasks:
     vars:
       VERSION: '{{.VERSION | default "0.2.0-beta.1"}}'
       # the public GitHub repo (owner/repo) release builds check for
-      # updates; override with `task build RELEASE_REPO=you/kafka-explorer`
-      RELEASE_REPO: '{{.RELEASE_REPO | default ""}}'
+      # updates; override with `task build RELEASE_REPO=owner/repo`
+      RELEASE_REPO: '{{.RELEASE_REPO | default "OrangeX100/kafka-explorer"}}'
       COMMIT:
         sh: git rev-parse --short HEAD 2>/dev/null || echo ""
 
@@ -76,6 +76,11 @@ tasks:
       # version upgrades (same-version reinstalls are the only case Inno
       # silently skips — see cmd/setup/service.go install()).
       - go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version={{.VERSION}}" -o bin/installer/KafkaExplorer_Setup.exe ./cmd/setup
+      # the PUBLISHED artifact is the front-end (engine embedded) under the
+      # versioned name: users download it AND the in-app auto-update matches
+      # exactly this pattern (see internal/application/update_service.go).
+      # The raw ISCC output (the engine alone) is build-internal only.
+      - cmd /c copy /y "bin\installer\KafkaExplorer_Setup.exe" "bin\installer\KafkaExplorer_Setup_{{.VERSION}}.exe"
       - certutil -hashfile bin/installer/KafkaExplorer_Setup.exe SHA256
     vars:
       VERSION: '{{.VERSION | default "0.2.0-beta.1"}}'

@@ -7,7 +7,6 @@ import (
 	"embed"
 	"fmt"
 	"log/slog"
-	"os"
 	"sync"
 
 	"go.uber.org/zap"
@@ -57,19 +56,10 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 	connectSvc := appsvc.NewConnectService(dbw, secrets)
 	updateSvc := appsvc.NewUpdateService(buildinfo.Version)
 
-	// KE_DEBUG_CDP=1 exposes a WebView2 DevTools port for automated UI
-	// testing. Never set in release installs: a local DevTools port would
-	// let any local process script the app's webview.
-	if os.Getenv("KE_DEBUG_CDP") == "1" {
-		log.Info("debug CDP enabled on :9223")
-	}
 	// re-point the ARP 卸载 button at the styled wrapper (Inno re-writes
 	// the key on every install/upgrade and no setup hook runs after that)
 	fixUninstallRegistry()
 	winOptions := application.WindowsOptions{}
-	if os.Getenv("KE_DEBUG_CDP") == "1" {
-		winOptions.AdditionalBrowserArgs = []string{"--remote-debugging-port=9223", "--auto-open-devtools-for-tabs"}
-	}
 
 	// Single instance: the tray lives in-process, so a second launch would
 	// show a SECOND tray icon for the same app. The wails runtime takes a

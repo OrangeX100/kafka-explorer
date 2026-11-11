@@ -10,7 +10,6 @@ package main
 
 import (
 	"embed"
-	"os"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"kafkaexplorer/internal/uninstaller"
@@ -23,9 +22,6 @@ func main() {
 	// KE_DEBUG_CDP=1 exposes a WebView2 DevTools port for automated UI
 	// testing (same switch as the main app). Never set in release installs.
 	winOptions := application.WindowsOptions{}
-	if os.Getenv("KE_DEBUG_CDP") == "1" {
-		winOptions.AdditionalBrowserArgs = []string{"--remote-debugging-port=9224"}
-	}
 
 	app := application.New(application.Options{
 		Name:    "Kafka Explorer Uninstaller",

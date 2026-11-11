@@ -21,7 +21,7 @@ function apply(theme: Theme) {
 }
 
 const saved = localStorage.getItem(STORAGE_KEY);
-const initial: Theme = saved === "light" || saved === "system" ? saved : "dark";
+const initial: Theme = saved === "dark" || saved === "system" ? saved : "light";
 apply(initial);
 
 interface ThemeState {

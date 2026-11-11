@@ -13,7 +13,7 @@ interface SettingsState {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  theme: "dark",
+  theme: "light",
   locale: "zh-CN",
   density: "compact",
   fontSize: 14, // UI zoom baseline (zoom = fontSize / 14)

@@ -69,7 +69,7 @@ var fontFamilies = map[string]bool{
 // DefaultSettings returns the shipped defaults.
 func DefaultSettings() Settings {
 	return Settings{
-		Theme:        "dark",
+		Theme:        "light",
 		Locale:       "zh-CN",
 		Density:      "compact",
 		FontSize:     14,
@@ -119,7 +119,7 @@ func (s *SettingsService) Get(ctx context.Context) (Settings, error) {
 // Save validates and persists the settings blob.
 func (s *SettingsService) Save(ctx context.Context, in Settings) (Settings, error) {
 	if in.Theme != "dark" && in.Theme != "light" && in.Theme != "system" {
-		in.Theme = "dark"
+		in.Theme = "light"
 	}
 	if in.Locale != "zh-CN" && in.Locale != "en" && in.Locale != "system" {
 		in.Locale = "zh-CN"
