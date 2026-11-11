@@ -1,0 +1,44 @@
+// Package keyring stores secrets in the OS credential store
+// (Windows Credential Manager / macOS Keychain / Linux Secret Service).
+// This is the only place passwords touch persistent storage.
+package keyring
+
+import (
+	"fmt"
+
+	"github.com/zalando/go-keyring"
+
+	"kafkaexplorer/internal/domain"
+)
+
+// Store implements domain.SecretStore. Service is fixed per-app so entries
+// are namespaced; ref is the per-connection secret name.
+type Store struct {
+	service string
+}
+
+func NewStore(service string) *Store { return &Store{service: service} }
+
+func (s *Store) Set(_, ref, password string) error {
+	if err := keyring.Set(s.service, ref, password); err != nil {
+		return fmt.Errorf("keyring set %s: %w", ref, err)
+	}
+	return nil
+}
+
+func (s *Store) Get(_, ref string) (string, error) {
+	v, err := keyring.Get(s.service, ref)
+	if err != nil {
+		// go-keyring's ErrNotFound wraps differently per platform; normalize.
+		return "", fmt.Errorf("%w: keyring get %s: %v", domain.ErrNotFound, ref, err)
+	}
+	return v, nil
+}
+
+func (s *Store) Delete(_, ref string) error {
+	if err := keyring.Delete(s.service, ref); err != nil {
+		// Deleting a missing secret is fine: the caller's intent is achieved.
+		return nil
+	}
+	return nil
+}

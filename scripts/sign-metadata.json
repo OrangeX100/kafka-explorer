@@ -1,0 +1,7 @@
+{
+  "Description": "Kafka Explorer - Kafka 集群可视化管理工具",
+  "App": {
+    "Name": "Kafka Explorer",
+    "Version": "http://kafkaexplorer.local"
+  }
+}

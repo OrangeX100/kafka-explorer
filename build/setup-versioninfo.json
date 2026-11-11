@@ -1,0 +1,22 @@
+{
+  "StringFileInfo": {
+    "040904B0": {
+      "CompanyName": "Kafka Explorer contributors",
+      "FileDescription": "Kafka Explorer 安装程序",
+      "LegalCopyright": "Copyright (C) 2026 Kafka Explorer contributors",
+      "ProductName": "Kafka Explorer",
+      "FileVersion": "0.2.0-beta.1",
+      "ProductVersion": "0.2.0-beta.1",
+      "OriginalFilename": "KafkaExplorer_Setup.exe",
+      "InternalName": "KafkaExplorer_Setup"
+    }
+  },
+  "VarFileInfo": {
+    "Translation": {
+      "LangID": "0409",
+      "CharsetID": "04B0"
+    }
+  },
+  "IconPath": "build/windows/kafka_icon.ico",
+  "ManifestPath": "build/app.manifest"
+}

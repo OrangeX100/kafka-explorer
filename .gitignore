@@ -1,0 +1,19 @@
+# Go
+bin/
+.gotmp/
+*.test.exe
+
+# Frontend: node_modules and ALL generated artifacts are never committed.
+frontend/node_modules/
+frontend/dist/
+frontend/bindings/
+
+# Local env
+*.log
+
+# setup front-end build artifact (copied from bin/installer by Taskfile)
+cmd/setup/engine/
+kafka-explorer.exe
+Kafka Explorer/
+docs/
+build/preview/

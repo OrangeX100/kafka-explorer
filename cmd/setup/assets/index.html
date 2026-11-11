@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+<title>Kafka Explorer 安装</title>
+</head>
+<body>
+  <!-- frameless window: this header is the draggable titlebar -->
+  <header class="titlebar" style="--wails-draggable: drag">
+    <span class="title">Kafka Explorer 安装</span>
+    <button class="close" id="close" style="--wails-draggable: no-drag" title="关闭">✕</button>
+  </header>
+
+  <main class="content">
+    <div class="left">
+      <img class="logo" src="logo.png" alt="">
+    </div>
+    <div class="right">
+      <h1 class="name">Kafka Explorer</h1>
+      <p class="subtitle">集群可视化管理工具</p>
+
+      <p class="from" id="upgradeLine" style="display:none">
+        检测到已安装 <span id="prevVersion"></span>
+      </p>
+      <div id="pathGroup">
+        <p class="from">安装到</p>
+        <div class="path-row">
+          <input class="path-input" id="path" spellcheck="false" autocomplete="off">
+          <button class="browse" id="browse" title="选择安装目录">浏览…</button>
+        </div>
+      </div>
+
+      <label class="check" id="launchCheck" style="display:none">
+        <input type="checkbox" id="launchNow" checked>
+        <span>安装完成后启动 Kafka Explorer</span>
+      </label>
+
+      <p class="note" id="note"></p>
+
+      <div class="actions">
+        <button class="btn cancel" id="cancel">取消</button>
+        <button class="btn primary" id="ok" disabled>安装</button>
+      </div>
+      <div class="progress" id="progress"><div class="bar" id="bar"></div></div>
+    </div>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

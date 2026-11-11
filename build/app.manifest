@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Application manifest embedded into the exe (RT_MANIFEST).
+  asInvoker: never request elevation — a Kafka desktop client has no
+  business prompting UAC. supportedOS: declare Win10/11 so version
+  heuristics (and shell behavior) treat the binary as a modern app.
+  Deliberately NO dpiAware section: WebView2 already manages per-monitor
+  DPI, and declaring it here changed rendering in earlier tests.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity version="0.1.0.0" processorArchitecture="*" name="KafkaExplorer" type="win32"/>
+  <description>Kafka Explorer</description>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 and Windows 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+</assembly>

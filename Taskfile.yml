@@ -1,0 +1,119 @@
+version: "3"
+
+# Gate order matters: bindings before audits (audit-dto reads generated
+# bindings), build before test (a compile error is cheaper than a test run).
+# CI runs `task precommit` — local and CI must never diverge.
+
+env:
+  PATH: "{{.PATH}}"
+
+tasks:
+  generate:bindings:
+    desc: Generate wails TS bindings (output is gitignored)
+    cmds:
+      - wails3 generate bindings -d frontend/bindings -i ./internal/app
+    generates:
+      - frontend/bindings
+
+  audit:
+    desc: All governance audits (i18n parity, DTO drift, structure limits)
+    deps: [generate:bindings]
+    cmds:
+      - cd frontend && npm run audit:all
+
+  build:frontend:
+    desc: Type-check and build the frontend into frontend/dist
+    cmds:
+      - cd frontend && npm ci --no-audit --no-fund && npm run build
+
+  build:
+    desc: Build the desktop binary (frontend/dist is refreshed first — a stale
+      dist embedded in the exe burned us three times before this dep existed)
+    deps: [build:frontend]
+    cmds:
+      # -H=windowsgui hides the console window on Windows release builds;
+      # zap file logging (DataDir/kafka-explorer.log) still captures output.
+      # Version/commit land in internal/buildinfo — the About page reads them.
+      # 360 AV mitigation: stamp VERSIONINFO + manifest + icon into ONE syso
+      # (an unsigned GUI binary with NO FileDescription is a heuristic
+      # high-scorer and has been cloud-quarantined here), and -trimpath to
+      # keep local paths out of the binary. goversioninfo puts the icon
+      # group at resource ID 32512 — winicon_windows.go loads that ID.
+      # NEVER add a second rsrc .syso beside it: two .rsrc sections fail
+      # to link ("too many .rsrc sections").
+      - python scripts/sync_versioninfo.py "{{.VERSION}}"
+      - go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0 -o app_windows.syso -manifest build/app.manifest build/versioninfo.json
+      - go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version={{.VERSION}} -X kafkaexplorer/internal/buildinfo.Commit={{.COMMIT}} -X kafkaexplorer/internal/buildinfo.UpdateRepo={{.RELEASE_REPO}}" -o bin/kafka-explorer.exe .
+    vars:
+      VERSION: '{{.VERSION | default "0.2.0-beta.1"}}'
+      # the public GitHub repo (owner/repo) release builds check for
+      # updates; override with `task build RELEASE_REPO=you/kafka-explorer`
+      RELEASE_REPO: '{{.RELEASE_REPO | default ""}}'
+      COMMIT:
+        sh: git rev-parse --short HEAD 2>/dev/null || echo ""
+
+  installer:
+    desc: Build + package the per-user setup exe (InnoSetup, WebView2 check)
+    deps: [build]
+    cmds:
+      - python scripts/make_installer_images.py
+      # custom uninstaller (Wails app) first: the main setup ships its exe.
+      # Same 360 mitigation as the main build — VERSIONINFO+icon in one syso.
+      - python scripts/sync_uninstaller_versioninfo.py "{{.VERSION}}"
+      - go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0 -o cmd/uninstaller/uninstall_windows.syso -manifest build/app.manifest build/uninstaller-versioninfo.json
+      - go build -trimpath -ldflags "-H=windowsgui" -o bin/installer/KafkaExplorer_Uninstall.exe ./cmd/uninstaller
+      # Inno engine FIRST: the setup front-end EMBEDS it (go:embed all:engine
+      # in cmd/setup) so the release stays a single self-contained exe.
+      - '"{{.ISCC}}" /DVersion={{.VERSION}} /DVersionInfoVersion={{.VERSIONINFOVERSION}} build/installer/installer.iss'
+      - cmd /c copy /y "bin\installer\KafkaExplorer_Setup_{{.VERSION}}.exe" "cmd\setup\engine\KafkaExplorer_Engine.exe"
+      # custom setup front-end (Wails app): BECOMES the distributable — it
+      # extracts the embedded engine and runs it silently (direct spawn,
+      # then AV-escape fallbacks ending in a one-click .cmd — see
+      # cmd/setup/service.go)
+      - python scripts/sync_setup_versioninfo.py "{{.VERSION}}"
+      - go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0 -o cmd/setup/setup_windows.syso -manifest build/app.manifest build/setup-versioninfo.json
+      # -X buildinfo.Version lets the service skip the pre-uninstall on
+      # version upgrades (same-version reinstalls are the only case Inno
+      # silently skips — see cmd/setup/service.go install()).
+      - go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version={{.VERSION}}" -o bin/installer/KafkaExplorer_Setup.exe ./cmd/setup
+      - certutil -hashfile bin/installer/KafkaExplorer_Setup.exe SHA256
+    vars:
+      VERSION: '{{.VERSION | default "0.2.0-beta.1"}}'
+      VERSIONINFOVERSION: '{{.VERSIONINFOVERSION | default "0.2.0.1"}}'
+      # winget installs per-user; override ISCC when Inno Setup lives elsewhere.
+      ISCC: '{{.ISCC | default "C:/Users/51293/AppData/Local/Programs/Inno Setup 6/ISCC.exe"}}'
+
+  test:
+    desc: Go unit + contract tests
+    deps: [test:unix, test:windows]
+
+  test:unix:
+    desc: Standard go test (CI and unix dev machines)
+    platforms: [linux, darwin]
+    cmds:
+      - go test -count=1 ./...
+
+  test:windows:
+    # Windows dev machines with aggressive AV deny exec of freshly-built
+    # *.test.exe under go-build's random temp dirs (observed on this repo's
+    # dev box). The script builds each test binary to a FIXED path first,
+    # which executes reliably. CI never hits this branch. (The loop lives in
+    # a script file: go-task's own template engine would swallow the
+    # `{{...}}` braces of `go list -f`.)
+    desc: Fixed-path test binaries (AV workaround)
+    platforms: [windows]
+    cmds:
+      - sh scripts/test-windows.sh
+
+  precommit:
+    desc: Full gate = generate + audit + build:frontend + build + test
+    cmds:
+      - task: generate:bindings
+      - task: audit
+      - task: build
+      - task: test
+
+  dev:
+    desc: Run the app in dev mode (wails dev server)
+    cmds:
+      - wails3 dev

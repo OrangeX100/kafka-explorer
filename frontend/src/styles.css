@@ -1,0 +1,721 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens. Colors are RGB triplets so Tailwind opacity modifiers
+ * (border-danger/40) keep working on top of CSS variables. Changing the
+ * theme later = swapping these values, not hunting through components.
+ *
+ * Dark is the default (data-tool heritage); [data-theme="light"] on <html>
+ * swaps the palette. Theme state lives in shared/theme.ts (localStorage).
+ */
+:root,
+[data-theme="dark"] {
+  --ink-950: 18 19 24;
+  --ink-900: 22 23 29;
+  --ink-850: 27 28 36;
+  --ink-800: 30 31 40;
+  --ink-700: 38 39 47;
+  --ink-600: 51 52 61;
+  --ink-500: 67 69 79;
+  --ink-400: 91 93 104;
+  --ink-300: 138 140 150;
+  --ink-200: 185 187 196;
+  --ink-100: 228 229 233;
+
+  --accent: 79 140 255;
+  --accent-hover: 107 159 255;
+  --accent-muted: 43 61 94;
+  --ok: 63 185 111;
+  --warn: 224 164 55;
+  --danger: 229 83 75;
+}
+
+[data-theme="light"] {
+  --ink-950: 244 245 247;
+  --ink-900: 238 240 243;
+  --ink-850: 255 255 255;
+  --ink-800: 241 243 246;
+  --ink-700: 226 229 234;
+  --ink-600: 208 212 219;
+  --ink-500: 180 186 194;
+  --ink-400: 140 147 158;
+  --ink-300: 110 118 130;
+  --ink-200: 70 78 90;
+  --ink-100: 28 32 38;
+
+  --accent: 37 99 235;
+  --accent-hover: 29 78 216;
+  --accent-muted: 219 234 254;
+  --ok: 22 163 74;
+  --warn: 217 119 6;
+  --danger: 220 38 38;
+}
+
+/* Motion primitives (ui-motion/PRIMITIVES.md): shared easing for every
+   animated surface in the app. Data-dense tool rule: enter with a gentle
+   spring, exit fast; never bounce inside the data area. */
+:root {
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-snappy: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: rgb(var(--ink-950));
+  color: rgb(var(--ink-100));
+  /* --app-font is set by the settings page (state/settings.ts
+     applyTypography); the fallback is the default stack. */
+  font-family: var(--app-font, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif);
+  line-height: 1.5;
+  font-size: 14px;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Data-dense surfaces (tables, code) allow selection — it is how users copy. */
+table,
+pre,
+code,
+.selectable {
+  user-select: text;
+}
+
+/* Keyboard focus ring: only :focus-visible, so mouse clicks stay quiet. */
+:focus-visible {
+  outline: 2px solid rgb(var(--accent) / 0.7);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--ink-600));
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--ink-500));
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+input,
+select,
+textarea {
+  user-select: text;
+}
+
+/* ---- animation utilities ------------------------------------------------ */
+
+@keyframes ke-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* content emerges from a 4px blur — the ksqlDB detail reveal, reused by
+   module content containers (.anim-blur-in) and keyed tab panels */
+@keyframes ke-blur-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+.anim-blur-in {
+  animation: ke-blur-in 340ms var(--ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-blur-in {
+    animation: none !important;
+  }
+}
+
+@keyframes ke-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ke-sink-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+@keyframes ke-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ke-icon-in {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Instant self-drawn tooltip for icon-only rails (HTML title takes ~1s
+   and feels broken). Hover shows a dark label to the right of the icon. */
+[data-tip] {
+  position: relative;
+}
+[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  background: rgb(var(--ink-100) / 0.95);
+  color: rgb(var(--ink-950));
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 9px;
+  border-radius: 6px;
+  z-index: 90;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.25);
+  /* overlays/tooltip: quick fade + slight slide-in from the rail (150ms) */
+  animation: ke-tip-in 150ms var(--ease-snappy);
+}
+
+@keyframes ke-tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+}
+
+/* Skeleton wave (progress/skeleton): quiet breathing, staggered per line. */
+@keyframes ke-sk-wave {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.52;
+  }
+}
+
+.anim-fade {
+  animation: ke-fade-in 160ms var(--ease-standard);
+}
+.anim-rise {
+  animation: ke-rise-in 400ms var(--ease-snappy);
+}
+
+/* ksqlDB tab panels: keep-alive visibility toggle. The panel-in animation
+   (not a transition) is deliberate — panels toggle the `hidden` attribute,
+   and display:none→visible in the same frame swallows transitions; a
+   keyframes animation always plays on reveal. Reuses ke-rise-in, tuned to
+   the tabs spec's 4px/200ms content swap. */
+.ksql-panel[data-state="active"] {
+  animation: ksql-panel-in 200ms var(--ease-snappy);
+}
+@keyframes ksql-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* skeleton-morph: skeleton and content share one grid cell; the loader's
+   data-state cross-morphs them (skeleton fades out after a 60ms beat,
+   content resolves from a 4px blur over 340ms). No display toggling between
+   the two states — both stay mounted, so transitions never get swallowed. */
+.ksql-loader {
+  display: grid;
+}
+.ksql-loader > * {
+  grid-area: 1 / 1;
+}
+.ksql-skeleton {
+  opacity: 1;
+  transition: opacity 380ms ease 60ms;
+  pointer-events: none;
+  /* the morph loader centers itself and holds a comfortable min height */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+}
+.ksql-content {
+  opacity: 0;
+  filter: blur(4px);
+  transition: opacity 340ms ease, filter 340ms ease;
+}
+.ksql-loader[data-state="content"] .ksql-skeleton {
+  opacity: 0;
+}
+.ksql-loader[data-state="content"] .ksql-content {
+  opacity: 1;
+  filter: blur(0);
+}
+.ksql-loader[data-state="error"] .ksql-content {
+  opacity: 0;
+}
+
+/* morph-loader (loaders/morph-loader spec, ring form): four persistent
+   paths rotate while loading and morph to the result glyph on done/error. */
+.morph-loader {
+  display: inline-flex;
+  color: rgb(var(--accent));
+}
+.morph-loader svg {
+  display: block;
+  overflow: visible;
+}
+.morph-dot {
+  /* staggered bounce — delay comes from the inline animationDelay */
+  animation: morph-bounce 0.9s ease-in-out infinite;
+}
+@keyframes morph-bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+.morph-path {
+  transition:
+    d 460ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    stroke-width 460ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.morph-pulse svg {
+  animation: morph-pulse 420ms cubic-bezier(0.18, 0.89, 0.32, 1.25);
+}
+@keyframes morph-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.14); }
+  100% { transform: scale(1); }
+}
+.anim-sink {
+  animation: ke-sink-out 160ms var(--ease-exit) forwards;
+}
+.anim-toast {
+  animation: ke-toast-in 420ms var(--ease-snappy);
+}
+.anim-icon {
+  animation: ke-icon-in 480ms var(--ease-snappy) backwards;
+}
+
+.sk-line {
+  height: 11px;
+  border-radius: 5px;
+  background: rgb(var(--ink-700));
+  animation: ke-sk-wave 1800ms infinite ease-in-out;
+  animation-delay: calc(var(--stagger, 0) * 90ms);
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-1.5 rounded border border-ink-600 bg-ink-700 px-2.5 py-1 text-xs text-ink-100;
+    transition:
+      background-color 150ms var(--ease-standard),
+      border-color 150ms var(--ease-standard),
+      color 150ms var(--ease-standard),
+      transform 140ms var(--ease-spring);
+  }
+  .btn:hover {
+    @apply border-ink-500 bg-ink-600;
+  }
+  .btn:active {
+    transform: scale(0.97);
+  }
+  .btn-accent {
+    @apply border-accent bg-accent text-white;
+  }
+  .btn-accent:hover {
+    @apply border-accent-hover bg-accent-hover;
+  }
+  .btn-danger {
+    @apply border-danger/60 bg-danger/15 text-danger;
+  }
+  .btn-danger:hover {
+    @apply bg-danger/30;
+  }
+  .field {
+    @apply w-full rounded border border-ink-600 bg-ink-900 px-2 py-1.5 text-xs text-ink-100 outline-none placeholder:text-ink-400;
+    transition: border-color 150ms var(--ease-standard);
+  }
+  .field:focus {
+    @apply border-accent;
+  }
+  .panel {
+    @apply rounded border border-ink-700 bg-ink-850;
+  }
+  .table-head {
+    @apply sticky top-0 z-10 bg-ink-800 text-left text-11 font-medium text-ink-300;
+  }
+}
+
+/* Reduced motion: kill every animation/transition globally. Layout and
+   information stay identical — only the movement disappears. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---- ke-switch: mechanical stretch switch (ui-motion toggles/switch).
+   White knob on both themes; track tokens flip with the theme. ---- */
+.ke-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 42px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.ke-switch-track {
+  position: relative;
+  display: block;
+  width: 42px;
+  height: 24px;
+  border-radius: 9999px;
+  background: rgb(var(--ink-500));
+  transition: background-color 0.25s ease;
+}
+.ke-switch[data-checked="true"] .ke-switch-track {
+  background: rgb(var(--accent));
+}
+.ke-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25), 0 1px 2px rgb(0 0 0 / 0.12);
+  pointer-events: none;
+  transition:
+    transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+    width 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.15);
+}
+.ke-switch:focus-visible .ke-switch-track {
+  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.35);
+}
+.ke-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* display-only variant in table cells */
+.ke-switch-static {
+  cursor: default;
+  pointer-events: none;
+  width: 36px;
+  height: 20px;
+}
+.ke-switch-static .ke-switch-track {
+  width: 36px;
+  height: 20px;
+}
+.ke-switch-static .ke-switch-thumb {
+  top: 2px;
+  left: 2px;
+  height: 16px;
+  width: 16px;
+}
+
+/* ---- ke-select: custom dropdown (ui-motion selects/select). Panel
+   springs open, chevron flips, value text rolls directionally. ---- */
+.ke-select {
+  position: relative;
+  display: inline-block;
+}
+.ke-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  /* NO min-width: a 160px minimum overflowing its w-32/w-36 wrapper was
+     the "overlap" — the trigger spilled 32px onto the neighbouring chip */
+  padding: 6px 10px;
+  border: 1px solid rgb(var(--ink-600));
+  border-radius: 8px;
+  background: rgb(var(--ink-900));
+  color: rgb(var(--ink-100));
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ke-select-trigger:hover {
+  border-color: rgb(var(--ink-400));
+}
+.ke-select-trigger:focus-visible,
+.ke-select-trigger[data-state="open"] {
+  border-color: rgb(var(--accent));
+  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.2);
+}
+.ke-select-value {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+}
+/* static value: one line, ellipsis when the label is longer than the
+   trigger — a wrapped second line would be clipped by the 17px height */
+.ke-select-value > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ke-select-roll {
+  display: inline-block;
+  white-space: nowrap;
+}
+.ke-select-roll.enter-up {
+  animation: ke-roll-enter-up 140ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.ke-select-roll.exit-up {
+  position: absolute;
+  top: 0;
+  left: 0;
+  animation: ke-roll-exit-up 140ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.ke-select-roll.enter-down {
+  animation: ke-roll-enter-down 140ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.ke-select-roll.exit-down {
+  position: absolute;
+  top: 0;
+  left: 0;
+  animation: ke-roll-exit-down 140ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes ke-roll-enter-up {
+  from { transform: translateY(8px); opacity: 0; filter: blur(2px); }
+  to { transform: translateY(0); opacity: 1; filter: blur(0); }
+}
+@keyframes ke-roll-exit-up {
+  from { transform: translateY(0); opacity: 1; filter: blur(0); }
+  to { transform: translateY(-8px); opacity: 0; filter: blur(2px); }
+}
+@keyframes ke-roll-enter-down {
+  from { transform: translateY(-8px); opacity: 0; filter: blur(2px); }
+  to { transform: translateY(0); opacity: 1; filter: blur(0); }
+}
+@keyframes ke-roll-exit-down {
+  from { transform: translateY(0); opacity: 1; filter: blur(0); }
+  to { transform: translateY(8px); opacity: 0; filter: blur(2px); }
+}
+.ke-select-chevron {
+  color: rgb(var(--ink-300));
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ke-select-trigger[data-state="open"] .ke-select-chevron {
+  transform: rotate(180deg);
+}
+.ke-select-content {
+  /* Closed panels stay display:none: an absolutely-positioned closed panel
+     still contributes to the nearest scroll container's scrollHeight, which
+     kept a phantom scrollbar track alive on every dialog hosting a select. */
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  overflow: hidden;
+  /* long option lists (50-partition pickers) must scroll, not run off-screen */
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid rgb(var(--ink-600));
+  border-radius: 8px;
+  background: rgb(var(--ink-850));
+  box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.35);
+  pointer-events: none;
+}
+/* Enter with a keyframes animation (not a transition): display:none -> block
+   in the same frame would eat a transition, but a keyframes run always plays. */
+.ke-select-content[data-state="open"] {
+  display: block;
+  pointer-events: auto;
+  animation: ke-select-in 150ms var(--ease-snappy);
+}
+@keyframes ke-select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ke-select-content[data-state="open"] {
+    animation: none;
+  }
+}
+.ke-select-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  color: rgb(var(--ink-200));
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+  border: none;
+  transition: background-color 80ms ease, color 80ms ease;
+}
+.ke-select-item:hover {
+  background: rgb(var(--ink-800));
+  color: rgb(var(--ink-100));
+}
+.ke-select-item[aria-selected="true"] {
+  background: rgb(var(--accent-muted));
+  color: rgb(var(--accent));
+  font-weight: 500;
+}
+.ke-select-check {
+  opacity: 0;
+  color: rgb(var(--accent));
+}
+.ke-select-item[aria-selected="true"] .ke-select-check {
+  opacity: 1;
+}
+
+/* ---- GlidingTabs (navigation/tabs spec, dark-adapted) ---- */
+.ke-tabs-shell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border: 1px solid rgb(var(--ink-700));
+  border-radius: 9999px;
+  background: rgb(var(--ink-900));
+  isolation: isolate;
+  user-select: none;
+}
+.ke-tabs-pill {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  height: calc(100% - 6px);
+  background: rgb(var(--ink-800));
+  border-radius: 9999px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+  pointer-events: none;
+  z-index: 0;
+  will-change: transform, width;
+  transition:
+    transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ke-tabs-btn {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: rgb(var(--ink-300));
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ke-tabs-btn:hover {
+  color: rgb(var(--ink-100));
+}
+.ke-tabs-btn[data-state="active"] {
+  color: rgb(var(--ink-100));
+  font-weight: 600;
+}
+.ke-tabs-btn:focus-visible {
+  outline: 1px solid rgb(var(--accent));
+  outline-offset: 1px;
+}
+.ke-tabs-sm .ke-tabs-btn {
+  height: 22px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ke-tabs-pill {
+    transition: none !important;
+  }
+}
+
+/* detail tab panels re-enter with the ksqlDB-style blur resolve (keyed
+   remount): content emerges from a 4px blur instead of a plain fade */
+.ke-tabpanel {
+  animation: ke-blur-in 340ms var(--ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ke-tabpanel {
+    animation: none !important;
+  }
+}

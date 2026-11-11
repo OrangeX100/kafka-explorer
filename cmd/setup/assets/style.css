@@ -1,0 +1,156 @@
+/* Self-drawn setup window: white page, brand column left, one blue
+   rounded button. Accent matches the app (#4F8CFF = RGB 79,140,255). */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --accent: #4f8cff;
+  --accent-hover: #3d77e8;
+  --ink: #1a1a1a;
+  --muted: #6e6e6e;
+  --danger: #d64541;
+}
+
+html, body { height: 100%; }
+
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: var(--ink);
+  background: #fff;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ---------- titlebar ---------- */
+.titlebar {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 14px;
+  background: #fff;
+}
+.titlebar .title { font-size: 12px; color: #444; }
+.close {
+  width: 44px; height: 38px;
+  border: none; background: transparent;
+  font-size: 13px; color: #555;
+  cursor: pointer;
+}
+.close:hover { background: #e81123; color: #fff; }
+.close:disabled { opacity: 0.4; cursor: default; }
+.close:disabled:hover { background: transparent; color: #555; }
+
+/* ---------- layout ---------- */
+.content {
+  display: flex;
+  gap: 40px;
+  padding: 30px 44px 36px;
+}
+.left { display: flex; align-items: center; }
+.logo { width: 190px; height: 190px; }
+
+.right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.name { font-size: 30px; font-weight: 700; letter-spacing: 0.2px; }
+.subtitle { margin-top: 8px; font-size: 14px; color: var(--muted); }
+
+.from { margin-top: 26px; font-size: 13px; color: var(--muted); }
+
+/* editable install path + folder picker */
+.path-row {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.path-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--accent);
+  font-size: 13px;
+  font-family: inherit;
+}
+.path-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.browse {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.browse:hover { background: #f2f2f2; }
+
+.note { margin-top: 14px; font-size: 13px; color: var(--muted); min-height: 18px; }
+.note.error { color: var(--danger); }
+
+/* ---------- buttons ---------- */
+.actions {
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 28px;
+}
+.btn {
+  min-width: 118px;
+  height: 40px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+.btn:active { transform: scale(0.98); }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn.cancel { background: #efefef; color: #333; }
+.btn.cancel:hover:not(:disabled) { background: #e2e2e2; }
+.btn:disabled { opacity: 0.55; cursor: default; }
+
+/* ---------- working progress ---------- */
+.progress {
+  display: none;
+  margin-top: 16px;
+  height: 4px;
+  border-radius: 2px;
+  background: #e6eefc;
+  overflow: hidden;
+}
+.progress .bar {
+  width: 40%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: slide 1.1s ease-in-out infinite;
+}
+@keyframes slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+/* done-state choice: 启动应用 vs 直接关闭 (same style as the uninstaller
+   checkbox — one visual language across both windows) */
+.check {
+  display: flex; align-items: center; gap: 9px;
+  margin-top: 30px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.check input {
+  width: 16px; height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
