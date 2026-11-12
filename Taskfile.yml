@@ -90,7 +90,19 @@ tasks:
 
   test:
     desc: Go unit + contract tests
-    deps: [test:unix, test:windows]
+    deps: [ensure:engine, test:unix, test:windows]
+
+  ensure:engine:
+    # cmd/setup embeds the installer engine via go:embed, but that binary is
+    # a task-installer ARTIFACT (gitignored). A clean checkout therefore has
+    # nothing at the pattern path and `go list`/`go test ./...` refuse to
+    # load the package ("no matching files found" — observed on CI). Tests
+    # never run the engine, so a placeholder satisfies compilation; the real
+    # installer task overwrites it before the front-end build.
+    desc: Placeholder engine file for go:embed on clean checkouts
+    cmds:
+      - mkdir -p cmd/setup/engine
+      - "[ -f cmd/setup/engine/KafkaExplorer_Engine.exe ] || echo placeholder > cmd/setup/engine/KafkaExplorer_Engine.exe"
 
   test:unix:
     desc: Standard go test (CI and unix dev machines)

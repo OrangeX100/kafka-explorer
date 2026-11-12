@@ -33,7 +33,9 @@ jobs:
         run: wails3 task precommit
 
       # The test binaries were built to fixed paths for the AV workaround;
-      # they are noise for the cache, not artifacts.
+      # they are noise for the cache, not artifacts. shell: bash — the
+      # Windows default (pwsh) rejects `rm -rf` as an unknown parameter.
       - name: Clean gate scratch
         if: always()
+        shell: bash
         run: rm -rf .gotmp || true
