@@ -3,6 +3,7 @@ module kafkaexplorer
 go 1.27.3
 
 require (
+	github.com/bufbuild/protocompile v0.14.1
 	github.com/hamba/avro/v2 v2.31.0
 	github.com/klauspost/compress v1.20.3
 	github.com/ncruces/go-sqlite3 v0.36.0
@@ -36,4 +37,5 @@ require (
 	github.com/ncruces/go-sqlite3-wasm/v6 v6.4.35401 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
+	golang.org/x/sync v0.25.0 // indirect
 )

@@ -91,7 +91,7 @@ func decodeConfluent(ctx context.Context, raw []byte, registry RegistryClient) R
 	case "JSON":
 		return prettyJSON(payload)
 	case "PROTOBUF":
-		return decodeProtobufJSON(payload, schemaStr)
+		return decodeProtobufJSON(ctx, payload, schemaStr)
 	default: // AVRO — ResolveBySchema semantics; framed or bare share a path
 		return DecodeWithSchema(raw, schemaStr)
 	}

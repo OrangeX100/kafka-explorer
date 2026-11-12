@@ -6,15 +6,16 @@
 //	go run ./it/protoseed/main.go -registry http://localhost:8081 \
 //	    -brokers localhost:9092 -topic proto-probe-value -count 20
 //
-// Steps: build a FileDescriptorSet in memory → register it on subject
-// <topic>-value with schemaType PROTOBUF (the registry stores protobuf
-// schemas as base64 FileDescriptorSet) → produce records framed with the
-// returned schema id (Confluent wire: 0x00 + BE uint32 id + protobuf bytes).
+// Steps: register the .proto source text on subject <topic>-value with
+// schemaType PROTOBUF (the observed registry stores protobuf schemas as
+// source text; a base64 FileDescriptorSet round-trips as empty) → build
+// the matching descriptor in memory to encode records → produce records
+// framed with the returned schema id (Confluent wire: 0x00 + BE uint32 id
+// + protobuf bytes).
 package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
@@ -30,6 +31,18 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
+
+// probeProtoText is both the registered schema and the in-memory
+// descriptor's source of truth.
+const probeProtoText = `syntax = "proto3";
+package probe;
+
+message ProtoEvent {
+  int64 id = 1;
+  string name = 2;
+  double score = 3;
+}
+`
 
 func main() {
 	registry := flag.String("registry", "http://localhost:8081", "schema registry url")
@@ -56,12 +69,10 @@ func main() {
 		}},
 	}
 	fds := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}
-	fdsetBytes, err := proto.Marshal(fds)
-	must(err)
 
-	// 2. register with schemaType PROTOBUF via ExecMethod-style /subjects
+	// 2. register the .proto text with schemaType PROTOBUF
 	subject := *topic + "-value"
-	schemaID, err := registerProto(ctx, *registry, subject, fdsetBytes)
+	schemaID, err := registerProto(ctx, *registry, subject, probeProtoText)
 	must(err)
 	fmt.Printf("protobuf schema registered: subject=%s id=%d\n", subject, schemaID)
 
@@ -108,10 +119,10 @@ func main() {
 	fmt.Printf("done: %d Confluent-framed PROTOBUF records -> %s\n", *count, *topic)
 }
 
-func registerProto(ctx context.Context, base, subject string, fdset []byte) (int, error) {
+func registerProto(ctx context.Context, base, subject, schema string) (int, error) {
 	body, _ := json.Marshal(map[string]any{
 		"schemaType": "PROTOBUF",
-		"schema":     base64.StdEncoding.EncodeToString(fdset),
+		"schema":     schema,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		base+"/subjects/"+subject+"/versions", strings.NewReader(string(body)))

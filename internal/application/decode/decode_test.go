@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"strings"
 	"testing"
 
 	"github.com/klauspost/compress/snappy"
@@ -16,6 +17,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/dynamicpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // fakeRegistry answers SchemaByID from a static map — the decoder's only
@@ -111,6 +113,95 @@ func TestProtobufFrameDecodes(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(r.Text), []byte(`"hello"`)) {
 		t.Fatalf("decoded content missing: %q", r.Text)
+	}
+}
+
+// TestProtobufTextSchemaDecodes runs the same framed decode against a
+// registry that stores the schema as .proto SOURCE TEXT (the observed
+// third-party registry behavior where a base64 FileDescriptorSet
+// round-trips as empty). Same descriptor shape as the base64 test so the
+// wire bytes are identical — only the stored schema representation
+// differs. The schema also imports a well-known proto to prove embedded
+// standard imports resolve.
+const textSchema = `syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package probe;
+
+message Event {
+  int64 id = 1;
+  string name = 2;
+  google.protobuf.Timestamp at = 3;
+}
+`
+
+func TestProtobufTextSchemaDecodes(t *testing.T) {
+	fdp := &descriptorpb.FileDescriptorProto{
+		Name:       proto.String("probe.proto"),
+		Package:    proto.String("probe"),
+		Dependency: []string{"google/protobuf/timestamp.proto"},
+		MessageType: []*descriptorpb.DescriptorProto{{
+			Name: proto.String("Event"),
+			Field: []*descriptorpb.FieldDescriptorProto{
+				{Name: proto.String("id"), Number: proto.Int32(1), Type: descriptorpb.FieldDescriptorProto_TYPE_INT64.Enum(), Label: descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum()},
+				{Name: proto.String("name"), Number: proto.Int32(2), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(), Label: descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum()},
+				{Name: proto.String("at"), Number: proto.Int32(3), Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(), Label: descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(), TypeName: proto.String(".google.protobuf.Timestamp")},
+			},
+		}},
+	}
+	// encode-side descriptor set: the timestamp dependency must be in the
+	// set (and before its dependent) for protodesc.NewFiles to link
+	tsFdp := protodesc.ToFileDescriptorProto(timestamppb.File_google_protobuf_timestamp_proto)
+	fds := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{tsFdp, fdp}}
+	files, err := protodesc.NewFiles(fds)
+	if err != nil {
+		t.Fatalf("build files: %v", err)
+	}
+	var md protoreflect.MessageDescriptor
+	files.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
+		ms := fd.Messages()
+		for i := 0; i < ms.Len(); i++ {
+			if ms.Get(i).Name() == "Event" { // skip the timestamp dependency's messages
+				md = ms.Get(i)
+				return false
+			}
+		}
+		return true
+	})
+	msg := dynamicpb.NewMessage(md)
+	setField(t, msg, "id", protoreflect.ValueOfInt64(7))
+	setField(t, msg, "name", protoreflect.ValueOfString("hello"))
+	payloadBytes, err := proto.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal message: %v", err)
+	}
+
+	reg := fakeRegistry{202: {schema: textSchema, typ: "PROTOBUF"}}
+	r := DecodeValue(context.Background(), framed(202, payloadBytes), "auto", reg)
+	if r.Error != "" {
+		t.Fatalf("error: %v", r.Error)
+	}
+	if r.Format != "protobuf" {
+		t.Fatalf("format = %q, want protobuf", r.Format)
+	}
+	if !bytes.Contains([]byte(r.Text), []byte(`"hello"`)) {
+		t.Fatalf("decoded content missing: %q", r.Text)
+	}
+}
+
+// TestProtobufTextSchemaBroken proves a malformed .proto text schema
+// reports a friendly Chinese error instead of a decode crash. Uses the
+// routed mode (not auto): auto intentionally falls back to raw text on
+// decode failure, which would swallow the error.
+func TestProtobufTextSchemaBroken(t *testing.T) {
+	reg := fakeRegistry{203: {schema: "syntax = \"proto3\"; message {{{", typ: "PROTOBUF"}}
+	r := DecodeValue(context.Background(), framed(203, []byte{0x08, 0x01}), "avro", reg)
+	if r.Error == "" {
+		t.Fatal("expected an error for malformed proto text")
+	}
+	if !strings.Contains(r.Error, ".proto") {
+		t.Fatalf("error should mention .proto parsing: %q", r.Error)
 	}
 }
 
