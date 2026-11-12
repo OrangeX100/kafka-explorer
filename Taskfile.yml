@@ -45,7 +45,7 @@ tasks:
       - go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0 -o app_windows.syso -manifest build/app.manifest build/versioninfo.json
       - go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version={{.VERSION}} -X kafkaexplorer/internal/buildinfo.Commit={{.COMMIT}} -X kafkaexplorer/internal/buildinfo.UpdateRepo={{.RELEASE_REPO}}" -o bin/kafka-explorer.exe .
     vars:
-      VERSION: '{{.VERSION | default "0.2.0-beta.1"}}'
+      VERSION: '{{.VERSION | default "0.2.0"}}'
       # the public GitHub repo (owner/repo) release builds check for
       # updates; override with `task build RELEASE_REPO=owner/repo`
       RELEASE_REPO: '{{.RELEASE_REPO | default "OrangeX100/kafka-explorer"}}'
@@ -83,8 +83,8 @@ tasks:
       - cmd /c copy /y "bin\installer\KafkaExplorer_Setup.exe" "bin\installer\KafkaExplorer_Setup_{{.VERSION}}.exe"
       - certutil -hashfile bin/installer/KafkaExplorer_Setup.exe SHA256
     vars:
-      VERSION: '{{.VERSION | default "0.2.0-beta.1"}}'
-      VERSIONINFOVERSION: '{{.VERSIONINFOVERSION | default "0.2.0.1"}}'
+      VERSION: '{{.VERSION | default "0.2.0"}}'
+      VERSIONINFOVERSION: '{{.VERSIONINFOVERSION | default "0.2.0.0"}}'
       # winget installs per-user; override ISCC when Inno Setup lives elsewhere.
       ISCC: '{{.ISCC | default "C:/Users/51293/AppData/Local/Programs/Inno Setup 6/ISCC.exe"}}'
 

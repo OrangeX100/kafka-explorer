@@ -8,6 +8,7 @@ import { execSync } from "node:child_process";
 
 const token = process.env.GH_TOKEN;
 const repo = process.env.GH_REPO;
+const tag = process.env.GH_TAG || "v0.2.0";
 const api = "https://api.github.com";
 const H = {
   Authorization: `Bearer ${token}`,
@@ -90,20 +91,20 @@ const commit = await gh("POST", `/repos/${repo}/git/commits`, {
 });
 console.log("commit:", commit.sha);
 
-// 6. force-update main + annotated tag v0.2.0-beta.1 (create on first
+// 6. force-update main + annotated release tag (create on first
 // push, follow main afterwards)
 await gh("PATCH", `/repos/${repo}/git/refs/heads/main`, { sha: commit.sha, force: true });
 try {
   const tag = await gh("POST", `/repos/${repo}/git/tags`, {
-    tag: "v0.2.0-beta.1",
+    tag: tag,
     message: "Kafka Explorer 0.2.0-beta.1\n\nFirst public beta: full cluster management in a single Windows installer.",
     object: commit.sha,
     type: "commit",
   });
-  await gh("POST", `/repos/${repo}/git/refs`, { ref: "refs/tags/v0.2.0-beta.1", sha: tag.sha });
+  await gh("POST", `/repos/${repo}/git/refs`, { ref: "refs/tags/" + tag, sha: tag.sha });
   console.log("tag created:", tag.sha);
 } catch {
-  await gh("PATCH", `/repos/${repo}/git/refs/tags/v0.2.0-beta.1`, {
+  await gh("PATCH", `/repos/${repo}/git/refs/tags/${tag}`, {
     sha: commit.sha, force: true,
   });
   console.log("tag moved to", commit.sha);
