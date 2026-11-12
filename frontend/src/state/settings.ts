@@ -22,7 +22,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   pageSize: 50, // 50 per page by default ; user-adjustable in Settings
   showInternal: false, // internal topics hidden by default: cleaner list
   maxScan: 100000,
-  updateRepo: "", // empty = update check disabled until configured
+  updateRepo: "", // empty = the release-baked source (buildinfo.UpdateRepo)
+  updateMirror: "", // empty = download straight from the release asset
   autoCheckUpdate: true,
   closeToTray: true,
 };

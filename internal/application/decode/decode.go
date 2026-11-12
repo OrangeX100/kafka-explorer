@@ -1,7 +1,9 @@
-// Package decode turns raw record bytes into readable text, mirroring
-// message decoders: JSON pretty-print and Confluent
-// wire-format Avro (magic 0x0 + 4-byte schema id + avro binary) resolved
-// through a Schema Registry connection.
+// Package decode turns raw record bytes into readable text: JSON
+// pretty-print, Confluent wire-format payloads (magic 0x0 + 4-byte schema
+// id + payload) resolved through a Schema Registry connection — Avro via
+// hamba/avro, JSON Schema via pretty-print, Protobuf via dynamic messages
+// from the registry's FileDescriptorSet — plus container decompression
+// (gzip/snappy/lz4/zstd) ahead of the format probes.
 package decode
 
 import (
@@ -27,8 +29,9 @@ type RegistryClient interface {
 type Result = domain.DecodeResult
 
 // DecodeValue decodes record value bytes according to the chosen strategy.
-// auto: try Confluent Avro framing (needs registry), then JSON pretty,
-// then fall back to UTF-8 text.
+// auto: decompress safe containers, then try Confluent framing (needs
+// registry; routes by the registered schema type), then JSON pretty, then
+// fall back to UTF-8 text.
 func DecodeValue(ctx context.Context, raw []byte, mode string, registry RegistryClient) Result {
 	switch mode {
 	case "text":
@@ -36,11 +39,20 @@ func DecodeValue(ctx context.Context, raw []byte, mode string, registry Registry
 	case "json":
 		return prettyJSON(raw)
 	case "avro":
-		return decodeAvro(ctx, raw, registry)
+		return decodeConfluent(ctx, raw, registry)
 	default: // auto
-		if isConfluentAvro(raw) {
-			if r := decodeAvro(ctx, raw, registry); r.Error == "" {
+		if isConfluentFramed(raw) {
+			if r := decodeConfluent(ctx, raw, registry); r.Error == "" {
 				return r
+			}
+		}
+		// compressed containers: decompress and re-run the probes on the
+		// inner bytes (gzip→inner JSON lands here as pretty JSON); the
+		// annotation names the codec so the origin stays visible
+		if inner, codec, ok := decompressContainer(raw); ok {
+			inner2 := DecodeValue(ctx, inner, "auto", registry)
+			if inner2.Error == "" && inner2.Format != "text" {
+				return Result{Format: inner2.Format, Text: containerNote(codec, inner) + "\n" + inner2.Text}
 			}
 		}
 		if r := prettyJSON(raw); r.Format == "json" {
@@ -50,25 +62,40 @@ func DecodeValue(ctx context.Context, raw []byte, mode string, registry Registry
 	}
 }
 
-// isConfluentAvro checks the wire magic: 0x00 + 4-byte big-endian schema id
-// + at least one payload byte.
-func isConfluentAvro(raw []byte) bool {
+// isConfluentFramed checks the wire magic: 0x00 + 4-byte big-endian
+// schema id + at least one payload byte. The magic is shared by all three
+// Confluent schema types (Avro/JSON/Protobuf) — the registered schema
+// type, not the magic, decides the decoder.
+func isConfluentFramed(raw []byte) bool {
 	return len(raw) > 5 && raw[0] == 0x00
 }
 
-func decodeAvro(ctx context.Context, raw []byte, registry RegistryClient) Result {
+// decodeConfluent resolves the schema id through the registry and routes
+// by the registered schema type.
+func decodeConfluent(ctx context.Context, raw []byte, registry RegistryClient) Result {
 	if registry == nil {
 		return Result{Format: "avro", Error: "no schema registry connection for this cluster"}
 	}
 	if len(raw) < 5 || raw[0] != 0x00 {
-		return Result{Format: "avro", Error: "not Confluent-framed Avro (missing magic byte)"}
+		return Result{Format: "avro", Error: "not Confluent-framed (missing magic byte)"}
 	}
 	schemaID := int(binary.BigEndian.Uint32(raw[1:5]))
-	schemaStr, _, err := registry.SchemaByID(ctx, schemaID)
+	schemaStr, schemaType, err := registry.SchemaByID(ctx, schemaID)
 	if err != nil {
 		return Result{Format: "avro", Error: fmt.Sprintf("schema %d: %v", schemaID, err)}
 	}
-	return DecodeWithSchema(raw, schemaStr)
+	payload := raw
+	if len(payload) > 5 {
+		payload = payload[5:] // strip Confluent framing
+	}
+	switch schemaType {
+	case "JSON":
+		return prettyJSON(payload)
+	case "PROTOBUF":
+		return decodeProtobufJSON(payload, schemaStr)
+	default: // AVRO — ResolveBySchema semantics; framed or bare share a path
+		return DecodeWithSchema(raw, schemaStr)
+	}
 }
 
 // DecodeWithSchema decodes record bytes against a caller-supplied schema —

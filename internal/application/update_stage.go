@@ -10,12 +10,15 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"kafkaexplorer/internal/appdir"
@@ -143,6 +146,21 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 			return "", fmt.Errorf("下载不完整（%d/%d 字节），请重试", got, assetSize)
 		}
 	}
+	// SHA-256 gate: releases publish <asset>.sha256 next to the installer;
+	// when present the staged file must match it (catches truncated-but-
+	// size-matching downloads and tampering). A missing checksum file keeps
+	// the size gate as the only protection (legacy releases).
+	if want, ok := fetchExpectedChecksum(ctx, assetURL+".sha256"); ok {
+		got, err := fileSHA256(part)
+		if err != nil {
+			os.Remove(part)
+			return "", fmt.Errorf("读取已下载文件失败: %w", err)
+		}
+		if got != want {
+			os.Remove(part)
+			return "", fmt.Errorf("安装包校验失败（SHA-256 不匹配），文件可能不完整或被篡改。请到发布页手动下载，或稍后重试")
+		}
+	}
 	if err := os.Rename(part, dest); err != nil {
 		os.Remove(part)
 		return "", fmt.Errorf("暂存安装包失败: %w", err)
@@ -202,4 +220,51 @@ func systemRoot() string {
 		return root
 	}
 	return `C:\Windows`
+}
+
+// fetchExpectedChecksum downloads <asset>.sha256 and returns the hex
+// digest it carries. ok=false when the sidecar is missing (legacy
+// releases) or unreachable — the size gate still protects the install.
+func fetchExpectedChecksum(ctx context.Context, url string) (string, bool) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", false
+	}
+	req.Header.Set("User-Agent", "kafka-explorer-updater")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+	body := make([]byte, 256)
+	n, _ := io.ReadFull(io.LimitReader(resp.Body, 256), body)
+	line := strings.TrimSpace(string(body[:n]))
+	if line == "" {
+		return "", false
+	}
+	// sha256sum format: "<hex>  <filename>" — the digest is the first field.
+	if i := strings.IndexAny(line, " 	"); i > 0 {
+		line = line[:i]
+	}
+	if len(line) != 64 {
+		return "", false
+	}
+	return strings.ToLower(line), true
+}
+
+// fileSHA256 hex-digests a file on disk.
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

@@ -69,7 +69,7 @@ type GlobalConfig struct {
 type LocalSchema struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
-	SchemaType string   `json:"schemaType"` // AVRO | JSON | PROTOBUF (only AVRO decodes today)
+	SchemaType string   `json:"schemaType"` // AVRO | JSON | PROTOBUF
 	Schema     string   `json:"schema"`
 	References []SchemaRef `json:"references,omitempty"`
 	CreatedAt  FlexTime `json:"createdAt,omitempty"`

@@ -658,7 +658,7 @@
   "reg.localName": "名称",
   "reg.localType": "类型",
   "reg.localSchema": "Schema 内容",
-  "reg.localOnlyAvro": "注意：本地解码目前仅支持 Avro；JSON Schema / Protobuf 可保存但消息解码暂不使用",
+  "reg.localOnlyAvro": "注意：本地离线解码仅支持 Avro；连接 Schema Registry 后，消息解码支持 Avro / JSON Schema / Protobuf",
   "reg.localList": "本地 Schema",
   "reg.localEmpty": "还没有本地 Schema",
   "reg.localHint": "本地 Schema 保存在本机，用于离线解码 Confluent 封装的消息（无需连接注册中心）",

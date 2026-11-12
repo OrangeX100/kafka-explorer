@@ -658,7 +658,7 @@
   "reg.localName": "Name",
   "reg.localType": "Type",
   "reg.localSchema": "Schema",
-  "reg.localOnlyAvro": "Note: offline decoding supports Avro only today; JSON Schema / Protobuf can be saved but are not used by message decode yet",
+  "reg.localOnlyAvro": "Note: offline decoding supports Avro only; with a Schema Registry connected, message decode covers Avro / JSON Schema / Protobuf",
   "reg.localList": "Local schemas",
   "reg.localEmpty": "No local schemas yet",
   "reg.localHint": "Local schemas are stored on this machine and decode Confluent-framed messages offline, without a registry connection",
