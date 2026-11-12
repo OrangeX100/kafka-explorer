@@ -21,7 +21,9 @@ func (r *ConnectionRepo) List(ctx context.Context) ([]domain.Connection, error) 
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, bootstrap, security, username, secret_ref,
 		       tls_enabled, tls_ca_cert_path, tls_client_cert_path, tls_client_key_path,
-		       tls_insecure_skip_verify, created_at, updated_at, pinned
+		       tls_insecure_skip_verify, created_at, updated_at, pinned,
+		       tunnel_enabled, tunnel_host, tunnel_port, tunnel_user, tunnel_auth,
+		       tunnel_key_path, tunnel_secret_ref, tunnel_host_key
 		FROM connections
 		ORDER BY pinned DESC, name COLLATE NOCASE`)
 	if err != nil {
@@ -44,7 +46,9 @@ func (r *ConnectionRepo) Get(ctx context.Context, id string) (domain.Connection,
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, name, bootstrap, security, username, secret_ref,
 		       tls_enabled, tls_ca_cert_path, tls_client_cert_path, tls_client_key_path,
-		       tls_insecure_skip_verify, created_at, updated_at, pinned
+		       tls_insecure_skip_verify, created_at, updated_at, pinned,
+		       tunnel_enabled, tunnel_host, tunnel_port, tunnel_user, tunnel_auth,
+		       tunnel_key_path, tunnel_secret_ref, tunnel_host_key
 		FROM connections WHERE id = ?`, id)
 	c, err := scanConnection(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -66,18 +70,29 @@ func (r *ConnectionRepo) Save(ctx context.Context, c domain.Connection) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO connections (id, name, bootstrap, security, username, secret_ref,
 		       tls_enabled, tls_ca_cert_path, tls_client_cert_path, tls_client_key_path,
-		       tls_insecure_skip_verify, created_at, updated_at, pinned)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		       tls_insecure_skip_verify, created_at, updated_at, pinned,
+		       tunnel_enabled, tunnel_host, tunnel_port, tunnel_user, tunnel_auth,
+		       tunnel_key_path, tunnel_secret_ref, tunnel_host_key)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name, bootstrap=excluded.bootstrap, security=excluded.security,
 			username=excluded.username, secret_ref=excluded.secret_ref,
 			tls_enabled=excluded.tls_enabled, tls_ca_cert_path=excluded.tls_ca_cert_path,
 			tls_client_cert_path=excluded.tls_client_cert_path, tls_client_key_path=excluded.tls_client_key_path,
 			tls_insecure_skip_verify=excluded.tls_insecure_skip_verify, updated_at=excluded.updated_at,
-			pinned=excluded.pinned`,
+			pinned=excluded.pinned,
+			tunnel_enabled=excluded.tunnel_enabled, tunnel_host=excluded.tunnel_host,
+			tunnel_port=excluded.tunnel_port, tunnel_user=excluded.tunnel_user,
+			tunnel_auth=excluded.tunnel_auth, tunnel_key_path=excluded.tunnel_key_path,
+			-- the ref clears when the user disables the tunnel or switches auth
+			tunnel_secret_ref=excluded.tunnel_secret_ref,
+			tunnel_host_key=excluded.tunnel_host_key`,
 		c.ID, c.Name, c.Bootstrap, string(c.Security), nullIfEmpty(c.Username), nullIfEmpty(c.SecretRef),
 		tlsOn, nullIfEmpty(c.TLS.CACertPath), nullIfEmpty(c.TLS.ClientCertPath), nullIfEmpty(c.TLS.ClientKeyPath),
-		insecure, createdAt, updatedAt, boolToInt(c.Pinned))
+		insecure, createdAt, updatedAt, boolToInt(c.Pinned),
+		boolToInt(c.Tunnel.Enabled), nullIfEmpty(c.Tunnel.Host), c.Tunnel.Port, nullIfEmpty(c.Tunnel.User),
+		nullIfEmpty(string(c.Tunnel.Auth)), nullIfEmpty(c.Tunnel.KeyPath), nullIfEmpty(c.Tunnel.SecretRef),
+		nullIfEmpty(c.Tunnel.HostKey))
 	if err != nil {
 		return fmt.Errorf("save connection %s: %w", c.ID, err)
 	}
@@ -107,9 +122,31 @@ func scanConnection(s rowScanner) (*domain.Connection, error) {
 		created, updated int64
 		pinned           int
 	)
+	var (
+		tunnelOn          int
+		tunnelHost        sql.NullString
+		tunnelPort        int
+		tunnelUser        sql.NullString
+		tunnelAuth        sql.NullString
+		tunnelKeyPath     sql.NullString
+		tunnelSecretRef   sql.NullString
+		tunnelHostKey     sql.NullString
+	)
 	if err := s.Scan(&c.ID, &c.Name, &c.Bootstrap, &security, &username, &ref,
-		&tlsOn, &ca, &cert, &key, &insecure, &created, &updated, &pinned); err != nil {
+		&tlsOn, &ca, &cert, &key, &insecure, &created, &updated, &pinned,
+		&tunnelOn, &tunnelHost, &tunnelPort, &tunnelUser, &tunnelAuth,
+		&tunnelKeyPath, &tunnelSecretRef, &tunnelHostKey); err != nil {
 		return nil, fmt.Errorf("scan connection: %w", err)
+	}
+	c.Tunnel = domain.TunnelSettings{
+		Enabled:   tunnelOn == 1,
+		Host:      tunnelHost.String,
+		Port:      tunnelPort,
+		User:      tunnelUser.String,
+		Auth:      domain.TunnelAuth(tunnelAuth.String),
+		KeyPath:   tunnelKeyPath.String,
+		SecretRef: tunnelSecretRef.String,
+		HostKey:   tunnelHostKey.String,
 	}
 	c.Security = domain.SecurityMechanism(security)
 	c.Username = username.String

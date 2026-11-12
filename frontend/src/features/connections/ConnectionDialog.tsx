@@ -65,6 +65,13 @@ export function ConnectionDialog({ connectionId, onClose }: Props) {
   const [clientCert, setClientCert] = useState(existing?.tls?.clientCertPath ?? "");
   const [clientKey, setClientKey] = useState(existing?.tls?.clientKeyPath ?? "");
   const [insecure, setInsecure] = useState(existing?.tls?.insecureSkipVerify ?? false);
+  const [tunnelEnabled, setTunnelEnabled] = useState(existing?.tunnel?.enabled ?? false);
+  const [tunnelHost, setTunnelHost] = useState(existing?.tunnel?.host ?? "");
+  const [tunnelPort, setTunnelPort] = useState(existing?.tunnel?.port ? String(existing.tunnel.port) : "");
+  const [tunnelUser, setTunnelUser] = useState(existing?.tunnel?.user ?? "");
+  const [tunnelAuth, setTunnelAuth] = useState(existing?.tunnel?.auth ?? "password");
+  const [tunnelKeyPath, setTunnelKeyPath] = useState(existing?.tunnel?.keyPath ?? "");
+  const [tunnelPassword, setTunnelPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -87,6 +94,13 @@ export function ConnectionDialog({ connectionId, onClose }: Props) {
   const onClientCert = (v: string) => { clearFeedback(); setClientCert(v); };
   const onClientKey = (v: string) => { clearFeedback(); setClientKey(v); };
   const onInsecure = (v: boolean) => { clearFeedback(); setInsecure(v); };
+  const onTunnelEnabled = (v: boolean) => { clearFeedback(); setTunnelEnabled(v); };
+  const onTunnelHost = (v: string) => { clearFeedback(); setTunnelHost(v); };
+  const onTunnelPort = (v: string) => { clearFeedback(); setTunnelPort(v); };
+  const onTunnelUser = (v: string) => { clearFeedback(); setTunnelUser(v); };
+  const onTunnelAuth = (v: string) => { clearFeedback(); setTunnelAuth(v); };
+  const onTunnelKeyPath = (v: string) => { clearFeedback(); setTunnelKeyPath(v); };
+  const onTunnelPassword = (v: string) => { clearFeedback(); setTunnelPassword(v); };
   // Native open dialog for certificate paths; picking a file is a form edit
   // and must clear the stale test/save feedback like every other change.
   const browse = (setter: (v: string) => void) => async () => {
@@ -129,6 +143,16 @@ export function ConnectionDialog({ connectionId, onClose }: Props) {
       clientKeyPath: clientKey || undefined,
       insecureSkipVerify: insecure || undefined,
     },
+    tunnel: {
+      enabled: tunnelEnabled,
+      host: tunnelEnabled ? tunnelHost : undefined,
+      port: tunnelEnabled && tunnelPort !== "" ? Number(tunnelPort) : undefined,
+      user: tunnelEnabled ? tunnelUser : undefined,
+      auth: tunnelEnabled ? tunnelAuth : undefined,
+      keyPath: tunnelEnabled && tunnelAuth === "key" ? tunnelKeyPath || undefined : undefined,
+      secretRef: existing?.tunnel?.secretRef,
+      hostKey: existing?.tunnel?.hostKey, // TOFU fingerprint is backend-owned
+    },
     // Omit when absent: a new connection has no timestamps yet. (Go's
     // FlexTime tolerates "", but an absent field is the honest wire shape.)
     createdAt: existing?.createdAt || undefined,
@@ -139,7 +163,11 @@ export function ConnectionDialog({ connectionId, onClose }: Props) {
     setSaving(true);
     setSaveError(null);
     try {
-      await connectionsApi.save({ connection: buildConnection(), password: password || undefined });
+      await connectionsApi.save({
+        connection: buildConnection(),
+        password: password || undefined,
+        tunnelPassword: tunnelPassword || undefined,
+      });
       await refresh();
       toast.show(t("conn.saved"), "ok");
       closeRef.current();
@@ -156,7 +184,11 @@ export function ConnectionDialog({ connectionId, onClose }: Props) {
     try {
       // Test uses what is in the form: if the user did not retype a password,
       // persist-first is the only way to test with the stored one.
-      const result = await connectionsApi.test(buildConnection(), password || undefined);
+      const result = await connectionsApi.test(
+        buildConnection(),
+        password || undefined,
+        tunnelEnabled ? tunnelPassword || undefined : undefined,
+      );
       setTestResult(result);
     } catch (err) {
       setTestResult({ success: false, error: String(err), elapsedMs: 0 });
@@ -243,6 +275,67 @@ export function ConnectionDialog({ connectionId, onClose }: Props) {
                 <Switch checked={insecure} onChange={(v) => onInsecure(v)} />
                 {t("conn.tlsInsecure")}
               </div>
+            </div>
+          )}
+
+          {/* SSH tunnel: brokers behind a jump host. TLS and the tunnel
+              compose (TLS wraps the tunneled connection); the password is
+              write-only like the SASL one. */}
+          <div className="flex items-center gap-2 pt-1 text-xs">
+            <Switch checked={tunnelEnabled} onChange={(v) => onTunnelEnabled(v)} />
+            {t("conn.tunnel")}
+          </div>
+          {tunnelEnabled && (
+            <div className="space-y-2.5 rounded border border-ink-700 bg-ink-900 p-2.5">
+              <div className="grid grid-cols-[1fr_100px] gap-2.5">
+                <label className="block">
+                  <span className="mb-1 block text-11 text-ink-300">{t("conn.tunnelHost")}</span>
+                  <input className="field font-mono" placeholder="jump.example.com" value={tunnelHost} onChange={(e) => onTunnelHost(e.target.value)} />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-11 text-ink-300">{t("conn.tunnelPort")}</span>
+                  <input className="field" type="number" min={1} max={65535} placeholder="22" value={tunnelPort} onChange={(e) => onTunnelPort(e.target.value)} />
+                </label>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <label className="block">
+                  <span className="mb-1 block text-11 text-ink-300">{t("conn.tunnelUser")}</span>
+                  <input className="field" value={tunnelUser} onChange={(e) => onTunnelUser(e.target.value)} />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-11 text-ink-300">{t("conn.tunnelAuth")}</span>
+                  <Select
+                    className="w-full"
+                    value={tunnelAuth}
+                    options={[
+                      { value: "password", label: t("conn.tunnelAuthPassword") },
+                      { value: "key", label: t("conn.tunnelAuthKey") },
+                    ]}
+                    onChange={(v) => onTunnelAuth(v)}
+                  />
+                </label>
+              </div>
+              {tunnelAuth === "key" && (
+                <CertPathField
+                  label={t("conn.tunnelKeyPath")}
+                  value={tunnelKeyPath}
+                  onChange={onTunnelKeyPath}
+                  onBrowse={browse(setTunnelKeyPath)}
+                />
+              )}
+              <label className="block">
+                <span className="mb-1 block text-11 text-ink-300">
+                  {tunnelAuth === "key" ? t("conn.tunnelPassphrase") : t("conn.tunnelPassword")}
+                  {existing?.tunnel?.secretRef && <span className="ml-1 text-ink-400">（{t("conn.passwordKeep")}）</span>}
+                </span>
+                <input
+                  className="field"
+                  type="password"
+                  value={tunnelPassword}
+                  onChange={(e) => onTunnelPassword(e.target.value)}
+                />
+              </label>
+              <div className="text-10 leading-relaxed text-ink-400">{t("conn.tunnelHint")}</div>
             </div>
           )}
 

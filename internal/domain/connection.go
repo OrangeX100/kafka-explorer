@@ -32,6 +32,41 @@ type TLSSettings struct {
 	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty"`
 }
 
+// TunnelAuth enumerates how the SSH jump host authenticates the user.
+type TunnelAuth string
+
+const (
+	TunnelAuthPassword TunnelAuth = "password"
+	TunnelAuthKey      TunnelAuth = "key"
+)
+
+// TunnelSettings describes an SSH jump host that brokers are reached
+// through. The password (auth=password) or key passphrase (auth=key) is a
+// secret and lives in the OS credential store behind SecretRef — never here.
+//
+// HostKey pins the jump host's first-seen public-key fingerprint
+// (SHA-256 base64, ssh.FingerprintSHA256 format): trust-on-first-use —
+// the first connect records it, later mismatches fail hard (MITM guard).
+// Empty = not recorded yet.
+type TunnelSettings struct {
+	Enabled   bool       `json:"enabled"`
+	Host      string     `json:"host,omitempty"`
+	Port      int        `json:"port,omitempty"` // 0 = 22
+	User      string     `json:"user,omitempty"`
+	Auth      TunnelAuth `json:"auth,omitempty"` // password | key
+	KeyPath   string     `json:"keyPath,omitempty"`
+	SecretRef string     `json:"secretRef,omitempty"`
+	HostKey   string     `json:"hostKey,omitempty"`
+}
+
+// EffectivePort resolves the SSH port default.
+func (t TunnelSettings) EffectivePort() int {
+	if t.Port > 0 {
+		return t.Port
+	}
+	return 22
+}
+
 // Connection is the user-visible cluster connection configuration.
 // Secrets (SASL password, TLS key password) are NOT fields here: they live in
 // the OS credential store under SecretRef. See infra/keyring.
@@ -43,6 +78,9 @@ type Connection struct {
 	Username  string            `json:"username,omitempty"` // SASL user; not a secret
 	SecretRef string            `json:"secretRef,omitempty"`// keyring entry name; empty when mechanism needs no password
 	TLS       TLSSettings       `json:"tls"`
+	// Tunnel: when enabled, every broker connection is dialed through an
+	// SSH jump host (local forwarders remap advertised listener addresses).
+	Tunnel TunnelSettings `json:"tunnel"`
 	// Pinned connections sort first in the list (favorites pinning); toggling it
 	// is not a content edit, so it never bumps UpdatedAt.
 	Pinned bool `json:"pinned,omitempty"`
@@ -85,6 +123,39 @@ func (c Connection) Validate() error {
 	}
 	if c.NeedsPassword() && strings.TrimSpace(c.SecretRef) == "" {
 		return fmt.Errorf("%w: password required for mechanism %s", ErrInvalid, c.Security)
+	}
+	if err := validateTunnel(c.Tunnel); err != nil {
+		return err
+	}
+	return nil
+}
+
+// TunnelNeedsSecret reports whether the tunnel auth needs a stored secret.
+// A password is mandatory; a key passphrase is optional (unencrypted keys).
+func (t TunnelSettings) TunnelNeedsSecret() bool {
+	return t.Enabled && t.Auth == TunnelAuthPassword
+}
+
+func validateTunnel(t TunnelSettings) error {
+	if !t.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(t.Host) == "" {
+		return fmt.Errorf("%w: SSH 隧道已启用但未填写跳板机地址", ErrInvalid)
+	}
+	if strings.TrimSpace(t.User) == "" {
+		return fmt.Errorf("%w: SSH 隧道已启用但未填写用户名", ErrInvalid)
+	}
+	switch t.Auth {
+	case TunnelAuthPassword:
+		// secret presence is enforced by the service (keyring may already
+		// hold it from a previous save even when the form resends "")
+	case TunnelAuthKey:
+		if strings.TrimSpace(t.KeyPath) == "" {
+			return fmt.Errorf("%w: SSH 隧道使用密钥认证但未填写私钥路径", ErrInvalid)
+		}
+	default:
+		return fmt.Errorf("%w: 未知 SSH 认证方式 %q", ErrInvalid, t.Auth)
 	}
 	return nil
 }

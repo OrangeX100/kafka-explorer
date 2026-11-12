@@ -53,6 +53,10 @@ type Client struct {
 	// round-trips per page into 0 while staying fresh for a GUI session.
 	boundsMu    sync.Mutex
 	boundsCache map[string]boundsEntry
+	// tunnel owns the SSH session + per-broker forwarders when the
+	// connection routes through a jump host; nil otherwise. Shared with
+	// every browse page client via the copied opts (same dialer closure).
+	tunnel *TunnelManager
 }
 
 type boundsEntry struct {
@@ -62,8 +66,10 @@ type boundsEntry struct {
 }
 
 // Open dials the cluster. It does not retry: the caller surfaces failures.
-func Open(ctx context.Context, conn domain.Connection, password string) (*Client, error) {
-	opts, err := clientOpts(conn, password)
+// tm is the connection's tunnel manager (nil = direct dialing). The caller
+// owns the TOFU persistence hook and the tunnel secret resolution.
+func Open(ctx context.Context, conn domain.Connection, password string, tm *TunnelManager) (*Client, error) {
+	opts, err := clientOpts(conn, password, tm)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +85,7 @@ func Open(ctx context.Context, conn domain.Connection, password string) (*Client
 		kc.Close()
 		return nil, mapErr(fmt.Errorf("connect: %w", err))
 	}
-	return &Client{kgo: kc, adm: kadm.NewClient(kc), opts: opts}, nil
+	return &Client{kgo: kc, adm: kadm.NewClient(kc), opts: opts, tunnel: tm}, nil
 }
 
 func (c *Client) Close() {
@@ -93,6 +99,9 @@ func (c *Client) Close() {
 	c.browseOrder = nil
 	if c.kgo != nil {
 		c.kgo.Close()
+	}
+	if c.tunnel != nil {
+		c.tunnel.Close()
 	}
 }
 
@@ -167,8 +176,11 @@ func (c *Client) Test(ctx context.Context) ([]string, error) {
 
 // clientOpts translates a domain.Connection into franz-go options.
 // Kept exported-within-package so Browse's temporary page clients use the
-// exact same security configuration as the pooled client.
-func clientOpts(conn domain.Connection, password string) ([]kgo.Opt, error) {
+// exact same security configuration as the pooled client. tm != nil routes
+// every broker dial through the SSH tunnel. franz-go rejects a Dialer
+// combined with DialTLSConfig, so the TLS wrap moves INSIDE the dialer:
+// the tunnel transports raw TCP and TLS applies on top of it.
+func clientOpts(conn domain.Connection, password string, tm *TunnelManager) ([]kgo.Opt, error) {
 	brokers := strings.Split(conn.Bootstrap, ",")
 	clean := make([]string, 0, len(brokers))
 	for _, b := range brokers {
@@ -234,7 +246,29 @@ func clientOpts(conn domain.Connection, password string) ([]kgo.Opt, error) {
 			}
 			cfg.Certificates = []tls.Certificate{pair}
 		}
-		opts = append(opts, kgo.DialTLSConfig(cfg))
+		if tm != nil {
+			// TLS inside the dialer (the tunnel transports raw TCP); the
+			// ServerName defaults to the dial host, which is the real
+			// broker address the forwarder targets — certificate
+			// verification stays meaningful.
+			opts = append(opts, kgo.Dialer(func(ctx context.Context, network, address string) (net.Conn, error) {
+				raw, err := tm.DialKafka(ctx, network, address)
+				if err != nil {
+					return nil, err
+				}
+				host, _, err := net.SplitHostPort(address)
+				if err != nil {
+					host = address
+				}
+				tlsCfg := cfg.Clone()
+				tlsCfg.ServerName = host
+				return tls.Client(raw, tlsCfg), nil
+			}))
+		} else {
+			opts = append(opts, kgo.DialTLSConfig(cfg))
+		}
+	} else if tm != nil {
+		opts = append(opts, kgo.Dialer(tm.DialKafka))
 	}
 	return opts, nil
 }

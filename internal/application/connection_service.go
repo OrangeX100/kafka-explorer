@@ -28,12 +28,15 @@ func (s *ConnectionService) List(ctx context.Context) ([]domain.Connection, erro
 	return s.repo.List(ctx)
 }
 
-// SaveInput carries the connection plus the optional password. The password
-// is write-only: it goes to the SecretStore and is never echoed back.
+// SaveInput carries the connection plus the optional passwords. Passwords
+// are write-only: they go to the SecretStore and are never echoed back.
 type SaveInput struct {
 	Connection domain.Connection `json:"connection"`
 	// Password empty + existing secret => keep old password (edit without retyping).
 	Password string `json:"password,omitempty"`
+	// TunnelPassword is the SSH password (auth=password) or key passphrase
+	// (auth=key — optional, unencrypted keys skip it).
+	TunnelPassword string `json:"tunnelPassword,omitempty"`
 }
 
 func (s *ConnectionService) Save(ctx context.Context, in SaveInput) (domain.Connection, error) {
@@ -87,6 +90,24 @@ func (s *ConnectionService) Save(ctx context.Context, in SaveInput) (domain.Conn
 		// Mechanism no longer needs a password: remove the stale secret.
 		_ = s.secrets.Delete(secretService, c.SecretRef)
 		c.SecretRef = ""
+	}
+
+	// Tunnel secret: password auth requires one; key auth stores a
+	// passphrase only when the user typed one. Disabling the tunnel or
+	// switching auth removes the stale entry.
+	if c.Tunnel.Enabled && in.TunnelPassword != "" {
+		if c.Tunnel.SecretRef == "" {
+			c.Tunnel.SecretRef = "conn-tunnel-" + c.ID
+		}
+		if err := s.secrets.Set(secretService, c.Tunnel.SecretRef, in.TunnelPassword); err != nil {
+			return domain.Connection{}, fmt.Errorf("store tunnel password: %w", err)
+		}
+	} else if !c.Tunnel.Enabled && c.Tunnel.SecretRef != "" {
+		_ = s.secrets.Delete(secretService, c.Tunnel.SecretRef)
+		c.Tunnel.SecretRef = ""
+	}
+	if c.Tunnel.Enabled && c.Tunnel.TunnelNeedsSecret() && c.Tunnel.SecretRef == "" {
+		return domain.Connection{}, fmt.Errorf("%w: SSH 隧道使用密码认证但未填写密码", domain.ErrInvalid)
 	}
 
 	updated := domain.FlexTime(now)
@@ -180,11 +201,11 @@ type TestResult struct {
 	ElapsedMs int64    `json:"elapsedMs"`
 }
 
-func (s *ConnectionService) Test(ctx context.Context, conn domain.Connection, password string) TestResult {
+func (s *ConnectionService) Test(ctx context.Context, conn domain.Connection, password, tunnelPassword string) TestResult {
 	start := time.Now()
-	// password is the form's typed value for unsaved connections; empty
+	// passwords are the form's typed values for unsaved connections; empty
 	// means the stored credential should be used. Never logged, never stored.
-	brokers, err := kafka.TestConnection(ctx, conn, s.secrets, password)
+	brokers, err := kafka.TestConnection(ctx, conn, s.secrets, password, tunnelPassword)
 	result := TestResult{ElapsedMs: time.Since(start).Milliseconds()}
 	if err != nil {
 		result.Error = ExplainError(err)

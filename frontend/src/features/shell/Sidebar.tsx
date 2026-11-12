@@ -15,6 +15,7 @@ import {
   Trash2,
   Unplug,
   Upload,
+  Shuffle,
 } from "lucide-react";
 import { useConnections } from "../../state/stores.js";
 import { useWorkspace } from "../../state/workspace.js";
@@ -355,6 +356,7 @@ export function Sidebar({ onAddConnection, onEditConnection, topView, setTopView
                   <span className="flex-1 flex min-w-0 items-center gap-1 truncate">
                     {conn.name}
                     {conn.pinned && <span title={t("conn.pin")}><Star size={11} className="flex-none fill-amber-400 text-amber-400" /></span>}
+                    {conn.tunnel?.enabled && <span title={t("conn.tunnel")}><Shuffle size={11} className="flex-none text-sky-400" /></span>}
                   </span>
                   <button
                     className="opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"

@@ -57,7 +57,23 @@ func (p *Pool) acquire(ctx context.Context, connectionID string) (*entry, error)
 			return nil, fmt.Errorf("load stored password: %w", err)
 		}
 	}
-	c, err := Open(ctx, conn, password)
+	var tm *TunnelManager
+	if conn.Tunnel.Enabled {
+		var tunnelSecret string
+		if conn.Tunnel.SecretRef != "" {
+			if tunnelSecret, err = p.secrets.Get(keyringService, conn.Tunnel.SecretRef); err != nil {
+				return nil, fmt.Errorf("load stored tunnel secret: %w", err)
+			}
+		}
+		// TOFU: the first successful handshake's fingerprint is persisted on
+		// the connection row; later mismatches fail inside the handshake.
+		tm = NewTunnelManager(conn.Tunnel, tunnelSecret, func(fp string) error {
+			updated := conn
+			updated.Tunnel.HostKey = fp
+			return p.repo.Save(ctx, updated)
+		})
+	}
+	c, err := Open(ctx, conn, password, tm)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +110,10 @@ const keyringService = "kafka-explorer"
 // throwaway client (never pooled) and returns the broker list.
 // providedPassword serves unsaved connections whose typed password is not in
 // the credential store yet; empty means "load the stored one".
-func TestConnection(ctx context.Context, conn domain.Connection, secrets domain.SecretStore, providedPassword string) ([]string, error) {
+// providedTunnelSecret is the same for the SSH tunnel (password or key
+// passphrase). The test's TOFU fingerprint stays in memory — persistence
+// happens on the pooled open path.
+func TestConnection(ctx context.Context, conn domain.Connection, secrets domain.SecretStore, providedPassword, providedTunnelSecret string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var password string
@@ -108,7 +127,18 @@ func TestConnection(ctx context.Context, conn domain.Connection, secrets domain.
 			}
 		}
 	}
-	c, err := Open(ctx, conn, password)
+	var tm *TunnelManager
+	if conn.Tunnel.Enabled {
+		tunnelSecret := providedTunnelSecret
+		if tunnelSecret == "" && conn.Tunnel.SecretRef != "" {
+			var err error
+			if tunnelSecret, err = secrets.Get(keyringService, conn.Tunnel.SecretRef); err != nil {
+				return nil, fmt.Errorf("load stored tunnel secret: %w", err)
+			}
+		}
+		tm = NewTunnelManager(conn.Tunnel, tunnelSecret, nil)
+	}
+	c, err := Open(ctx, conn, password, tm)
 	if err != nil {
 		return nil, err
 	}

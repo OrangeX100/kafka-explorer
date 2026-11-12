@@ -6,6 +6,20 @@
 // Generated bindings live in ../bindings (gitignored); the *service call*
 // wrappers import from there, but types flow through this file.
 
+export interface TunnelSettings {
+  enabled: boolean;
+  host?: string;
+  /** 0/absent = 22. */
+  port?: number;
+  user?: string;
+  /** "password" | "key". */
+  auth?: string;
+  keyPath?: string;
+  secretRef?: string;
+  /** First-seen jump-host fingerprint (TOFU); backend-owned. */
+  hostKey?: string;
+}
+
 export interface Connection {
   id: string;
   name: string;
@@ -14,6 +28,8 @@ export interface Connection {
   username?: string;
   secretRef?: string;
   tls: TlsSettings;
+  /** Backend struct is non-optional on the wire — the dialog always sends it. */
+  tunnel: TunnelSettings;
   // Optional: unsaved connections have no timestamps (backend FlexTime
   // tolerates both absent and empty-string forms).
   createdAt?: string;
@@ -41,6 +57,8 @@ export interface TlsSettings {
 export interface SaveInput {
   connection: Connection;
   password?: string;
+  /** SSH tunnel password / key passphrase (write-only). */
+  tunnelPassword?: string;
 }
 
 export interface TestResult {

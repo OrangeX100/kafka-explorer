@@ -52,8 +52,8 @@ export const connectionsApi = {
   // returns the new connection.
   clone: (id: string, newName: string): Promise<Connection> =>
     connectionHandler.CloneConnection(id, newName) as never,
-  test: (conn: Connection, password?: string): Promise<TestResult> =>
-    connectionHandler.Test(conn, password ?? "") as never,
+  test: (conn: Connection, password?: string, tunnelPassword?: string): Promise<TestResult> =>
+    connectionHandler.Test(conn, password ?? "", tunnelPassword ?? "") as never,
 };
 
 export const topicsApi = {

@@ -61,13 +61,14 @@ func (h *ConnectionHandler) CloneConnection(ctx context.Context, id, newName str
 	return h.svc.CloneConnection(ctx, id, newName)
 }
 
-func (h *ConnectionHandler) Test(ctx context.Context, conn domain.Connection, password string) application.TestResult {
+func (h *ConnectionHandler) Test(ctx context.Context, conn domain.Connection, password, tunnelPassword string) application.TestResult {
 	h.log.Info("connection test",
 		zap.String("name", conn.Name),
 		zap.String("bootstrap", conn.Bootstrap),
 		zap.Bool("passwordSet", password != ""),
+		zap.Bool("tunnelPasswordSet", tunnelPassword != ""),
 	)
-	return h.svc.Test(ctx, conn, password)
+	return h.svc.Test(ctx, conn, password, tunnelPassword)
 }
 
 // SetPinned toggles the list-ordering pin (a view preference, not a config
