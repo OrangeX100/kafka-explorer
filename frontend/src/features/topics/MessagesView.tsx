@@ -71,7 +71,9 @@ export function MessagesView({
   const [scanInfo, setScanInfo] = useState<number | null>(null);
   const [producing, setProducing] = useState(false);
   const [goTo, setGoTo] = useState(false);
-  const [decodeOn, setDecodeOn] = useState(false);
+  // 解码默认开启：schema 按 id 永久缓存（首屏后零 SR 往返），无 SR 集群
+  // 自动降级为标注，无卡顿风险；用户偏好经 localStorage 跨会话保留
+  const [decodeOn, setDecodeOn] = useState(() => localStorage.getItem("ke.decode") !== "0");
   // After a find, prev/next are meaningless (the cursor no longer describes
   // the shown window) — suspended until a jump (最新/最早/goto) re-anchors it.
   const [pagingSuspended, setPagingSuspended] = useState(false);

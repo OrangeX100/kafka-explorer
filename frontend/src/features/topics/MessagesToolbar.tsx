@@ -201,7 +201,7 @@ export function MessagesToolbar({
         </button>
         <span className="mx-1 h-4 w-px bg-ink-600" />
         <label className="flex items-center gap-1 text-11 text-ink-300" title={t("msg.decodeAuto")}>
-          <input type="checkbox" checked={decodeOn} onChange={(e) => setDecodeOn(e.target.checked)} />
+          <input type="checkbox" checked={decodeOn} onChange={(e) => { setDecodeOn(e.target.checked); localStorage.setItem("ke.decode", e.target.checked ? "1" : "0"); }} />
           {t("msg.decoded")}
         </label>
         <div className="flex-1" />
