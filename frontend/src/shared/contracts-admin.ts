@@ -181,10 +181,28 @@ export interface GenerateResult {
 export interface ExportMessagesInput {
   connectionId: string;
   topic: string;
+  /** -1 = all partitions (walked per-partition, ids ascending). */
   partition?: number;
   from: number;
   to?: number;
   format: string;
+  /** Add schema-decoded rendering (decodedValue + format) to JSONL rows. */
+  decoded?: boolean;
+}
+
+export interface ImportFileInput {
+  connectionId: string;
+  topic: string;
+  path: string;
+  partition?: number;
+}
+
+export interface ImportFileResult {
+  produced: number;
+  failed: number;
+  firstOffset?: number;
+  failedLines?: { line: number; error: string }[];
+  elapsedMs: number;
 }
 
 export interface AppSettings {

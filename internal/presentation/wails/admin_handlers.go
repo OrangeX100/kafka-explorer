@@ -270,12 +270,42 @@ func (h *GenerateHandler) Export(ctx context.Context, in domain.ExportMessagesIn
 	return h.io.Export(ctx, in)
 }
 
+// ExportToFile streams the export into a user-picked file; the path comes
+// from PickSaveFile in the frontend. Returns the record count for the
+// success toast.
+func (h *GenerateHandler) ExportToFile(ctx context.Context, in domain.ExportMessagesInput, path string) (int64, error) {
+	h.log.Info("messages export to file",
+		zap.String("connection", in.ConnectionID),
+		zap.String("topic", in.Topic),
+		zap.String("format", in.Format),
+		zap.String("path", path),
+	)
+	return h.io.ExportToFile(ctx, in, path)
+}
+
 func (h *GenerateHandler) Import(ctx context.Context, in domain.GenerateInput) (domain.GenerateResult, error) {
 	h.log.Info("messages import",
 		zap.String("connection", in.ConnectionID),
 		zap.String("topic", in.Topic),
 	)
 	return h.io.Import(ctx, in)
+}
+
+func (h *GenerateHandler) ImportFromFile(ctx context.Context, in domain.ImportFileInput) (domain.ImportFileResult, error) {
+	h.log.Info("messages import from file",
+		zap.String("connection", in.ConnectionID),
+		zap.String("topic", in.Topic),
+		zap.String("path", in.Path),
+	)
+	return h.io.ImportFromFile(ctx, in)
+}
+
+// SetEmitter bridges the service's import-progress callback to app events
+// (bootstrap owns the app object).
+func (h *GenerateHandler) SetEmitter(emit func(topic string, data ...any)) {
+	h.io.SetProgress(func(done, failed, total int) {
+		emit("io:import:progress", map[string]int{"done": done, "failed": failed, "total": total})
+	})
 }
 
 // SettingsHandler exposes user preferences plus the one-file full backup

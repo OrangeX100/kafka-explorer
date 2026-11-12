@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Pencil, Plus, Split, Undo2 } from "lucide-react";
-import { adminApi, topicsApi } from "../../shared/api.js";
-import { friendlyError } from "../../shared/api.js";
+import { adminApi, friendlyError, topicsApi } from "../../shared/api.js";
 import { useToast } from "../../state/stores.js";
 import { t } from "../../shared/i18n.js";
 import { configName, configDesc } from "../../shared/configLocale.js";
@@ -15,7 +14,6 @@ import { useCopy } from "../../shared/useCopy.js";
 import { AddConfigDialog, ConfigEditDialog } from "./ConfigDialogs.js";
 import { TOPIC_CONFIG_DOCS } from "../../shared/topicConfigDocs.js";
 import type { ConfigEntry, TopicDetail } from "../../shared/contracts.js";
-import { friendlyError } from "../../shared/api.js";
 
 // Fixed-position tooltip: native title takes ~1s to appear and the
 // overflow-auto table clips CSS-positioned tooltips, so hover text renders

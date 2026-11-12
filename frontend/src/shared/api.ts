@@ -225,6 +225,8 @@ import type {
   SchemaSubject,
   SchemaVersion,
   AlterBrokerConfigInput,
+  ImportFileInput,
+  ImportFileResult,
 } from "./contracts-admin.js";
 
 export const adminApi = {
@@ -294,7 +296,11 @@ export const registryApi = {
 export const generateApi = {
   generate: (input: GenerateInput): Promise<GenerateResult> => generateHandler.Generate(input) as never,
   export: (input: ExportMessagesInput): Promise<string> => generateHandler.Export(input) as never,
+  exportToFile: (input: ExportMessagesInput, path: string): Promise<number> =>
+    generateHandler.ExportToFile(input, path) as never,
   import: (input: GenerateInput): Promise<GenerateResult> => generateHandler.Import(input) as never,
+  importFromFile: (input: ImportFileInput): Promise<ImportFileResult> =>
+    generateHandler.ImportFromFile(input) as never,
 };
 
 import * as connectHandler from "../../bindings/kafkaexplorer/internal/presentation/wails/connecthandler.js";

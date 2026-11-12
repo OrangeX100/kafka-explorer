@@ -46,6 +46,7 @@ export function ConnectorDetailModal({
   const [loadError, setLoadError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [editingConfig, setEditingConfig] = useState(false);
+  const toast = { show: useToast((s) => s.show) };
 
   const load = useCallback(async () => {
     setLoadError(null);

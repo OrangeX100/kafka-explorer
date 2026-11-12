@@ -110,7 +110,9 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 	app.RegisterService(application.NewService(wails.NewGroupHandler(groupSvc, log)))
 	app.RegisterService(application.NewService(wails.NewAdminHandler(adminSvc, log)))
 	app.RegisterService(application.NewService(wails.NewSchemaRegistryHandler(registrySvc, secrets, log)))
-	app.RegisterService(application.NewService(wails.NewGenerateHandler(genSvc, ioSvc, log)))
+	genHandler := wails.NewGenerateHandler(genSvc, ioSvc, log)
+	genHandler.SetEmitter(func(topic string, data ...any) { app.Event.Emit(topic, data...) })
+	app.RegisterService(application.NewService(genHandler))
 	systemHandler := wails.NewSystemHandler(updateSvc, log)
 	systemHandler.SetEmitter(func(topic string, data ...any) { app.Event.Emit(topic, data...) })
 	var tray *Tray // created below; the quit closure runs only after boot
@@ -140,12 +142,14 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 	// calls. Distinct schemas are few; cache forever (Confluent ids are
 	// immutable: an id IS the schema, never invalidated). Keyed by
 	// registry/id: the same numeric id means DIFFERENT schemas across
-	// registries once connections bind their own.
+	// registries once connections bind their own. ONE fetcher instance is
+	// shared by message browsing AND schema-aware exports (same binding,
+	// same cache).
 	var schemaMu sync.Mutex
 	schemaCache := map[string]struct {
 		schema, typ string
 	}{}
-	msgHandler.SetDecodeFetcher(func(ctx context.Context, connectionID string, id int) (string, string, error) {
+	decodeFetcher := func(ctx context.Context, connectionID string, id int) (string, string, error) {
 		registries, err := registrySvc.List(ctx)
 		if err != nil || len(registries) == 0 {
 			return "", "", fmt.Errorf("no schema registry configured")
@@ -169,7 +173,9 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 		schemaCache[cacheKey] = struct{ schema, typ string }{schema, typ}
 		schemaMu.Unlock()
 		return schema, typ, nil
-	})
+	}
+	msgHandler.SetDecodeFetcher(decodeFetcher)
+	ioSvc.SetSchemaFetcher(decodeFetcher)
 	app.RegisterService(application.NewService(msgHandler))
 
 	// application.New does NOT create a window: without this the process

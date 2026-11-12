@@ -197,11 +197,17 @@ type GenerateResult struct {
 type ExportMessagesInput struct {
 	ConnectionID string `json:"connectionId"`
 	Topic        string `json:"topic"`
-	Partition    *int32 `json:"partition,omitempty"`
+	// Partition: nil or negative = ALL partitions (exported per-partition,
+	// ids ascending). Legacy callers send 0 explicitly.
+	Partition *int32 `json:"partition,omitempty"`
 	// From/To offset window (inclusive); To nil = to the end.
-	From int64  `json:"from"`
-	To   *int64 `json:"to,omitempty"`
+	From   int64  `json:"from"`
+	To     *int64 `json:"to,omitempty"`
 	Format string `json:"format"` // "jsonl" | "csv"
+	// Decoded adds the schema-decoded rendering (decodedValue + format) to
+	// JSONL rows when a registry is wired — the fix for exporting
+	// Avro/Protobuf payloads that would otherwise be opaque bytes.
+	Decoded bool `json:"decoded,omitempty"`
 }
 
 // ImportedMessage is one record coming in from an import file.
@@ -210,6 +216,32 @@ type ImportedMessage struct {
 	Value   *string            `json:"value,omitempty"`
 	Headers map[string]string  `json:"headers,omitempty"`
 	Partition *int32           `json:"partition,omitempty"`
+}
+
+// ImportFileInput selects an import payload file (path chosen by the user
+// through the native dialog) and its destination.
+type ImportFileInput struct {
+	ConnectionID string `json:"connectionId"`
+	Topic        string `json:"topic"`
+	Path         string `json:"path"`
+	// Partition: nil = let the client choose (sticky partitioner).
+	Partition *int32 `json:"partition,omitempty"`
+}
+
+// ImportLineError names one record that failed to produce, by 1-based file
+// line — an import is best-effort; good lines land, bad lines are listed.
+type ImportLineError struct {
+	Line  int    `json:"line"`
+	Error string `json:"error"`
+}
+
+// ImportFileResult summarizes one file import run.
+type ImportFileResult struct {
+	Produced    int               `json:"produced"`
+	Failed      int               `json:"failed"`
+	FirstOffset *int64            `json:"firstOffset,omitempty"`
+	FailedLines []ImportLineError `json:"failedLines,omitempty"`
+	ElapsedMs   int64             `json:"elapsedMs"`
 }
 
 func errInvalidField(msg string) error { return &fieldError{msg} }

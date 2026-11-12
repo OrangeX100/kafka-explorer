@@ -241,6 +241,29 @@ func (c *Client) DeleteTopic(ctx context.Context, name string) error {
 	return nil
 }
 
+// TopicPartitionIDs lists a topic's partition ids ascending — the export
+// path walks partitions one cursor at a time (the all-partitions browse
+// window has no cursor, so it cannot page a From..To window).
+func (c *Client) TopicPartitionIDs(ctx context.Context, topic string) ([]int32, error) {
+	md, err := c.adm.Metadata(ctx, topic)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	t, ok := md.Topics[topic]
+	if !ok {
+		return nil, fmt.Errorf("%w: 主题 %s 不存在", domain.ErrInvalid, topic)
+	}
+	if t.Err != nil {
+		return nil, mapErr(fmt.Errorf("fetch topic %s: %w", topic, t.Err))
+	}
+	ids := make([]int32, 0, len(t.Partitions))
+	for _, pd := range t.Partitions {
+		ids = append(ids, pd.Partition)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids, nil
+}
+
 // IncreasePartitions grows a topic's partition count to target. Kafka only
 // ever allows GROWING a topic (shrinkage is a wire-level rejection), so the
 // live count is fetched first and a shrink attempt gets a friendly error
