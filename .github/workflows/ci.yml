@@ -7,10 +7,13 @@ on:
 jobs:
   gate:
     # Same entry point as local dev: task precommit. No divergence.
+    # Windows only: the shipped artifact is the Windows installer, and the
+    # wails3 CLI itself needs GTK4/webkitgtk system packages to compile on
+    # Linux/macOS runners — nothing else in the gate needs the extra OSes.
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
