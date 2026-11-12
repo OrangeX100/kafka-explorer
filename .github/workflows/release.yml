@@ -41,10 +41,17 @@ jobs:
           GOPATH: ${{ github.workspace }}/go
         run: |
           export PATH="$GOPATH/bin:$PATH"
+          # choco puts Inno Setup machine-wide; the Taskfile default points
+          # at a per-user install, so probe both before invoking the task
+          ISCC_PATH="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          [ -f "$ISCC_PATH" ] || ISCC_PATH="$LOCALAPPDATA/Programs/Inno Setup 6/ISCC.exe"
+          ISCC_PATH=$(cygpath -m "$ISCC_PATH")
+          echo "ISCC: $ISCC_PATH"
           VERSION="${GITHUB_REF_NAME#v}"
           wails3 task installer VERSION="$VERSION" \
             VERSIONINFOVERSION="$VERSION.0" \
-            RELEASE_REPO="${GITHUB_REPOSITORY}"
+            RELEASE_REPO="${GITHUB_REPOSITORY}" \
+            ISCC="$ISCC_PATH"
 
       - name: Versioned asset + checksum
         shell: bash
