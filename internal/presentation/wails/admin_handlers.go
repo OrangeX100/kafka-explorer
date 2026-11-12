@@ -9,6 +9,7 @@ import (
 	wailsapp "github.com/wailsapp/wails/v3/pkg/application"
 
 	"kafkaexplorer/internal/application"
+	"kafkaexplorer/internal/application/decode"
 	"kafkaexplorer/internal/domain"
 )
 
@@ -37,6 +38,16 @@ func (h *AdminHandler) AlterBrokerConfig(ctx context.Context, in domain.AlterBro
 		zap.Int32("broker", in.BrokerID),
 	)
 	return h.svc.AlterBrokerConfig(ctx, in)
+}
+
+func (h *AdminHandler) IncreasePartitions(ctx context.Context, connectionID, topic string, target int32) error {
+	// Growing a topic changes downstream message routing — decision log.
+	h.log.Info("partitions increase",
+		zap.String("connection", connectionID),
+		zap.String("topic", topic),
+		zap.Int32("target", target),
+	)
+	return h.svc.IncreasePartitions(ctx, connectionID, topic, target)
 }
 
 func (h *AdminHandler) ListLogDirs(ctx context.Context, connectionID string) ([]domain.LogDir, error) {
@@ -160,6 +171,22 @@ func (h *SchemaRegistryHandler) Versions(ctx context.Context, registryID, subjec
 
 func (h *SchemaRegistryHandler) Compatibility(ctx context.Context, registryID, subject, schema, schemaType string) (domain.CompatibilityCheck, error) {
 	return h.svc.Compatibility(ctx, registryID, subject, schema, schemaType)
+}
+
+// ValidateSchema runs the local precheck only (no registry contact) — the
+// UI calls it before compat check and registration.
+func (h *SchemaRegistryHandler) ValidateSchema(ctx context.Context, schemaType, schema string) error {
+	return decode.ValidateSchema(schemaType, schema)
+}
+
+func (h *SchemaRegistryHandler) RegisterSchema(ctx context.Context, registryID, subject, schema, schemaType string) (application.SchemaRegisterResult, error) {
+	// Registering a schema adds a version to the registry — decision log.
+	h.log.Info("schema register",
+		zap.String("registry", registryID),
+		zap.String("subject", subject),
+		zap.String("type", schemaType),
+	)
+	return h.svc.RegisterSchema(ctx, registryID, subject, schema, schemaType)
 }
 
 func (h *SchemaRegistryHandler) DeleteSubject(ctx context.Context, registryID, subject string, permanent bool) error {

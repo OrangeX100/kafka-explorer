@@ -12,7 +12,7 @@ import { useContextMenu } from "../common/ContextMenu.js";
 import { useCopy } from "../../shared/useCopy.js";
 import { GlidingTabs } from "../common/GlidingTabs.js";
 import type { SchemaRegistry, SchemaSubject } from "../../shared/contracts-admin.js";
-import { RegistryDialog } from "./RegistryDialogs.js";
+import { RegistryDialog, SchemaRegisterModal } from "./RegistryDialogs.js";
 import { SchemaDetail } from "./RegistryDetail.js";
 import { LocalSchemas } from "./LocalSchemas.js";
 
@@ -37,6 +37,7 @@ export function RegistryView() {
   const [selected, setSelected] = useState<SchemaSubject | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<SchemaRegistry | null>(null);
+  const [registering, setRegistering] = useState(false);
   // connections resolve binding badges (registry → cluster name)
   const [connections, setConnections] = useState<{ id: string; name: string }[]>([]);
   const toast = { show: useToast((s) => s.show) };
@@ -220,6 +221,14 @@ export function RegistryView() {
             <div className="flex items-center gap-1.5 border-b border-ink-700 px-2 py-1.5">
               <span className="px-1 text-11 text-ink-300">{t("reg.subjects")}</span>
               <div className="flex-1" />
+              <button
+                className="btn !py-0.5 !px-1.5"
+                title={t("reg.registerTitle")}
+                disabled={!activeId}
+                onClick={() => setRegistering(true)}
+              >
+                <Plus size={11} />
+              </button>
               <button className="btn !py-0.5 !px-1.5" title={t("common.refresh")} onClick={() => activeId && void loadSubjects(activeId)}>
                 <RefreshCw size={11} />
               </button>
@@ -310,6 +319,21 @@ export function RegistryView() {
           onSaved={() => {
             setEditing(null);
             void load();
+          }}
+        />
+      )}
+      {registering && activeId && (
+        <SchemaRegisterModal
+          registryId={activeId}
+          subjects={(subjects ?? []).map((s) => s.name)}
+          initialSubject={selected?.name}
+          onClose={() => setRegistering(false)}
+          onRegistered={(subject) => {
+            setRegistering(false);
+            void loadSubjects(activeId);
+            // Reopen the registered subject so the new version is visible.
+            const found = (subjects ?? []).find((s) => s.name === subject);
+            if (found) setSelected(found);
           }}
         />
       )}

@@ -91,6 +91,16 @@ func (h *ConnectHandler) Restart(ctx context.Context, clusterID, name string) er
 	return h.svc.Restart(ctx, clusterID, name)
 }
 
+func (h *ConnectHandler) RestartTask(ctx context.Context, clusterID, name string, taskID int) error {
+	h.log.Info("connector task restart", zap.String("cluster", clusterID), zap.String("name", name), zap.Int("task", taskID))
+	return h.svc.RestartTask(ctx, clusterID, name, taskID)
+}
+
+func (h *ConnectHandler) UpdateConnector(ctx context.Context, clusterID, name string, config map[string]string) error {
+	h.log.Info("connector config update", zap.String("cluster", clusterID), zap.String("name", name), zap.Int("keys", len(config)))
+	return h.svc.UpdateConnector(ctx, clusterID, name, config)
+}
+
 func (h *ConnectHandler) Pause(ctx context.Context, clusterID, name string) error {
 	h.log.Info("connector pause", zap.String("cluster", clusterID), zap.String("name", name))
 	return h.svc.Pause(ctx, clusterID, name)

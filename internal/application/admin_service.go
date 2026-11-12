@@ -2,8 +2,12 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 
+	"kafkaexplorer/internal/application/decode"
 	"kafkaexplorer/internal/domain"
 	"kafkaexplorer/internal/infrastructure/kafka"
 	"kafkaexplorer/internal/infrastructure/registry"
@@ -41,6 +45,16 @@ func (s *AdminService) AlterBrokerConfig(ctx context.Context, in domain.AlterBro
 		return err
 	}
 	return client.AlterBrokerConfig(ctx, in.BrokerID, in.Values)
+}
+
+// IncreasePartitions grows a topic's partition count to target. The client
+// pre-validates against the live count (Kafka never shrinks partitions).
+func (s *AdminService) IncreasePartitions(ctx context.Context, connectionID, topic string, target int32) error {
+	client, err := s.pool.Acquire(ctx, connectionID)
+	if err != nil {
+		return err
+	}
+	return client.IncreasePartitions(ctx, topic, target)
 }
 
 func (s *AdminService) ListLogDirs(ctx context.Context, connectionID string) ([]domain.LogDir, error) {
@@ -288,6 +302,39 @@ func (s *SchemaRegistryService) Compatibility(ctx context.Context, registryID, s
 		return domain.CompatibilityCheck{}, err
 	}
 	return s.client(r, "").CheckCompatibility(ctx, subject, schema, schemaType)
+}
+
+// SchemaRegisterResult is what a successful registration assigns.
+type SchemaRegisterResult struct {
+	ID      int `json:"id"`
+	Version int `json:"version"`
+}
+
+// RegisterSchema validates the schema locally FIRST (friendly parse errors
+// with zero registry round trip), then registers it on the subject. A 409
+// or 422 from the registry is a compatibility/storage conflict — mapped to
+// actionable text pointing at the compatibility workspace instead of a raw
+// status code.
+func (s *SchemaRegistryService) RegisterSchema(ctx context.Context, registryID, subject, schema, schemaType string) (SchemaRegisterResult, error) {
+	if strings.TrimSpace(subject) == "" {
+		return SchemaRegisterResult{}, fmt.Errorf("subject 不能为空")
+	}
+	if err := decode.ValidateSchema(schemaType, schema); err != nil {
+		return SchemaRegisterResult{}, err
+	}
+	r, err := s.store.get(ctx, registryID)
+	if err != nil {
+		return SchemaRegisterResult{}, err
+	}
+	id, version, err := s.client(r, "").RegisterSchema(ctx, strings.TrimSpace(subject), schema, schemaType)
+	if err != nil {
+		var api *registry.RegistryAPIError
+		if errors.As(err, &api) && (api.Code == http.StatusConflict || api.Code == http.StatusUnprocessableEntity) {
+			return SchemaRegisterResult{}, fmt.Errorf("注册被拒绝：通常是兼容性冲突或与已有版本重复，可在「兼容性检查」页先校验候选 schema（%s）", api.Message)
+		}
+		return SchemaRegisterResult{}, err
+	}
+	return SchemaRegisterResult{ID: id, Version: version}, nil
 }
 
 // DeleteSubject removes a subject. Soft delete keeps versions resolvable

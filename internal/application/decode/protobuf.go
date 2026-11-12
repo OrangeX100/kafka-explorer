@@ -32,50 +32,35 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
-// decodeProtobufJSON renders one Confluent-framed Protobuf payload as
-// JSON. schema is the registry's schema field for the record's schema id.
-// The first message type in the resolved descriptor set is the message
-// used (registries conventionally register one subject per message).
-func decodeProtobufJSON(ctx context.Context, payload []byte, schema string) Result {
-	if strings.ContainsAny(schema, "{};") {
-		// .proto source text (see file comment): compile to descriptors.
-		return decodeProtobufTextJSON(ctx, payload, schema)
-	}
-	raw, err := base64.StdEncoding.DecodeString(schema)
-	if err != nil {
-		return Result{Format: "protobuf", Error: "protobuf schema 不是合法的 FileDescriptorSet base64 文本"}
-	}
-	var fds descriptorpb.FileDescriptorSet
-	if err := proto.Unmarshal(raw, &fds); err != nil {
-		return Result{Format: "protobuf", Error: fmt.Sprintf("解析 FileDescriptorSet 描述集失败: %v", err)}
-	}
-	entry := ""
-	if n := len(fds.GetFile()); n > 0 {
-		entry = fds.GetFile()[0].GetName() // serializers put the schema's own file first
-	}
-	return decodeProtobufFDSetJSON(payload, &fds, entry)
+// compiledEntry is the in-memory file name the registry's .proto text is
+// compiled under; the resolver serves the schema at exactly this path.
+const compiledEntry = "registry-schema.proto"
+
+// isProtoText tells the two storage formats apart: .proto source always
+// carries at least one of braces/semicolons, byte sequences base64 never
+// produces.
+func isProtoText(schema string) bool {
+	return strings.ContainsAny(schema, "{};")
 }
 
-// decodeProtobufTextJSON compiles .proto source text into a descriptor
-// set and decodes the payload against it. Well-known imports
-// (google/protobuf/*.proto) resolve from embedded descriptors; imports of
-// other schema files cannot be resolved from one registry string and are
-// reported as a friendly error.
-func decodeProtobufTextJSON(ctx context.Context, payload []byte, source string) Result {
-	const entry = "registry-schema.proto"
+// compileProtoText compiles .proto source text into a descriptor set.
+// Well-known imports (google/protobuf/*.proto) resolve from embedded
+// descriptors; imports of other schema files cannot be resolved from one
+// registry string and are reported as a friendly error. Dependencies are
+// emitted first (post-order) — protodesc.NewFiles requires a file's
+// imports registered before the file itself.
+func compileProtoText(ctx context.Context, source string) (*descriptorpb.FileDescriptorSet, error) {
 	resolver := protocompile.ResolverFunc(func(path string) (protocompile.SearchResult, error) {
-		if path == entry {
+		if path == compiledEntry {
 			return protocompile.SearchResult{Source: strings.NewReader(source)}, nil
 		}
 		return protocompile.SearchResult{}, fmt.Errorf("schema 引用了导入 %q，注册中心未随 schema 提供该文件", path)
 	})
 	compiler := protocompile.Compiler{Resolver: protocompile.WithStandardImports(resolver)}
-	compiled, err := compiler.Compile(ctx, entry)
+	compiled, err := compiler.Compile(ctx, compiledEntry)
 	if err != nil {
-		return Result{Format: "protobuf", Error: fmt.Sprintf("解析 .proto 文本失败: %v", err)}
+		return nil, err
 	}
-	// Dependencies first (post-order): protodesc.NewFiles requires a file's
-	// imports registered before the file itself.
 	fdps := make([]*descriptorpb.FileDescriptorProto, 0, len(compiled))
 	seen := map[string]bool{}
 	var collect func(fd protoreflect.FileDescriptor)
@@ -93,7 +78,49 @@ func decodeProtobufTextJSON(ctx context.Context, payload []byte, source string) 
 	for _, f := range compiled {
 		collect(f)
 	}
-	return decodeProtobufFDSetJSON(payload, &descriptorpb.FileDescriptorSet{File: fdps}, entry)
+	return &descriptorpb.FileDescriptorSet{File: fdps}, nil
+}
+
+// decodeFDSet decodes the base64 payload into fds. Kept separate so both
+// the decoder and the schema validator share the exact acceptance rules.
+func decodeFDSet(schemaB64 string, fds *descriptorpb.FileDescriptorSet) ([]byte, error) {
+	raw, err := base64.StdEncoding.DecodeString(schemaB64)
+	if err != nil {
+		return nil, fmt.Errorf("protobuf schema 不是合法的 FileDescriptorSet base64 文本")
+	}
+	if err := proto.Unmarshal(raw, fds); err != nil {
+		return nil, fmt.Errorf("解析 FileDescriptorSet 描述集失败: %v", err)
+	}
+	return raw, nil
+}
+
+// entryFile returns the descriptor set's own (first) file name —
+// serializers put the schema's file first, and it carries the message the
+// payload was written with.
+func entryFile(fds *descriptorpb.FileDescriptorSet) string {
+	if n := len(fds.GetFile()); n > 0 {
+		return fds.GetFile()[0].GetName()
+	}
+	return ""
+}
+
+// decodeProtobufJSON renders one Confluent-framed Protobuf payload as
+// JSON. schema is the registry's schema field for the record's schema id.
+// The schema's own file's first message is the message used (registries
+// conventionally register one subject per message).
+func decodeProtobufJSON(ctx context.Context, payload []byte, schema string) Result {
+	if isProtoText(schema) {
+		fds, err := compileProtoText(ctx, schema)
+		if err != nil {
+			return Result{Format: "protobuf", Error: fmt.Sprintf("解析 .proto 文本失败: %v", err)}
+		}
+		return decodeProtobufFDSetJSON(payload, fds, compiledEntry)
+	}
+	var fds descriptorpb.FileDescriptorSet
+	if _, err := decodeFDSet(schema, &fds); err != nil {
+		return Result{Format: "protobuf", Error: err.Error()}
+	}
+	return decodeProtobufFDSetJSON(payload, &fds, entryFile(&fds))
 }
 
 // decodeProtobufFDSetJSON builds a dynamic message from the descriptor

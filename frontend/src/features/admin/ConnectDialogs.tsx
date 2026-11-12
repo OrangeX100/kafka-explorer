@@ -45,6 +45,7 @@ export function ConnectorDetailModal({
   const [detail, setDetail] = useState<ConnectorDetail | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [editingConfig, setEditingConfig] = useState(false);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -65,6 +66,21 @@ export function ConnectorDetailModal({
     // by seconds (the modal used to freeze that lag on screen: connector
     // PAUSED with tasks still RUNNING). A settling second snapshot shows
     // the truth once propagation finishes.
+    await new Promise((r) => setTimeout(r, 2500));
+    await load();
+  };
+
+  // Single-task restart: the narrow fix for one stuck task. Same settle
+  // snapshot as lifecycle ops — the task state lags the restart by seconds.
+  const restartTaskThenReload = async (taskId: number) => {
+    try {
+      await connectApi.restartTask(clusterId, name, taskId);
+      toast.show(t("connect.taskRestartOk", String(taskId)), "ok");
+    } catch (err) {
+      toast.show(friendlyError(err), "error");
+      return;
+    }
+    await load();
     await new Promise((r) => setTimeout(r, 2500));
     await load();
   };
@@ -111,6 +127,7 @@ export function ConnectorDetailModal({
                     <th className="table-head w-14 px-2 py-1 text-left">#</th>
                     <th className="table-head w-24 px-2 py-1 text-left">{t("connect.taskState")}</th>
                     <th className="table-head px-2 py-1 text-left">{t("connect.taskWorker")}</th>
+                    <th className="table-head w-20 px-2 py-1 text-center">{t("connect.taskRestart")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -119,6 +136,15 @@ export function ConnectorDetailModal({
                       <td className="px-2 py-1 font-mono">{task.id}</td>
                       <td className={`px-2 py-1 font-medium ${stateColor(task.state)}`}>{task.state}</td>
                       <td className="truncate px-2 py-1 font-mono text-ink-400" title={task.worker}>{task.worker || "∅"}</td>
+                      <td className="px-2 py-1 text-center">
+                        <button
+                          className="btn !px-1.5 !py-0.5"
+                          title={t("connect.taskRestartHint")}
+                          onClick={() => void restartTaskThenReload(task.id)}
+                        >
+                          ↻
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -147,8 +173,95 @@ export function ConnectorDetailModal({
             <button className="btn" disabled={!detail || detail.state !== "RUNNING"} onClick={() => void onLifecyleThenReload("pause")}>⏸ {t("ctx.pauseConnector")}</button>
             <button className="btn" disabled={!detail || detail.state !== "PAUSED"} onClick={() => void onLifecyleThenReload("resume")}>▶ {t("ctx.resumeConnector")}</button>
             <button className="btn" disabled={!detail} onClick={() => void onLifecyleThenReload("restart")}>↻ {t("ctx.restartConnector")}</button>
+            <button className="btn" disabled={!detail} onClick={() => setEditingConfig(true)}>{t("connect.editConfig")}</button>
             <div className="flex-1" />
             <button className="btn" onClick={close}>{t("conn.cancel")}</button>
+          </div>
+          {detail && editingConfig && (
+            <EditConnectorConfigModal
+              clusterId={clusterId}
+              connector={detail}
+              onClose={() => setEditingConfig(false)}
+              onSaved={async () => {
+                setEditingConfig(false);
+                await load();
+              }}
+            />
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// EditConnectorConfigModal: PUT the connector's config back to the cluster
+// (the update path the detail view could only show read-only before). The
+// JSON editor pre-fills from the live config; connector.class must survive
+// the edit — it defines the plugin and the backend rejects its absence.
+function EditConnectorConfigModal({
+  clusterId,
+  connector,
+  onClose,
+  onSaved,
+}: {
+  clusterId: string;
+  connector: ConnectorDetail;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [configText, setConfigText] = useState(JSON.stringify(connector.config, null, 2));
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const toast = { show: useToast((s) => s.show) };
+
+  const save = async () => {
+    setFormError(null);
+    let config: Record<string, string>;
+    try {
+      const parsed = JSON.parse(configText || "{}") as Record<string, unknown>;
+      config = {};
+      for (const [k, v] of Object.entries(parsed)) config[k] = String(v);
+    } catch {
+      setFormError(t("connect.jsonInvalid"));
+      return;
+    }
+    if (!config["connector.class"]) {
+      setFormError(t("connect.classRequired"));
+      return;
+    }
+    setSaving(true);
+    try {
+      await connectApi.updateConnector(clusterId, connector.name, config);
+      toast.show(t("connect.updateOk", connector.name), "ok");
+      await onSaved();
+    } catch (err) {
+      setFormError(friendlyError(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title={t("connect.editConfigTitle", connector.name)} width={480} onClose={onClose}>
+      {(close) => (
+        <div className="space-y-2.5">
+          <label className="block">
+            <span className="mb-1 block text-11 text-ink-300">{t("connect.configJson")}</span>
+            <textarea
+              className="field h-48 resize-y font-mono text-11"
+              value={configText}
+              onChange={(e) => setConfigText(e.target.value)}
+              spellCheck={false}
+            />
+          </label>
+          <div className="text-10 text-ink-400">{t("connect.updateHint")}</div>
+          {formError && (
+            <div className="rounded border border-danger/40 bg-danger/10 px-2.5 py-2 text-11 text-danger selectable">{formError}</div>
+          )}
+          <div className="flex items-center gap-2 border-t border-ink-700 pt-3">
+            <div className="flex-1" />
+            <button className="btn" onClick={close}>{t("conn.cancel")}</button>
+            <button className="btn btn-accent" disabled={saving} onClick={() => void save()}>{t("conn.save")}</button>
           </div>
         </div>
       )}

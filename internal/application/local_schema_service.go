@@ -37,16 +37,12 @@ func (s *SchemaRegistryService) DeleteLocalSchema(ctx context.Context, id string
 
 // DecodeLocal decodes one base64 record payload against a local schema —
 // the offline answer to Confluent-framed values when no registry connection
-// is configured. Only Avro decodes today; other types are named, not faked.
+// is configured. Branching mirrors the registry decode (Avro / Protobuf
+// dual-format / JSON) via decode.DecodeLocalSchema.
 func (s *SchemaRegistryService) DecodeLocal(ctx context.Context, schemaType, schema, payloadBase64 string) (domain.DecodeResult, error) {
 	raw, err := base64.StdEncoding.DecodeString(payloadBase64)
 	if err != nil {
 		return domain.DecodeResult{}, fmt.Errorf("payload 不是合法的 base64: %w", err)
 	}
-	switch schemaType {
-	case "AVRO", "":
-		return decode.DecodeWithSchema(raw, schema), nil
-	default:
-		return domain.DecodeResult{}, fmt.Errorf("本地解码目前仅支持 Avro（收到 %s）", schemaType)
-	}
+	return decode.DecodeLocalSchema(schemaType, schema, raw), nil
 }

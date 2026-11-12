@@ -221,6 +221,7 @@ import type {
   Quota,
   RegistrySaveInput,
   SchemaRegistry,
+  SchemaRegisterResult,
   SchemaSubject,
   SchemaVersion,
   AlterBrokerConfigInput,
@@ -249,6 +250,8 @@ export const adminApi = {
     adminHandler.AlterQuota(connectionId, entity, key, value) as never,
   deleteGroup: (connectionId: string, group: string): Promise<void> =>
     adminHandler.DeleteConsumerGroup(connectionId, group) as never,
+  increasePartitions: (connectionId: string, topic: string, target: number): Promise<void> =>
+    adminHandler.IncreasePartitions(connectionId, topic, target) as never,
   clusterDiff: (connectionA: string, connectionB: string): Promise<ClusterDiff> =>
     adminHandler.ClusterDiff(connectionA, connectionB) as never,
 };
@@ -265,6 +268,10 @@ export const registryApi = {
     schemaRegistryHandler.Versions(registryId, subject) as never,
   compatibility: (registryId: string, subject: string, schema: string, schemaType: string): Promise<CompatibilityCheck> =>
     schemaRegistryHandler.Compatibility(registryId, subject, schema, schemaType) as never,
+  validateSchema: (schemaType: string, schema: string): Promise<void> =>
+    schemaRegistryHandler.ValidateSchema(schemaType, schema) as never,
+  registerSchema: (registryId: string, subject: string, schema: string, schemaType: string): Promise<SchemaRegisterResult> =>
+    schemaRegistryHandler.RegisterSchema(registryId, subject, schema, schemaType) as never,
   compatibilityVersion: (registryId: string, subject: string, version: number, schema: string, schemaType: string): Promise<CompatibilityCheck> =>
     schemaRegistryHandler.CompatibilityVersion(registryId, subject, version, schema, schemaType) as never,
   deleteSubject: (registryId: string, subject: string, permanent?: boolean): Promise<void> =>
@@ -310,6 +317,10 @@ export const connectApi = {
       : connectHandler.Resume(clusterId, name)) as never,
   createConnector: (input: CreateConnectorInput): Promise<void> => connectHandler.CreateConnector(input) as never,
   removeConnector: (clusterId: string, name: string): Promise<void> => connectHandler.DeleteConnector(clusterId, name) as never,
+  updateConnector: (clusterId: string, name: string, config: Record<string, string>): Promise<void> =>
+    connectHandler.UpdateConnector(clusterId, name, config) as never,
+  restartTask: (clusterId: string, name: string, taskId: number): Promise<void> =>
+    connectHandler.RestartTask(clusterId, name, taskId) as never,
 };
 
 export const settingsApi = {
@@ -330,6 +341,8 @@ export const systemApi = {
     systemHandler.PickOpenFile(title, pattern) as never,
   pickSaveFile: (title: string, defaultName: string, pattern: string): Promise<string> =>
     systemHandler.PickSaveFile(title, defaultName, pattern) as never,
+  // Content reader for files the user just picked (schema uploads, imports).
+  readTextFile: (path: string): Promise<string> => systemHandler.ReadTextFile(path) as never,
   checkUpdate: (repo: string): Promise<UpdateCheck> => systemHandler.CheckUpdate(repo) as never,
   stageUpdate: (repo: string, assetUrl: string, assetSize: number, requestId: string): Promise<void> =>
     systemHandler.StageUpdate(repo, assetUrl, assetSize, requestId) as never,

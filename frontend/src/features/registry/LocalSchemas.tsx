@@ -115,7 +115,7 @@ export function LocalSchemas() {
             </pre>
           </div>
         ) : (
-          <EmptyState icon={<BookMarked size={20} />} title={t("reg.localHint")} desc={t("reg.localOnlyAvro")} />
+          <EmptyState icon={<BookMarked size={20} />} title={t("reg.localHint")} desc={t("reg.localAllTypes")} />
         )}
       </div>
       {ctxMenu}

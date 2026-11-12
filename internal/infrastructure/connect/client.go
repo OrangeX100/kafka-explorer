@@ -341,3 +341,15 @@ func (c *Client) CreateConnector(ctx context.Context, name string, config map[st
 func (c *Client) DeleteConnector(ctx context.Context, name string) error {
 	return c.do(ctx, http.MethodDelete, "/connectors/"+name, nil)
 }
+
+// UpdateConnectorConfig replaces a connector's config (PUT …/config). The
+// cluster re-generates tasks; some clusters reject the update with 409
+// while the connector has failed tasks or must be paused first.
+func (c *Client) UpdateConnectorConfig(ctx context.Context, name string, config map[string]string) error {
+	return c.do(ctx, http.MethodPut, "/connectors/"+name+"/config", config)
+}
+
+// RestartTask restarts ONE task of a connector (not the whole connector).
+func (c *Client) RestartTask(ctx context.Context, name string, taskID int) error {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/connectors/%s/tasks/%d/restart", name, taskID), nil)
+}

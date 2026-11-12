@@ -2,6 +2,8 @@ package wails
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -112,6 +114,29 @@ func (h *SystemHandler) PickOpenFile(ctx context.Context, title, pattern string)
 		dlg = dlg.AddFilter("文件", pattern)
 	}
 	return promptSingleSelection(dlg.PromptForSingleSelection())
+}
+
+// ReadTextFile reads a UTF-8 text file the user just picked (schema uploads,
+// import payloads). The path is user-selected via PickOpenFile, not typed —
+// this is a content reader, not an arbitrary file accessor, and oversized
+// reads are rejected before memory is committed.
+func (h *SystemHandler) ReadTextFile(ctx context.Context, path string) (string, error) {
+	const maxTextFile = 8 << 20 // 8 MB: any schema or import payload fits
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("读取文件失败：%v", err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s 是目录，不是文件", filepath.Base(path))
+	}
+	if info.Size() > maxTextFile {
+		return "", fmt.Errorf("文件过大（%d MB），文本读取上限 8 MB", info.Size()/(1<<20))
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("读取文件失败：%v", err)
+	}
+	return string(raw), nil
 }
 
 // CloseToTray is the ✕ button's backend: hide-to-tray or quit per settings.

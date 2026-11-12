@@ -45,6 +45,12 @@ export interface SchemaVersion {
   schema: string;
 }
 
+/** What a successful schema registration assigns (both ids are stable once set). */
+export interface SchemaRegisterResult {
+  id: number;
+  version: number;
+}
+
 export interface CompatibilityCheck {
   isCompatible: boolean;
   messages?: string[];

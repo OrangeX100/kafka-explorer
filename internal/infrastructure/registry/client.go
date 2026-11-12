@@ -64,14 +64,15 @@ func (c *Client) raw(ctx context.Context, method, path string, body any, out any
 		return fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		// Registry errors carry {"error_code":N,"message":"..."}; surface the message.
+		// Registry errors carry {"error_code":N,"message":"..."}; surface the
+		// message AND the status (typed, so callers can branch on 409/422).
 		var se struct {
 			Message string `json:"message"`
 		}
 		if json.Unmarshal(data, &se) == nil && se.Message != "" {
-			return fmt.Errorf("registry %d: %s", resp.StatusCode, se.Message)
+			return &RegistryAPIError{Code: resp.StatusCode, Message: se.Message}
 		}
-		return fmt.Errorf("registry %d: %s", resp.StatusCode, truncate(string(data), 200))
+		return &RegistryAPIError{Code: resp.StatusCode, Message: truncate(string(data), 200)}
 	}
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {
@@ -86,6 +87,21 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// RegistryAPIError is a non-2xx registry response carrying the registry's
+// own error text. Error() keeps the exact wording every existing caller
+// prints; status-based branching uses errors.As.
+type RegistryAPIError struct {
+	Code    int
+	Message string
+}
+
+func (e *RegistryAPIError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("registry %d: %s", e.Code, e.Message)
+	}
+	return fmt.Sprintf("registry %d", e.Code)
 }
 
 // TestConnection verifies the registry answers and returns an identity
@@ -269,6 +285,26 @@ func (c *Client) CheckCompatibilityVersion(ctx context.Context, subject string, 
 		return domain.CompatibilityCheck{}, err
 	}
 	return domain.CompatibilityCheck{IsCompatible: out.IsCompatible, Messages: out.Messages}, nil
+}
+
+// RegisterSchema registers one schema version on a subject and returns the
+// assigned (schema id, subject version). Empty schemaType means AVRO — the
+// request then omits the field entirely, matching what every serializer
+// sends. A 409/422 from the registry surfaces as a *RegistryAPIError so the
+// service layer can translate it into a compatibility-conflict message.
+func (c *Client) RegisterSchema(ctx context.Context, subject, schema, schemaType string) (int, int, error) {
+	body := map[string]any{"schema": schema}
+	if schemaType != "" && schemaType != "AVRO" {
+		body["schemaType"] = schemaType
+	}
+	var out struct {
+		ID      int `json:"id"`
+		Version int `json:"version"`
+	}
+	if err := c.raw(ctx, http.MethodPost, "/subjects/"+subject+"/versions", body, &out); err != nil {
+		return 0, 0, err
+	}
+	return out.ID, out.Version, nil
 }
 
 // SchemaByID resolves one schema id to (schema, type). Avro omits

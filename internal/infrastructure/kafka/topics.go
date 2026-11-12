@@ -241,6 +241,43 @@ func (c *Client) DeleteTopic(ctx context.Context, name string) error {
 	return nil
 }
 
+// IncreasePartitions grows a topic's partition count to target. Kafka only
+// ever allows GROWING a topic (shrinkage is a wire-level rejection), so the
+// live count is fetched first and a shrink attempt gets a friendly error
+// before any request leaves the client. The broker chooses the replica
+// assignment for the new partitions (fine-grained reassignment is out of
+// scope for this path).
+func (c *Client) IncreasePartitions(ctx context.Context, topic string, target int32) error {
+	if target < 1 {
+		return fmt.Errorf("%w: 目标分区数必须为正数，收到 %d", domain.ErrInvalid, target)
+	}
+	md, err := c.adm.Metadata(ctx, topic)
+	if err != nil {
+		return mapErr(err)
+	}
+	t, ok := md.Topics[topic]
+	if !ok {
+		return fmt.Errorf("%w: 主题 %s 不存在", domain.ErrInvalid, topic)
+	}
+	if t.Err != nil {
+		return mapErr(fmt.Errorf("fetch topic %s: %w", topic, t.Err))
+	}
+	current := int32(len(t.Partitions))
+	if target <= current {
+		return fmt.Errorf("%w: 目标分区数 %d 必须大于当前分区数 %d（Kafka 不允许减少分区）", domain.ErrInvalid, target, current)
+	}
+	resps, err := c.adm.UpdatePartitions(ctx, int(target), topic)
+	if err != nil {
+		return mapErr(err)
+	}
+	for _, r := range resps {
+		if r.Err != nil {
+			return mapErr(fmt.Errorf("increase partitions on %s to %d: %w", topic, target, r.Err))
+		}
+	}
+	return nil
+}
+
 // AlterTopicConfig sets topic configs; a nil value sends an explicit
 // DELETE op, removing the topic-level override so the broker default
 // applies again.

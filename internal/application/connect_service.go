@@ -174,6 +174,54 @@ func (s *ConnectService) Restart(ctx context.Context, clusterID, name string) er
 	return c.RestartConnector(ctx, name)
 }
 
+// RestartTask restarts ONE failed task — the narrower fix when a single
+// task is stuck while the connector itself is healthy.
+func (s *ConnectService) RestartTask(ctx context.Context, clusterID, name string, taskID int) error {
+	c, err := s.clusterFor(ctx, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := c.RestartTask(ctx, name, taskID); err != nil {
+		var api *connect.APIError
+		if errors.As(err, &api) && api.Code == http.StatusNotFound {
+			return fmt.Errorf("任务不存在（连接器可能已被删除或重建），刷新后重试")
+		}
+		return err
+	}
+	return nil
+}
+
+// UpdateConnector replaces a connector's config (PUT …/config). 409 means
+// the cluster refused the update — most often failed tasks or a paused
+// connector, so the message points the user at the pause/restart levers.
+func (s *ConnectService) UpdateConnector(ctx context.Context, clusterID, name string, config map[string]string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("连接器名称不能为空")
+	}
+	if config["connector.class"] == "" {
+		return fmt.Errorf("缺少 connector.class：配置必须保留该字段")
+	}
+	c, err := s.clusterFor(ctx, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := c.UpdateConnectorConfig(ctx, name, config); err != nil {
+		var api *connect.APIError
+		if errors.As(err, &api) {
+			switch api.Code {
+			case http.StatusConflict:
+				return fmt.Errorf("集群拒绝更新「%s」的配置：存在失败任务或连接器需先暂停后再更新（%s）", name, api.Message)
+			case http.StatusBadRequest:
+				return fmt.Errorf("Connect 拒绝了配置（%s）", api.Message)
+			case http.StatusNotFound:
+				return fmt.Errorf("连接器「%s」不存在（可能已被删除），刷新列表即可", name)
+			}
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *ConnectService) Pause(ctx context.Context, clusterID, name string) error {
 	c, err := s.clusterFor(ctx, clusterID)
 	if err != nil {
