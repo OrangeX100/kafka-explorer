@@ -46,13 +46,16 @@ jobs:
             VERSIONINFOVERSION="$VERSION.0" \
             RELEASE_REPO="${GITHUB_REPOSITORY}"
 
-      - name: Checksum
+      - name: Versioned asset + checksum
         shell: bash
         working-directory: bin/installer
         run: |
-          SHA=$(certutil -hashfile KafkaExplorer_Setup.exe SHA256 | sed -n 2p | tr -d ' ')
-          echo "$SHA  KafkaExplorer_Setup.exe" > KafkaExplorer_Setup.exe.sha256
-          cat KafkaExplorer_Setup.exe.sha256
+          # the versioned name is what users download AND what the in-app
+          # updater pattern-matches — the sidecar must match that name
+          mv KafkaExplorer_Setup.exe "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe"
+          SHA=$(certutil -hashfile "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe" SHA256 | sed -n 2p | tr -d ' ')
+          echo "$SHA  KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe" > "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe.sha256"
+          cat "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe.sha256"
 
       - name: Publish release
         shell: bash
@@ -64,8 +67,5 @@ jobs:
             --title "Kafka Explorer ${GITHUB_REF_NAME#v}" \
             --notes "See the repository README for the full capability list. SHA-256 is in the .sha256 sidecar." \
             --latest \
-            KafkaExplorer_Setup.exe.sha256
-          # rename the asset to the versioned name users expect
-          mv KafkaExplorer_Setup.exe "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe"
-          gh release upload "$GITHUB_REF_NAME" \
-            "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe" --clobber
+            "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe" \
+            "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe.sha256"
