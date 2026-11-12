@@ -33,6 +33,8 @@ jobs:
         run: |
           go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.117
           choco install innosetup -y --no-progress
+          # installer image script needs Pillow; the runner only ships stdlib
+          python -m pip install --quiet --disable-pip-version-check pillow
 
       - name: Build installer
         shell: bash
