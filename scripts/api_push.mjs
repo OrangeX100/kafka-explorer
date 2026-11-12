@@ -75,8 +75,27 @@ if (remoteHead && localAll.includes(remoteHead) && !rebuild) {
   commits = localAll;
   console.log(`full chain replay: ${commits.length} commit(s)${remoteHead ? " (GH_REBUILD)" : " (branch empty)"}`);
 }
+const pushTag = async (targetSha) => {
+  if (!releaseTag) return;
+  try {
+    const tagObj = await gh("POST", `/repos/${repo}/git/tags`, {
+      tag: releaseTag,
+      message: `Release ${releaseTag}`,
+      object: targetSha,
+      type: "commit",
+    });
+    await gh("POST", `/repos/${repo}/git/refs`, { ref: "refs/tags/" + releaseTag, sha: tagObj.sha });
+    console.log(`tag ${releaseTag} created at ${targetSha.slice(0, 8)}`);
+  } catch {
+    await gh("PATCH", `/repos/${repo}/git/refs/tags/${releaseTag}`, { sha: targetSha, force: true });
+    console.log(`tag ${releaseTag} moved to ${targetSha.slice(0, 8)}`);
+  }
+};
+
 if (commits.length === 0) {
-  console.log("nothing to push");
+  console.log("nothing to push; tagging remote head only");
+  await pushTag(remoteHead);
+  console.log("PUSH_DONE");
   process.exit(0);
 }
 
@@ -207,20 +226,5 @@ if (remoteHead) {
   await gh("POST", `/repos/${repo}/git/refs`, { ref: "refs/heads/" + ref, sha: lastRemote });
 }
 console.log(`ref heads/${ref} → ${lastRemote.slice(0, 8)}`);
-
-if (releaseTag) {
-  try {
-    const tagObj = await gh("POST", `/repos/${repo}/git/tags`, {
-      tag: releaseTag,
-      message: `Release ${releaseTag}`,
-      object: lastRemote,
-      type: "commit",
-    });
-    await gh("POST", `/repos/${repo}/git/refs`, { ref: "refs/tags/" + releaseTag, sha: tagObj.sha });
-    console.log(`tag ${releaseTag} created at ${lastRemote.slice(0, 8)}`);
-  } catch {
-    await gh("PATCH", `/repos/${repo}/git/refs/tags/${releaseTag}`, { sha: lastRemote, force: true });
-    console.log(`tag ${releaseTag} moved to ${lastRemote.slice(0, 8)}`);
-  }
-}
+await pushTag(lastRemote);
 console.log("PUSH_DONE");
