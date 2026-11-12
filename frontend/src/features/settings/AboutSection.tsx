@@ -5,7 +5,7 @@ import { systemApi, friendlyError } from "../../shared/api.js";
 import type { AppSettings, AppInfo, UpdateCheck } from "../../shared/contracts-admin.js";
 import { t } from "../../shared/i18n.js";
 import { useCopy } from "../../shared/useCopy.js";
-import { Row, SectionTitle } from "./Section.js";
+import { SectionTitle } from "./Section.js";
 
 type Phase = "idle" | "downloading" | "staged" | "installing";
 
@@ -104,18 +104,6 @@ export function UpdateSection({
     <section className="panel p-3">
       <SectionTitle icon={<Tag size={13} />} text={t("settings.updates")} />
       <div className="space-y-2.5">
-        <Row label={t("settings.updateRepo")} hint={t("settings.updateRepoHint")}>
-          <input
-            className="field !w-52 font-mono"
-            placeholder={t("settings.updateRepoPlaceholder")}
-            value={settings.updateRepo}
-            onChange={(e) => {
-              set("updateRepo", e.target.value);
-              setResult(null);
-              setError("");
-            }}
-          />
-        </Row>
         <label className="flex items-center gap-2 text-xs text-ink-200">
           <input
             type="checkbox"
@@ -129,14 +117,11 @@ export function UpdateSection({
       <div className="mt-3 flex items-center gap-3">
         <button
           className="btn btn-accent"
-          disabled={checking || settings.updateRepo.trim() === ""}
+          disabled={checking}
           onClick={() => void runCheck()}
         >
           {checking ? t("settings.checking") : t("settings.checkNow")}
         </button>
-        {settings.updateRepo.trim() === "" && (
-          <span className="text-10 text-ink-500">{t("settings.updateRepoHint")}</span>
-        )}
       </div>
 
       {error && (

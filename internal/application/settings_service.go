@@ -75,7 +75,7 @@ func DefaultSettings() Settings {
 		FontSize:     14,
 		FontFamily:   "",
 		FontLatin:    "",
-		PageSize:     50, // default: 50 per page 
+		PageSize:     50, // default: 50 per page
 		ShowInternal: true,
 		MaxScan:      100_000,
 		// Release builds stamp their public repo here (see Taskfile); a
@@ -112,6 +112,11 @@ func (s *SettingsService) Get(ctx context.Context) (Settings, error) {
 	// unknown keys are ignored (forward-compatible).
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return DefaultSettings(), nil // corrupt payload -> defaults, never fail the app boot
+	}
+	// An empty stored repo means "use the release's baked-in source" —
+	// JSON keeps the stored "" over the default, so re-apply the fallback.
+	if out.UpdateRepo == "" {
+		out.UpdateRepo = buildinfo.UpdateRepo
 	}
 	return out, nil
 }
