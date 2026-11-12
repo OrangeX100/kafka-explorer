@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"kafkaexplorer/internal/appdir"
@@ -45,9 +47,38 @@ func updatesDir() (string, error) {
 	return p, nil
 }
 
+// downloadMirrors are public read-only accelerators for GitHub release
+// downloads, tried automatically after the direct route stalls — the
+// user never configures anything. Purely additive candidates: the direct
+// URL is always tried first, so networks with good GitHub access are
+// unaffected.
+var downloadMirrors = []string{
+	"https://ghfast.top/",
+	"https://gh-proxy.com/",
+}
+
+// downloadCandidates expands the asset URL into the ordered list of
+// routes to try: direct first, then each mirror prefix. Only GitHub
+// release-download URLs get mirrors (the accelerator path form is
+// prefix + full original URL).
+func downloadCandidates(assetURL string) []string {
+	const ghPrefix = "https://github.com/"
+	if !strings.HasPrefix(assetURL, ghPrefix) {
+		return []string{assetURL}
+	}
+	out := []string{assetURL}
+	for _, m := range downloadMirrors {
+		out = append(out, m+assetURL)
+	}
+	return out
+}
+
 // StageUpdate downloads the setup asset into DataDir/updates with
 // progress ticks. cancelled is polled between chunks — closing it is the
-// stop button, and the .part file is removed so a later retry starts over.
+// stop button, and the .part file is removed so a later retry starts
+// over. Direct GitHub downloads that stall or crawl (typical on CN
+// networks) automatically fall through to the built-in mirrors: the user
+// sees one progress bar and never picks a route.
 func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetSize int64, progress func(Progress), cancelled <-chan struct{}) (string, error) {
 	if runtime.GOOS != "windows" {
 		return "", fmt.Errorf("%w: 自动更新当前仅支持 Windows", domain.ErrInvalid)
@@ -63,9 +94,84 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 	dest := filepath.Join(dir, name)
 	part := dest + ".part"
 
-	// No overall client timeout: a 22MB download on a slow link must be
-	// allowed to finish; cancellation is handled by ctx/cancelled.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
+	var lastErr error
+	for _, route := range downloadCandidates(assetURL) {
+		if _, err := s.tryRoute(ctx, route, assetSize, part, progress, cancelled); err == nil {
+			if err := os.Rename(part, dest); err != nil {
+				os.Remove(part)
+				return "", fmt.Errorf("暂存安装包失败: %w", err)
+			}
+			progress(Progress{Bytes: assetSize, Total: assetSize})
+			return dest, nil
+		}
+		if err == errCancelled || ctx.Err() != nil {
+			os.Remove(part)
+			return "", nil // stop button: not an error
+		}
+		os.Remove(part)
+		lastErr = err // remember; the next route gets a chance
+	}
+	if lastErr != nil {
+		return "", lastErr
+	}
+	return "", fmt.Errorf("%w: 所有下载通道均失败，请检查网络后重试，或到发布页手动下载", domain.ErrUnavailable)
+}
+
+// slowStart is how long a route gets to prove itself: below this rate
+// after slowStartWindow the route is abandoned for the next one.
+var (
+	slowStartBytes  = int64(64 << 10)  // 64KB
+	slowStartWindow = 8 * time.Second  // a route gets this long to prove itself
+	stallTimeout    = 15 * time.Second // no bytes at all for this long → dead route
+)
+
+// tryRoute downloads one route into part (no rename). Errors are
+// classified for the fallback chain: start/cancel errors and stalls are
+// retryable on the next route.
+func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize int64, part string, progress func(Progress), cancelled <-chan struct{}) (string, error) {
+	// routeCtx is cancelled by the watchdog (stall/slow-start) and tears
+	// down the in-flight request; the deferred cancel cleans up after a
+	// healthy completion. The watchdog starts BEFORE the request: a dead
+	// route never returns response headers, and Do would block forever if
+	// the watchdog only started afterwards.
+	routeCtx, routeCancel := context.WithCancel(ctx)
+	defer routeCancel()
+
+	var got atomic.Int64
+	lastNano := atomic.Int64{}
+	started := time.Now()
+
+	ticker := time.NewTicker(150 * time.Millisecond)
+	defer ticker.Stop()
+	watchdogDone := make(chan struct{})
+	go func() {
+		defer close(watchdogDone)
+		for {
+			select {
+			case <-routeCtx.Done():
+				return
+			case <-cancelled:
+				return
+			case <-ticker.C:
+				progress(Progress{Bytes: got.Load(), Total: assetSize})
+				g := got.Load()
+				sinceStart := time.Since(started)
+				switch {
+				case g == 0 && sinceStart > slowStartWindow:
+					routeCancel() // never produced a byte: dead route
+					return
+				case g > 0 && g < slowStartBytes && sinceStart > slowStartWindow:
+					routeCancel() // crawling: under 64KB in the whole window
+					return
+				case g > 0 && g >= slowStartBytes && time.Since(time.Unix(0, lastNano.Load())) > stallTimeout:
+					routeCancel() // bytes stopped moving mid-download
+					return
+				}
+			}
+		}
+	}()
+
+	req, err := http.NewRequestWithContext(routeCtx, http.MethodGet, assetURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -75,11 +181,11 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 		if ctx.Err() != nil {
 			return "", nil // cancelled while connecting: the normal stop
 		}
-		return "", fmt.Errorf("%w: 无法连接更新源", domain.ErrUnavailable)
+		return "", errSlowRoute // this route is unreachable: try the next
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("更新源返回异常状态 %d", resp.StatusCode)
+		return "", fmt.Errorf("下载通道返回异常状态 %d", resp.StatusCode)
 	}
 	if assetSize <= 0 && resp.ContentLength > 0 {
 		assetSize = resp.ContentLength
@@ -89,20 +195,18 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 	if err != nil {
 		return "", fmt.Errorf("创建临时文件失败: %w", err)
 	}
-	ticker := time.NewTicker(150 * time.Millisecond)
-	defer ticker.Stop()
 	done := make(chan error, 1)
 
 	go func() {
 		buf := make([]byte, 64*1024)
-		var got int64
 		for {
 			select {
 			case <-cancelled:
 				done <- errCancelled
 				return
-			case <-ticker.C:
-				progress(Progress{Bytes: got, Total: assetSize})
+			case <-routeCtx.Done():
+				done <- routeCtx.Err()
+				return
 			default:
 			}
 			n, rerr := resp.Body.Read(buf)
@@ -111,7 +215,8 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 					done <- werr
 					return
 				}
-				got += int64(n)
+				got.Add(int64(n))
+				lastNano.Store(time.Now().UnixNano())
 			}
 			if rerr == io.EOF {
 				done <- nil
@@ -131,6 +236,9 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 		if werr == errCancelled || ctx.Err() != nil {
 			return "", nil // stop button: not an error
 		}
+		if werr == errSlowRoute || errors.Is(werr, context.Canceled) {
+			return "", errSlowRoute // watchdog/parent cancelled: next route
+		}
 		return "", fmt.Errorf("%w: 下载中断，请检查网络后重试", domain.ErrUnavailable)
 	}
 	// Size gate: the release metadata promised a byte count; a truncated
@@ -139,11 +247,11 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 		st, statErr := os.Stat(part)
 		if statErr != nil || st.Size() != assetSize {
 			os.Remove(part)
-			got := int64(-1)
+			gotSize := int64(-1)
 			if statErr == nil {
-				got = st.Size()
+				gotSize = st.Size()
 			}
-			return "", fmt.Errorf("下载不完整（%d/%d 字节），请重试", got, assetSize)
+			return "", fmt.Errorf("下载不完整（%d/%d 字节），请重试", gotSize, assetSize)
 		}
 	}
 	// SHA-256 gate: releases publish <asset>.sha256 next to the installer;
@@ -151,24 +259,18 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 	// size-matching downloads and tampering). A missing checksum file keeps
 	// the size gate as the only protection (legacy releases).
 	if want, ok := fetchExpectedChecksum(ctx, assetURL+".sha256"); ok {
-		got, err := fileSHA256(part)
+		digest, err := fileSHA256(part)
 		if err != nil {
 			os.Remove(part)
 			return "", fmt.Errorf("读取已下载文件失败: %w", err)
 		}
-		if got != want {
+		if digest != want {
 			os.Remove(part)
 			return "", fmt.Errorf("安装包校验失败（SHA-256 不匹配），文件可能不完整或被篡改。请到发布页手动下载，或稍后重试")
 		}
 	}
-	if err := os.Rename(part, dest); err != nil {
-		os.Remove(part)
-		return "", fmt.Errorf("暂存安装包失败: %w", err)
-	}
-	progress(Progress{Bytes: assetSize, Total: assetSize})
-	return dest, nil
+	return part, nil
 }
-
 func assetNameFromURL(url string) string {
 	for i := len(url) - 1; i >= 0; i-- {
 		if url[i] == '/' {
@@ -268,3 +370,7 @@ func fileSHA256(path string) (string, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
+
+// Route-quality sentinels: a stalled/crawling route asks the caller to
+// try the next download route (mirrors), distinct from user cancellation.
+var errSlowRoute = fmt.Errorf("route too slow or stalled")

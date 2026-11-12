@@ -5,7 +5,7 @@ import { systemApi, friendlyError } from "../../shared/api.js";
 import type { AppSettings, AppInfo, UpdateCheck } from "../../shared/contracts-admin.js";
 import { t } from "../../shared/i18n.js";
 import { useCopy } from "../../shared/useCopy.js";
-import { Row, SectionTitle } from "./Section.js";
+import { SectionTitle } from "./Section.js";
 
 type Phase = "idle" | "downloading" | "staged" | "installing";
 
@@ -77,11 +77,7 @@ export function UpdateSection({
     setBytes(0);
     setTotal(result.assetSize || 0);
     reqID.current = `u-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    // download accelerator: a configured mirror prefix is applied to the
-    // asset URL only (the API check stays on api.github.com)
-    const mirror = settings.updateMirror.trim().replace(/\/+$/, "");
-    const assetUrl = mirror ? `${mirror}/${result.assetUrl}` : result.assetUrl;
-    void systemApi.stageUpdate(settings.updateRepo.trim(), assetUrl, result.assetSize || 0, reqID.current);
+    void systemApi.stageUpdate(settings.updateRepo.trim(), result.assetUrl, result.assetSize || 0, reqID.current);
   };
 
   const cancelDownload = () => {
@@ -116,14 +112,6 @@ export function UpdateSection({
           />
           {t("settings.autoCheckUpdate")}
         </label>
-        <Row label={t("settings.updateMirror")} hint={t("settings.updateMirrorHint")}>
-          <input
-            className="field !w-64 font-mono"
-            placeholder={t("settings.updateMirrorPlaceholder")}
-            value={settings.updateMirror}
-            onChange={(e) => set("updateMirror", e.target.value)}
-          />
-        </Row>
       </div>
 
       <div className="mt-3 flex items-center gap-3">

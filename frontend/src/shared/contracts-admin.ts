@@ -192,7 +192,6 @@ export interface AppSettings {
   showInternal: boolean;
   maxScan: number;
   updateRepo: string;
-  updateMirror: string;
   autoCheckUpdate: boolean;
   // ✕ hides to the system tray instead of quitting (default on).
   closeToTray: boolean;

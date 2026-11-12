@@ -23,7 +23,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showInternal: false, // internal topics hidden by default: cleaner list
   maxScan: 100000,
   updateRepo: "", // empty = the release-baked source (buildinfo.UpdateRepo)
-  updateMirror: "", // empty = download straight from the release asset
   autoCheckUpdate: true,
   closeToTray: true,
 };

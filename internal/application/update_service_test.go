@@ -15,16 +15,16 @@ func TestVersionLess(t *testing.T) {
 		{"0.2.0", "0.2.1", true},
 		{"0.3.0", "0.2.0", false},
 		{"0.2.0", "0.2.0", false},
-		{"v0.2.0", "0.2.0", false},          // v-prefix + build junk ignored
-		{"0.2.0+build.5", "0.2.0", false},   // build metadata never compares
-		{"10.0.0", "9.9.9", false},          // numeric, not lexical
+		{"v0.2.0", "0.2.0", false},        // v-prefix + build junk ignored
+		{"0.2.0+build.5", "0.2.0", false}, // build metadata never compares
+		{"10.0.0", "9.9.9", false},        // numeric, not lexical
 		// pre-releases sort before their own release
 		{"0.2.0-beta.1", "0.2.0", true},
 		{"0.2.0-beta.9", "0.2.0", true},
 		{"0.2.0-rc.1", "0.2.0", true},
 		// betas iterate within a triple
 		{"0.2.0-beta.1", "0.2.0-beta.2", true},
-		{"0.2.0-beta.2", "0.2.0-beta.10", true},   // numeric: 2 < 10
+		{"0.2.0-beta.2", "0.2.0-beta.10", true}, // numeric: 2 < 10
 		{"0.2.0-beta.2", "0.2.0-beta.1", false},
 		{"0.2.0-beta.1", "0.2.0-beta.1", false},
 		// numeric < alphanumeric identifiers

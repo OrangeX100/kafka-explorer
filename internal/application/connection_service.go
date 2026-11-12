@@ -4,9 +4,9 @@
 package application
 
 import (
-	"strings"
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"kafkaexplorer/internal/domain"

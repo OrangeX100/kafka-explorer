@@ -16,7 +16,6 @@ import (
 	"github.com/hamba/avro/v2"
 
 	"kafkaexplorer/internal/domain"
-
 )
 
 // RegistryClient is the slice of the registry client the decoder needs.

@@ -111,11 +111,11 @@ func (s *MessageService) Find(ctx context.Context, req domain.FindRequest) (Find
 // strings (the frontend encodes); an empty string means empty bytes, an
 // absent field means null key/value respectively.
 type ProduceInput struct {
-	ConnectionID string             `json:"connectionId"`
-	Topic        string             `json:"topic"`
-	Partition    *int32             `json:"partition,omitempty"` // nil = let the client choose
-	Key          *string            `json:"key,omitempty"`
-	Value        *string            `json:"value,omitempty"`
+	ConnectionID string                 `json:"connectionId"`
+	Topic        string                 `json:"topic"`
+	Partition    *int32                 `json:"partition,omitempty"` // nil = let the client choose
+	Key          *string                `json:"key,omitempty"`
+	Value        *string                `json:"value,omitempty"`
 	Headers      []domain.MessageHeader `json:"headers,omitempty"`
 }
 

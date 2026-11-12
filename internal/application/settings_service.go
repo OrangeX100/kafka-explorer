@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
-	"strings"
 
 	"kafkaexplorer/internal/buildinfo"
 	"kafkaexplorer/internal/infrastructure/store"
@@ -27,7 +26,6 @@ type Settings struct {
 	ShowInternal    bool   `json:"showInternal"`    // include __consumer_offsets etc.
 	MaxScan         int    `json:"maxScan"`         // find scan budget
 	UpdateRepo      string `json:"updateRepo"`      // GitHub "owner/repo" the update check queries
-	UpdateMirror    string `json:"updateMirror"`    // optional download-accelerator prefix for release assets
 	AutoCheckUpdate bool   `json:"autoCheckUpdate"` // check once per app boot
 	// CloseToTray: the window ✕ hides to the system tray instead of
 	// quitting. Default true — a management tool keeps its pooled cluster
@@ -83,7 +81,6 @@ func DefaultSettings() Settings {
 		// Release builds stamp their public repo here (see Taskfile); a
 		// user-configured repo (loaded over these defaults below) wins.
 		UpdateRepo:      buildinfo.UpdateRepo,
-		UpdateMirror:    "",
 		AutoCheckUpdate: true,
 		CloseToTray:     true,
 	}
@@ -152,13 +149,6 @@ func (s *SettingsService) Save(ctx context.Context, in Settings) (Settings, erro
 	}
 	// UpdateRepo: either empty (update check disabled) or a GitHub
 	// "owner/repo" pair — anything else would produce a malformed API URL.
-	// UpdateMirror: either empty (download straight from the release) or
-	// a URL prefix for an accelerator service — anything else would mangle
-	// the asset URL, so it resets to the default like UpdateRepo does.
-	if in.UpdateMirror != "" && !strings.HasPrefix(in.UpdateMirror, "http://") && !strings.HasPrefix(in.UpdateMirror, "https://") {
-		in.UpdateMirror = ""
-	}
-	in.UpdateMirror = strings.TrimSuffix(in.UpdateMirror, "/")
 	if in.UpdateRepo != "" && !updateRepoRe.MatchString(in.UpdateRepo) {
 		in.UpdateRepo = ""
 	}
