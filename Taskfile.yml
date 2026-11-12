@@ -65,6 +65,9 @@ tasks:
       # Inno engine FIRST: the setup front-end EMBEDS it (go:embed all:engine
       # in cmd/setup) so the release stays a single self-contained exe.
       - '"{{.ISCC}}" /DVersion={{.VERSION}} /DVersionInfoVersion={{.VERSIONINFOVERSION}} build/installer/installer.iss'
+      # the engine dir is gitignored whole — create it before the copy (clean
+      # checkouts lack it; local builds always have it with the last engine)
+      - mkdir -p cmd/setup/engine
       - cmd /c copy /y "bin\installer\KafkaExplorer_Setup_{{.VERSION}}.exe" "cmd\setup\engine\KafkaExplorer_Engine.exe"
       # custom setup front-end (Wails app): BECOMES the distributable — it
       # extracts the embedded engine and runs it silently (direct spawn,
