@@ -77,7 +77,10 @@ func (s *UpdateService) Check(ctx context.Context, repo string) (UpdateCheck, er
 	defer resp.Body.Close()
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
-		return UpdateCheck{}, fmt.Errorf("%w: 更新源 %s 尚无发布版本（releases 为空）", domain.ErrNotFound, repo)
+		// GitHub answers 404 for BOTH "no releases yet" and "private repo,
+		// unauthenticated" — the latter is the normal state while the
+		// project is still private.
+		return UpdateCheck{}, fmt.Errorf("%w: 更新源 %s 尚无发布版本，或仓库仍为私有（转公开后即可检查）", domain.ErrNotFound, repo)
 	case resp.StatusCode == http.StatusForbidden:
 		return UpdateCheck{}, fmt.Errorf("%w: 更新源请求被限流，请稍后再试", domain.ErrUnavailable)
 	case resp.StatusCode != http.StatusOK:
@@ -130,33 +133,69 @@ func (s *UpdateService) Check(ctx context.Context, repo string) (UpdateCheck, er
 	return out, nil
 }
 
-// versionLess reports whether a < b comparing leading numeric triples
-// ("0.1.0-dev" → 0.1.0; "v1.2.3" → 1.2.3). Non-numeric residue after the
-// third component is ignored, so pre-release suffixes never compare.
+// versionLess reports whether a < b by full semver precedence:
+// numeric triples first, then release > pre-release of the same triple,
+// then identifier-wise pre-release comparison — so 0.2.0-beta.1 <
+// 0.2.0-beta.2 < 0.2.0 all hold, and iterating betas is visible to the
+// update check (the old triple-only compare called every 0.2.0-* equal).
 func versionLess(a, b string) bool {
-	as, bs := semverTriple(a), semverTriple(b)
-	for i := 0; i < 3; i++ {
-		if as[i] != bs[i] {
-			return as[i] < bs[i]
-		}
-	}
-	return false
+	return semverLess(parseSemver(a), parseSemver(b))
 }
 
-func semverTriple(v string) [3]int {
-	var out [3]int
+// semverKey is a parsed version: the numeric triple plus pre-release
+// identifiers (nil = a release, which semver sorts AFTER every
+// pre-release of the same triple). Build metadata ("+…") never compares.
+type semverKey struct {
+	triple [3]int
+	pre    []string
+}
+
+func parseSemver(v string) semverKey {
+	var k semverKey
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
-	for i, part := range strings.SplitN(v, ".", 3) {
-		if i >= 3 {
-			break
-		}
-		n, ok := leadingInt(part)
-		if !ok {
-			break
-		}
-		out[i] = n
+	if i := strings.IndexByte(v, '+'); i >= 0 {
+		v = v[:i] // build metadata is ignored for precedence
 	}
-	return out
+	if i := strings.IndexByte(v, '-'); i >= 0 {
+		k.pre = strings.Split(v[i+1:], ".")
+		v = v[:i]
+	}
+	for i, part := range strings.SplitN(v, ".", 3) {
+		n, _ := leadingInt(part)
+		k.triple[i] = n
+	}
+	return k
+}
+
+func semverLess(a, b semverKey) bool {
+	for i := 0; i < 3; i++ {
+		if a.triple[i] != b.triple[i] {
+			return a.triple[i] < b.triple[i]
+		}
+	}
+	switch {
+	case len(a.pre) == 0 && len(b.pre) == 0:
+		return false
+	case len(a.pre) == 0:
+		return false // a is the release of the shared triple
+	case len(b.pre) == 0:
+		return true // b is the release, a is a pre-release of it
+	}
+	for i := 0; i < len(a.pre) && i < len(b.pre); i++ {
+		anNum, aNum := leadingInt(a.pre[i])
+		bnNum, bNum := leadingInt(b.pre[i])
+		switch {
+		case aNum && bNum:
+			if anNum != bnNum {
+				return anNum < bnNum
+			}
+		case aNum != bNum:
+			return aNum // numeric identifiers sort below alphanumeric
+		case a.pre[i] != b.pre[i]:
+			return a.pre[i] < b.pre[i]
+		}
+	}
+	return len(a.pre) < len(b.pre) // a prefix list sorts before a longer one
 }
 
 func leadingInt(s string) (int, bool) {
