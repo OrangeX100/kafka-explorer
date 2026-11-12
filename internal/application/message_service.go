@@ -10,14 +10,19 @@ import (
 	"kafkaexplorer/internal/infrastructure/kafka"
 )
 
-// decodeAdapter bridges the fetcher signature to the decode package.
-type decodeAdapter struct{ f registrySchemaFetcher }
+// decodeAdapter bridges the fetcher signature to the decode package. It
+// carries the connection id of the browse request so the fetcher can pick
+// the registry bound to THAT cluster (connection-level binding).
+type decodeAdapter struct {
+	connID string
+	f      registrySchemaFetcher
+}
 
 func (a decodeAdapter) SchemaByID(ctx context.Context, id int) (string, string, error) {
 	if a.f == nil {
 		return "", "", fmt.Errorf("no schema registry connection for this cluster")
 	}
-	return a.f(ctx, id)
+	return a.f(ctx, a.connID, id)
 }
 
 func base64DecodeBytes(s string) ([]byte, error) {
@@ -33,8 +38,9 @@ type MessageService struct {
 	decoder registrySchemaFetcher
 }
 
-// registrySchemaFetcher resolves a Confluent schema id to (schema, type).
-type registrySchemaFetcher func(ctx context.Context, id int) (string, string, error)
+// registrySchemaFetcher resolves a Confluent schema id to (schema, type)
+// for one connection (the caller's connection id routes the registry).
+type registrySchemaFetcher func(ctx context.Context, connectionID string, id int) (string, string, error)
 
 // SetSchemaFetcher wires the registry lookup used by value decoding
 // (nil = decoding falls back to JSON/text only).
@@ -70,7 +76,7 @@ func (s *MessageService) Browse(ctx context.Context, req domain.BrowseRequest) (
 	// 0x00, e.g. every __consumer_offsets record) instead of degrading.
 	var registry decode.RegistryClient
 	if fetcher != nil {
-		registry = decodeAdapter{fetcher}
+		registry = decodeAdapter{req.ConnectionID, fetcher}
 	}
 	for i := range page.Messages {
 		raw, decErr := base64DecodeBytes(page.Messages[i].Value)

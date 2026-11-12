@@ -170,8 +170,9 @@ func (h *MessageHandler) Browse(ctx context.Context, req domain.BrowseRequest) (
 }
 
 // SetDecodeFetcher wires the Schema Registry schema-id lookup into message
-// browsing (bootstrap calls this once after both services exist).
-func (h *MessageHandler) SetDecodeFetcher(fetcher func(ctx context.Context, id int) (string, string, error)) {
+// browsing (bootstrap calls this once after both services exist). The
+// connection id routes the lookup to the registry bound to that cluster.
+func (h *MessageHandler) SetDecodeFetcher(fetcher func(ctx context.Context, connectionID string, id int) (string, string, error)) {
 	h.svc.SetSchemaFetcher(fetcher)
 }
 

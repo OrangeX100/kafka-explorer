@@ -11,6 +11,8 @@ export interface SchemaRegistry {
   url: string;
   username?: string;
   secretRef?: string;
+  /** Cluster binding: decoding on this connection resolves here first. Empty = global fallback. */
+  connectionId?: string;
   createdAt?: string;
   updatedAt?: string;
 }

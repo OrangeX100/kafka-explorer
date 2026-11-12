@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { FileCode, PlugZap, Plus, Trash2, Copy, Pencil, RefreshCw } from "lucide-react";
-import { registryApi } from "../../shared/api.js";
+import { connectionsApi, registryApi } from "../../shared/api.js";
 import { friendlyError } from "../../shared/api.js";
 import { useToast } from "../../state/stores.js";
 import { t } from "../../shared/i18n.js";
@@ -37,7 +37,13 @@ export function RegistryView() {
   const [selected, setSelected] = useState<SchemaSubject | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<SchemaRegistry | null>(null);
+  // connections resolve binding badges (registry → cluster name)
+  const [connections, setConnections] = useState<{ id: string; name: string }[]>([]);
   const toast = { show: useToast((s) => s.show) };
+
+  useEffect(() => {
+    connectionsApi.list().then((c) => setConnections(c ?? [])).catch(() => setConnections([]));
+  }, []);
 
   const load = useCallback(async () => {
     setRegistries(null);
@@ -181,6 +187,14 @@ export function RegistryView() {
                   />
                   <FileCode size={13} className="flex-none text-ink-400" />
                   <span className="flex-1 truncate">{r.name}</span>
+                  {r.connectionId && (
+                    <span
+                      className="flex-none rounded bg-accent-muted px-1.5 py-0.5 text-10 text-accent"
+                      title={t("reg.boundTo", connections.find((c) => c.id === r.connectionId)?.name ?? r.connectionId)}
+                    >
+                      {connections.find((c) => c.id === r.connectionId)?.name ?? r.connectionId}
+                    </span>
+                  )}
                   <span className="flex-none opacity-0 transition-opacity group-hover:opacity-100">
                     <button
                       className="text-ink-400 hover:text-ink-100"

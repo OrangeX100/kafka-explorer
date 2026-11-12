@@ -21,7 +21,7 @@ func NewWrapper(db *sql.DB) *DBWrapper { return &DBWrapper{sqlDB: db} }
 
 func (w *DBWrapper) ListRegistries(ctx context.Context) ([]domain.SchemaRegistry, error) {
 	rows, err := w.sqlDB.QueryContext(ctx, `
-		SELECT id, name, url, username, secret_ref, created_at, updated_at
+		SELECT id, name, url, username, secret_ref, connection_id, created_at, updated_at
 		FROM schema_registries ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -30,13 +30,14 @@ func (w *DBWrapper) ListRegistries(ctx context.Context) ([]domain.SchemaRegistry
 	out := []domain.SchemaRegistry{}
 	for rows.Next() {
 		var r domain.SchemaRegistry
-		var username, secretRef sql.NullString
+		var username, secretRef, connectionID sql.NullString
 		var created, updated int64
-		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &username, &secretRef, &created, &updated); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &username, &secretRef, &connectionID, &created, &updated); err != nil {
 			return nil, err
 		}
 		r.Username = username.String
 		r.SecretRef = secretRef.String
+		r.ConnectionID = connectionID.String
 		if ft := flexFromUnix(created); ft != nil {
 			r.CreatedAt = *ft
 		}
@@ -51,14 +52,17 @@ func (w *DBWrapper) ListRegistries(ctx context.Context) ([]domain.SchemaRegistry
 func (w *DBWrapper) SaveRegistry(ctx context.Context, r domain.SchemaRegistry) (domain.SchemaRegistry, error) {
 	now := time.Now().Unix()
 	_, err := w.sqlDB.ExecContext(ctx, `
-		INSERT INTO schema_registries (id, name, url, username, secret_ref, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?)
+		INSERT INTO schema_registries (id, name, url, username, secret_ref, connection_id, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name, url=excluded.url,
 			username=COALESCE(excluded.username, schema_registries.username),
 			secret_ref=COALESCE(excluded.secret_ref, schema_registries.secret_ref),
+			-- binding clears when the user empties it, unlike the COALESCEd
+			-- secret fields (clearing those is not a form action)
+			connection_id=excluded.connection_id,
 			updated_at=excluded.updated_at`,
-		r.ID, r.Name, r.URL, nullIfEmpty(r.Username), nullIfEmpty(r.SecretRef), now, now)
+		r.ID, r.Name, r.URL, nullIfEmpty(r.Username), nullIfEmpty(r.SecretRef), nullIfEmpty(r.ConnectionID), now, now)
 	return r, err
 }
 

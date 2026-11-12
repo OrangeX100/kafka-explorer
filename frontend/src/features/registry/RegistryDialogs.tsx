@@ -1,16 +1,18 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PlugZap } from "lucide-react";
 import { Modal } from "../common/Modal.js";
 import { Select } from "../common/controls.js";
-import { registryApi } from "../../shared/api.js";
+import { connectionsApi, registryApi } from "../../shared/api.js";
 import { friendlyError } from "../../shared/api.js";
 import { useToast } from "../../state/stores.js";
 import { t } from "../../shared/i18n.js";
+import type { Connection } from "../../shared/contracts.js";
 import type { LocalSchema, SchemaRegistry } from "../../shared/contracts-admin.js";
 
 // RegistryDialog: create AND edit a registry connection. In edit mode the
 // password field stays empty (the stored secret is kept unless the user
-// types a replacement) — write-only like the SASL connection form.
+// types a replacement) — write-only like the SASL connection form. The
+// cluster binding picks WHICH connection decodes through this registry.
 export function RegistryDialog({
   existing,
   onClose,
@@ -24,15 +26,22 @@ export function RegistryDialog({
   const [url, setUrl] = useState(existing?.url ?? "");
   const [username, setUsername] = useState(existing?.username ?? "");
   const [password, setPassword] = useState("");
+  const [connectionId, setConnectionId] = useState(existing?.connectionId ?? "");
+  const [connections, setConnections] = useState<Connection[] | null>(null);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const toast = { show: useToast((s) => s.show) };
+
+  useEffect(() => {
+    connectionsApi.list().then((c) => setConnections(c ?? [])).catch(() => setConnections([]));
+  }, []);
 
   const form = (): SchemaRegistry => ({
     id: existing?.id ?? "",
     name: name.trim(),
     url: url.trim(),
     username: username.trim() || undefined,
+    connectionId: connectionId || undefined,
   });
 
   const save = async () => {
@@ -86,6 +95,20 @@ export function RegistryDialog({
               />
             </label>
           </div>
+          <label className="block">
+            <span className="mb-1 block text-11 text-ink-300">{t("reg.bindConnection")}</span>
+            <div className="min-h-[26px]">
+              <Select
+                value={connectionId}
+                options={[
+                  { value: "", label: t("reg.bindNone") },
+                  ...(connections ?? []).map((c) => ({ value: c.id, label: c.name })),
+                ]}
+                onChange={(v) => setConnectionId(v)}
+              />
+            </div>
+            <span className="mt-1 block text-10 text-ink-400">{t("reg.bindHint")}</span>
+          </label>
           {result && (
             <div
               className={`rounded border px-2.5 py-2 text-11 selectable ${

@@ -131,34 +131,42 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 	app.RegisterService(application.NewService(wails.NewSettingsHandler(settingsSvc, backupSvc, log)))
 
 	// Value decoding: message browsing resolves Confluent schema ids through
-	// the FIRST saved registry (the common one-registry setup; multi-registry
-	// routing per connection is deferred until a real need shows up).
+	// the registry bound to the browsed CONNECTION (binding picked in
+	// pickRegistryFor); unbound registries stay the global fallback so the
+	// common one-registry setup keeps working unchanged.
 	msgHandler := wails.NewMessageHandler(msgSvc, log)
 	// Schema cache: decode=auto resolves a schema id PER RECORD and every
 	// miss is an HTTP round trip to the registry — a 60-row page was 60
 	// calls. Distinct schemas are few; cache forever (Confluent ids are
-	// immutable: an id IS the schema, never invalidated).
+	// immutable: an id IS the schema, never invalidated). Keyed by
+	// registry/id: the same numeric id means DIFFERENT schemas across
+	// registries once connections bind their own.
 	var schemaMu sync.Mutex
-	schemaCache := map[int]struct {
+	schemaCache := map[string]struct {
 		schema, typ string
 	}{}
-	msgHandler.SetDecodeFetcher(func(ctx context.Context, id int) (string, string, error) {
-		schemaMu.Lock()
-		if hit, ok := schemaCache[id]; ok {
-			schemaMu.Unlock()
-			return hit.schema, hit.typ, nil
-		}
-		schemaMu.Unlock()
+	msgHandler.SetDecodeFetcher(func(ctx context.Context, connectionID string, id int) (string, string, error) {
 		registries, err := registrySvc.List(ctx)
 		if err != nil || len(registries) == 0 {
 			return "", "", fmt.Errorf("no schema registry configured")
 		}
-		schema, typ, err := registrySvc.SchemaByID(ctx, registries[0].ID, id)
+		reg := pickRegistryFor(registries, connectionID)
+		if reg == nil {
+			return "", "", fmt.Errorf("当前连接未绑定 Schema Registry，且没有未绑定的全局 Registry 可用（请在「Schema Registry」页为该集群绑定一个）")
+		}
+		cacheKey := fmt.Sprintf("%s/%d", reg.ID, id)
+		schemaMu.Lock()
+		if hit, ok := schemaCache[cacheKey]; ok {
+			schemaMu.Unlock()
+			return hit.schema, hit.typ, nil
+		}
+		schemaMu.Unlock()
+		schema, typ, err := registrySvc.SchemaByID(ctx, reg.ID, id)
 		if err != nil {
 			return "", "", err
 		}
 		schemaMu.Lock()
-		schemaCache[id] = struct{ schema, typ string }{schema, typ}
+		schemaCache[cacheKey] = struct{ schema, typ string }{schema, typ}
 		schemaMu.Unlock()
 		return schema, typ, nil
 	})

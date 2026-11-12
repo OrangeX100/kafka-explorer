@@ -10,8 +10,12 @@ type SchemaRegistry struct {
 	URL       string    `json:"url"` // http(s)://host:port
 	Username  string    `json:"username,omitempty"`
 	SecretRef string    `json:"secretRef,omitempty"` // basic-auth password reference
-	CreatedAt FlexTime  `json:"createdAt,omitempty"`
-	UpdatedAt FlexTime  `json:"updatedAt,omitempty"`
+	// ConnectionID binds the registry to one cluster: message decoding on
+	// that connection resolves schema ids HERE first. Empty = global
+	// fallback (serves any connection without its own binding).
+	ConnectionID string   `json:"connectionId,omitempty"`
+	CreatedAt    FlexTime `json:"createdAt,omitempty"`
+	UpdatedAt    FlexTime `json:"updatedAt,omitempty"`
 }
 
 func (r SchemaRegistry) Validate() error {
