@@ -47,6 +47,9 @@ jobs:
           [ -f "$ISCC_PATH" ] || ISCC_PATH="$LOCALAPPDATA/Programs/Inno Setup 6/ISCC.exe"
           ISCC_PATH=$(cygpath -m "$ISCC_PATH")
           echo "ISCC: $ISCC_PATH"
+          # wails TS bindings are a gitignored generated artifact; the gate
+          # regenerates them before every build, installer alone does not
+          wails3 task generate:bindings
           VERSION="${GITHUB_REF_NAME#v}"
           wails3 task installer VERSION="$VERSION" \
             VERSIONINFOVERSION="$VERSION.0" \
