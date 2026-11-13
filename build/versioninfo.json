@@ -4,13 +4,13 @@
     "FileVersion": {
       "Major": 0,
       "Minor": 4,
-      "Micro": 2,
+      "Micro": 3,
       "Patch": 0
     },
     "ProductVersion": {
       "Major": 0,
       "Minor": 4,
-      "Micro": 2,
+      "Micro": 3,
       "Patch": 0
     },
     "FileFlagsMask": "3f",
@@ -23,12 +23,12 @@
     "Comments": "Kafka cluster explorer: topics, messages and consumer groups",
     "CompanyName": "Kafka Explorer",
     "FileDescription": "Kafka Explorer - Kafka 集群可视化管理工具",
-    "FileVersion": "0.4.2",
+    "FileVersion": "0.4.3",
     "InternalName": "kafka-explorer",
     "LegalCopyright": "Copyright (C) 2026 Kafka Explorer contributors",
     "OriginalFilename": "kafka-explorer.exe",
     "ProductName": "Kafka Explorer",
-    "ProductVersion": "0.4.2"
+    "ProductVersion": "0.4.3"
   },
   "VarFileInfo": {
     "Translation": {

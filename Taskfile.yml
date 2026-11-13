@@ -45,7 +45,7 @@ tasks:
       - go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0 -o app_windows.syso -manifest build/app.manifest build/versioninfo.json
       - go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version={{.VERSION}} -X kafkaexplorer/internal/buildinfo.Commit={{.COMMIT}} -X kafkaexplorer/internal/buildinfo.UpdateRepo={{.RELEASE_REPO}}" -o bin/kafka-explorer.exe .
     vars:
-      VERSION: '{{.VERSION | default "0.4.2"}}'
+      VERSION: '{{.VERSION | default "0.4.3"}}'
       # the public GitHub repo (owner/repo) release builds check for
       # updates; override with `task build RELEASE_REPO=owner/repo`
       RELEASE_REPO: '{{.RELEASE_REPO | default "OrangeX100/kafka-explorer"}}'
@@ -86,8 +86,8 @@ tasks:
       - cmd /c copy /y "bin\installer\KafkaExplorer_Setup.exe" "bin\installer\KafkaExplorer_Setup_{{.VERSION}}.exe"
       - certutil -hashfile bin/installer/KafkaExplorer_Setup.exe SHA256
     vars:
-      VERSION: '{{.VERSION | default "0.4.2"}}'
-      VERSIONINFOVERSION: '{{.VERSIONINFOVERSION | default "0.4.2.0"}}'
+      VERSION: '{{.VERSION | default "0.4.3"}}'
+      VERSIONINFOVERSION: '{{.VERSIONINFOVERSION | default "0.4.3.0"}}'
       # Default = the machine-wide choco install location. The release
       # workflow probes both choco and per-user locations and passes ISCC=
       # explicitly — do NOT replace this with a vars sh: probe: go-task runs
