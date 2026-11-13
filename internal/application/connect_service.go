@@ -50,7 +50,29 @@ func (s *ConnectService) Save(ctx context.Context, c domain.ConnectCluster) (dom
 }
 
 func (s *ConnectService) Delete(ctx context.Context, id string) error {
-	return s.store.db.DeleteConnectCluster(ctx, id)
+	// Read the row first: the credential ref is only reachable from it. Row
+	// first, credential after — a non-"not found" keyring failure surfaces so
+	// a leftover credential never looks like a silent leak.
+	clusters, err := s.store.db.ListConnectClusters(ctx)
+	if err != nil {
+		return err
+	}
+	var ref string
+	for _, c := range clusters {
+		if c.ID == id {
+			ref = c.SecretRef
+			break
+		}
+	}
+	if err := s.store.db.DeleteConnectCluster(ctx, id); err != nil {
+		return err
+	}
+	if ref != "" && s.secrets != nil {
+		if err := s.secrets.Delete("kafka-explorer", ref); err != nil {
+			return fmt.Errorf("条目已删除，但其凭据未能从系统凭据存储移除（%v）；可在系统凭据管理器中手动清理", err)
+		}
+	}
+	return nil
 }
 
 // clusterFor builds a client for a saved endpoint id.
@@ -61,7 +83,11 @@ func (s *ConnectService) clusterFor(ctx context.Context, id string) (*connect.Cl
 	}
 	for _, c := range clusters {
 		if c.ID == id {
-			return connect.New(c.URL, c.Username, s.storedPassword(c.SecretRef)), nil
+			pass, err := s.storedPassword(c.SecretRef)
+			if err != nil {
+				return nil, err
+			}
+			return connect.New(c.URL, c.Username, pass), nil
 		}
 	}
 	return nil, fmt.Errorf("Connect 集群 %s: %w", id, domain.ErrNotFound)
@@ -71,16 +97,19 @@ func (s *ConnectService) Test(ctx context.Context, url, username, password strin
 	return connect.New(url, username, password).Test(ctx)
 }
 
-// storedPassword resolves the OS credential store reference; an empty ref
-// means the endpoint runs unauthenticated.
-func (s *ConnectService) storedPassword(ref string) string {
+// storedPassword resolves the OS credential store reference. An empty ref
+// means the endpoint runs unauthenticated; an unreadable ref is an ERROR —
+// swallowing it used to send an unauthenticated request whose 401 told the
+// user nothing about the real cause.
+func (s *ConnectService) storedPassword(ref string) (string, error) {
 	if ref == "" || s.secrets == nil {
-		return ""
+		return "", nil
 	}
-	if pass, err := s.secrets.Get("kafka-explorer", ref); err == nil {
-		return pass
+	pass, err := s.secrets.Get("kafka-explorer", ref)
+	if err != nil {
+		return "", fmt.Errorf("读取 Connect 集群凭据失败：%v（请在编辑对话框重新保存密码）", err)
 	}
-	return ""
+	return pass, nil
 }
 
 func (s *ConnectService) Connectors(ctx context.Context, clusterID string) ([]connect.ConnectorSummary, error) {

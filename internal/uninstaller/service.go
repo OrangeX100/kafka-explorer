@@ -57,22 +57,40 @@ func (s *Service) SetEmitter(emit func(topic string, data ...any)) {
 
 // uninstallProgress watches Inno's /LOG and streams a deterministic bar:
 // the uninstall log writes one "Deleting file:" line per removed file,
-// and "Uninstallation process succeeded" ends the run.
+// and "Uninstallation process succeeded" ends the run. stop lets the caller
+// converge the watcher the moment the uninstaller process exits — without
+// it, a watcher that missed the final log line idled up to its 20-minute
+// deadline polling a deleted file.
 type uninstallProgress struct {
 	emit     func(topic string, data ...any)
 	logPath  string
 	deadline time.Time
+	stop     chan struct{}
 }
 
 func (p *uninstallProgress) run() {
-	defer func() {
-		if p.emit != nil {
-			p.emit("uninstall:progress", map[string]any{"pct": 100, "done": true})
-		}
-	}()
+	succeeded := false
 	seen := -1
-	for time.Now().Before(p.deadline) {
-		time.Sleep(300 * time.Millisecond)
+	defer func() {
+		if p.emit == nil {
+			return
+		}
+		// done:true ONLY on real success (honest event contract).
+		pct := 0
+		if seen > 0 {
+			pct = seen
+		}
+		p.emit("uninstall:progress", map[string]any{"pct": pct, "done": succeeded})
+	}()
+	for {
+		select {
+		case <-p.stop:
+			return
+		case <-time.After(300 * time.Millisecond):
+		}
+		if time.Now().After(p.deadline) {
+			return
+		}
 		data, err := os.ReadFile(p.logPath)
 		if err != nil {
 			continue
@@ -97,6 +115,7 @@ func (p *uninstallProgress) run() {
 			}
 		}
 		if done || strings.Contains(text, "Log closed.") {
+			succeeded = done
 			return
 		}
 	}
@@ -164,15 +183,24 @@ func (s *Service) Uninstall(deleteData bool) error {
 	// /LOG feeds the real progress bar: the UI shows how far the actual
 	// file removal got instead of a fake marquee.
 	logPath := filepath.Join(os.TempDir(), "KafkaExplorer_Uninstall.log")
-	watcher := &uninstallProgress{emit: s.emit, logPath: logPath, deadline: time.Now().Add(20 * time.Minute)}
+	watcher := &uninstallProgress{
+		emit:     s.emit,
+		logPath:  logPath,
+		deadline: time.Now().Add(20 * time.Minute),
+		stop:     make(chan struct{}),
+	}
 	if s.emit != nil {
 		go watcher.run()
 	}
 	cmd := exec.Command(unins, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG="+logPath)
 	cmd.Dir = appPath
 	if err := cmd.Run(); err != nil {
+		close(watcher.stop)
 		return fmt.Errorf("卸载程序执行失败（可能是文件被占用）。请关闭杀毒软件的实时防护后重试，或手动运行安装目录中的 unins000.exe。")
 	}
+	// The uninstaller exited: converge the watcher BEFORE the log vanishes,
+	// so it cannot idle out its whole deadline on read errors.
+	close(watcher.stop)
 	os.Remove(logPath)
 
 	if deleteData {

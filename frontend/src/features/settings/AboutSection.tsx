@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { CircleAlert, Copy, Download, ExternalLink, Info, Tag } from "lucide-react";
-import { Events } from "@wailsio/runtime";
 import { systemApi, friendlyError } from "../../shared/api.js";
 import type { AppSettings, AppInfo, UpdateCheck } from "../../shared/contracts-admin.js";
 import { t } from "../../shared/i18n.js";
 import { useCopy } from "../../shared/useCopy.js";
 import { SectionTitle } from "./Section.js";
-
-type Phase = "idle" | "downloading" | "staged" | "installing";
+import { newReqID, useUpdate } from "../../state/update.js";
 
 // UpdateSection: the version-update mechanism UI. The repo field
 // ("owner/repo") is user-configured and saved with the rest of the
@@ -28,12 +26,11 @@ export function UpdateSection({
   // Auto-update lifecycle (Windows only): idle → downloading (progress
   // events) → staged (install+relaunch button) → installing (app quits,
   // the silent installer takes over). GOOS!=windows never leaves idle.
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [bytes, setBytes] = useState(0);
-  const [total, setTotal] = useState(0);
-  const [route, setRoute] = useState("");
-  const [staged, setStaged] = useState("");
-  const reqID = useRef(`u-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+  // Phase/bytes/staged live in the SESSION-GLOBAL update store (state/update
+  // .ts): the download outlives this component, and a remount must re-show
+  // the staged result instead of silently forgetting it.
+  const upd = useUpdate();
+  const { phase, bytes, total, route, staged } = upd;
   const isWindows = /^windows/i.test(navigator.userAgent);
 
   const runCheck = async () => {
@@ -49,68 +46,33 @@ export function UpdateSection({
     }
   };
 
-  // Progress + completion events for the staged download (id-filtered so a
-  // second About mount ignores a stale stream). route shows which mirror
-  // is serving the bytes (transparency, see the staging route fallback).
-  useEffect(() => {
-    const offProgress = Events.On("system:update:progress", (ev: unknown) => {
-      const data = (ev as { data?: { id: string; bytes: number; total: number; route?: string } })?.data;
-      if (!data || data.id !== reqID.current) return;
-      setBytes(data.bytes);
-      setTotal(data.total);
-      setRoute(data.route ?? "");
-    });
-    const offDone = Events.On("system:update:done", (ev: unknown) => {
-      const data = (ev as { data?: { id: string; failed: boolean; staged: string; error?: string } })?.data;
-      if (!data || data.id !== reqID.current) return;
-      // Cancelled staging arrives as failed=false with an EMPTY path — that
-      // pair means "stopped", not "staged": mapping it to the staged phase
-      // left a dead install button on screen after every cancel.
-      if (!data.failed && !data.staged) {
-        setPhase("idle");
-        setStaged("");
-        return;
-      }
-      setPhase(data.failed ? "idle" : "staged");
-      setStaged(data.failed ? "" : data.staged);
-      if (data.failed && data.error) setError(data.error);
-    });
-    return () => {
-      offProgress();
-      offDone();
-    };
-  }, []);
-
   const startDownload = () => {
     if (!result?.assetUrl) return;
     setError("");
-    setPhase("downloading");
-    setBytes(0);
-    setTotal(result.assetSize || 0);
-    reqID.current = `u-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const reqID = newReqID();
+    upd.begin(reqID, result.assetSize || 0);
     void systemApi.stageUpdate(
       settings.updateRepo.trim(),
       result.assetUrl,
       result.assetSize || 0,
       result.assetSha256 ?? "",
-      reqID.current,
+      reqID,
     );
   };
 
   const cancelDownload = () => {
     void systemApi.cancelUpdate();
-    setPhase("idle");
+    upd.cancel();
   };
 
   const installNow = async () => {
     if (!staged) return;
-    setPhase("installing");
+    upd.toInstalling();
     try {
       await systemApi.installStaged(staged, true);
       // The app quits right after this; the silent installer takes over.
     } catch (err) {
-      setPhase("staged");
-      setError(friendlyError(err));
+      upd.installFailed(friendlyError(err));
     }
   };
 
@@ -141,10 +103,10 @@ export function UpdateSection({
         </button>
       </div>
 
-      {error && (
+      {(error || upd.error) && (
         <div className="mt-3 flex items-start gap-2 rounded border border-danger/40 bg-danger/10 px-2.5 py-2 text-xs text-ink-100">
           <CircleAlert size={14} className="mt-0.5 flex-none text-danger" />
-          <span className="leading-relaxed">{error}</span>
+          <span className="leading-relaxed">{error || upd.error}</span>
         </div>
       )}
       {result && (

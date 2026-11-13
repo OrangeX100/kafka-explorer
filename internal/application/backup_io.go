@@ -171,6 +171,13 @@ func (s *BackupService) ImportAll(ctx context.Context, path string) (BackupCount
 				c.SecretRef = "conn-" + c.ID
 				needPw = true
 			}
+			// Tunnel password entries: same passwordless-landing rule as the
+			// single-purpose import — pre-assign the ref so validation passes.
+			needTunnelPw := false
+			if c.Tunnel.Enabled && c.Tunnel.TunnelNeedsSecret() && c.Tunnel.SecretRef == "" {
+				c.Tunnel.SecretRef = "conn-tunnel-" + c.ID
+				needTunnelPw = true
+			}
 			if err := c.Validate(); err != nil {
 				counts.Skipped++
 				continue
@@ -180,7 +187,7 @@ func (s *BackupService) ImportAll(ctx context.Context, path string) (BackupCount
 				continue
 			}
 			counts.Connections++
-			if needPw {
+			if needPw || needTunnelPw {
 				counts.NeedPassword = append(counts.NeedPassword, name)
 			}
 		}
@@ -348,6 +355,10 @@ func stripConnections(all []domain.Connection) []domain.Connection {
 	for _, c := range all {
 		c.ID = ""
 		c.SecretRef = ""
+		// The tunnel credential rides its own ref — stripping only SecretRef
+		// would let a re-import silently re-bind to the original row's
+		// credential (or break on a machine where it does not exist).
+		c.Tunnel.SecretRef = ""
 		c.CreatedAt = nil
 		c.UpdatedAt = nil
 		out = append(out, c)

@@ -9,9 +9,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
+
+// esc escapes a connector name for a URL path segment: names are user data
+// and may carry spaces, '?', '#' or '%', which raw interpolation turns into
+// broken requests (query split, fragment cut, wrong route).
+func esc(s string) string {
+	return url.PathEscape(s)
+}
 
 type Client struct {
 	base     string
@@ -180,13 +188,13 @@ func (c *Client) GetConnector(ctx context.Context, name string) (ConnectorDetail
 			Trace  string `json:"trace"`
 		} `json:"tasks"`
 	}
-	if err := c.get(ctx, "/connectors/"+name+"/status", &st); err != nil {
+	if err := c.get(ctx, "/connectors/"+esc(name)+"/status", &st); err != nil {
 		return ConnectorDetail{}, err
 	}
 	var cfg struct {
 		Config map[string]string `json:"config"`
 	}
-	if err := c.get(ctx, "/connectors/"+name, &cfg); err != nil {
+	if err := c.get(ctx, "/connectors/"+esc(name), &cfg); err != nil {
 		return ConnectorDetail{}, err
 	}
 	tasks := make([]TaskStatus, 0, len(st.Tasks))
@@ -224,7 +232,7 @@ func (c *Client) ListPlugins(ctx context.Context) ([]string, error) {
 // The pause/resume state lives in the config topic, so a restart preserves
 // it: a paused connector stays paused after restarting (verified on 4.2).
 func (c *Client) RestartConnector(ctx context.Context, name string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/connectors/"+name+"/restart?includeTasks=true", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/connectors/"+esc(name)+"/restart?includeTasks=true", nil)
 	if err != nil {
 		return err
 	}
@@ -242,7 +250,7 @@ func (c *Client) RestartConnector(ctx context.Context, name string) error {
 
 // PauseConnector pauses a running connector.
 func (c *Client) PauseConnector(ctx context.Context, name string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.base+"/connectors/"+name+"/pause", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.base+"/connectors/"+esc(name)+"/pause", nil)
 	if err != nil {
 		return err
 	}
@@ -260,7 +268,7 @@ func (c *Client) PauseConnector(ctx context.Context, name string) error {
 
 // ResumeConnector resumes a paused connector.
 func (c *Client) ResumeConnector(ctx context.Context, name string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.base+"/connectors/"+name+"/resume", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.base+"/connectors/"+esc(name)+"/resume", nil)
 	if err != nil {
 		return err
 	}
@@ -339,17 +347,17 @@ func (c *Client) CreateConnector(ctx context.Context, name string, config map[st
 
 // DeleteConnector removes a connector together with its tasks.
 func (c *Client) DeleteConnector(ctx context.Context, name string) error {
-	return c.do(ctx, http.MethodDelete, "/connectors/"+name, nil)
+	return c.do(ctx, http.MethodDelete, "/connectors/"+esc(name), nil)
 }
 
 // UpdateConnectorConfig replaces a connector's config (PUT …/config). The
 // cluster re-generates tasks; some clusters reject the update with 409
 // while the connector has failed tasks or must be paused first.
 func (c *Client) UpdateConnectorConfig(ctx context.Context, name string, config map[string]string) error {
-	return c.do(ctx, http.MethodPut, "/connectors/"+name+"/config", config)
+	return c.do(ctx, http.MethodPut, "/connectors/"+esc(name)+"/config", config)
 }
 
 // RestartTask restarts ONE task of a connector (not the whole connector).
 func (c *Client) RestartTask(ctx context.Context, name string, taskID int) error {
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/connectors/%s/tasks/%d/restart", name, taskID), nil)
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/connectors/%s/tasks/%d/restart", esc(name), taskID), nil)
 }

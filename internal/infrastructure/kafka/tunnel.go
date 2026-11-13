@@ -155,6 +155,21 @@ func (t *TunnelManager) ensureSSH() (*gossh.Client, error) {
 	}
 	t.client = client
 	t.mu.Unlock()
+	// Lifecycle watcher: when the SSH session dies (network blip, server
+	// restart), clear the cached client so the NEXT ensureSSH re-dials
+	// instead of handing out a corpse forever. Without this the tunnel had
+	// NO recovery — every forwarded connection kept failing until the user
+	// evicted the pooled client. Pointer-matched: a superseded/closed client
+	// never clears a newer one, and Close() nils t.client first, so teardown
+	// stays race-free.
+	go func() {
+		_ = client.Wait()
+		t.mu.Lock()
+		if t.client == client {
+			t.client = nil
+		}
+		t.mu.Unlock()
+	}()
 	return client, nil
 }
 

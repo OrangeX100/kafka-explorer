@@ -30,10 +30,10 @@ export default function App() {
   const [topView, setTopView] = useState<TopView>("clusters");
   const { open: openFallback, menu: fallbackMenu } = useContextMenu();
   const copy = useCopy();
-  // (s) => s.show: the whole-store object changes identity on every toast,
-  // which would re-run this effect (and re-fire the update check) forever
-  // whenever a new version is found.
-  const toast = { show: useToast((s) => s.show) };
+  // (s) => s.show selected DIRECTLY (no wrapping object): a fresh `{ show }`
+  // literal every render changed identity on each render, re-running the
+  // boot effect (refresh + settings + update check) on every navigation.
+  const showToast = useToast((s) => s.show);
 
   const loadSettings = useAppSettings((s) => s.load);
   // ✕ → tray hint: the Go side emits tray:minimized on the first hide; the
@@ -43,7 +43,7 @@ export default function App() {
     const off = Events.On("tray:minimized", () => {
       if (localStorage.getItem("ke.trayHintShown")) return;
       localStorage.setItem("ke.trayHintShown", "1");
-      toast.show(t("tray.hint"), "info");
+      showToast(t("tray.hint"), "info");
     });
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -63,11 +63,11 @@ export default function App() {
           if (!r.hasUpdate) return;
           if (localStorage.getItem("ke.updateNotifiedAtVersion") === r.latest) return;
           localStorage.setItem("ke.updateNotifiedAtVersion", r.latest);
-          toast.show(t("settings.autoCheckFound", r.latest), "info");
+          showToast(t("settings.autoCheckFound", r.latest), "info");
         })
         .catch(() => {});
     });
-  }, [refresh, loadSettings, toast]);
+  }, [refresh, loadSettings, showToast]);
 
   // Suppress the WebView2 default context menu everywhere. Surfaces with
   // their own app menu call preventDefault+stopPropagation first, so this

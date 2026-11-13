@@ -46,10 +46,14 @@ func (s *ConnectionService) ExportConnections(ctx context.Context, pickSave func
 	}
 	// Secrets never leave the credential store: strip ID (regenerated on
 	// import), SecretRef and timestamps; keep everything the user typed.
+	// The tunnel secret rides its OWN ref (conn-tunnel-<id>) — it must be
+	// stripped too, or an import would silently re-bind the new row to the
+	// ORIGINAL connection's credential.
 	stripped := make([]domain.Connection, 0, len(all))
 	for _, c := range all {
 		c.ID = ""
 		c.SecretRef = ""
+		c.Tunnel.SecretRef = ""
 		c.CreatedAt = nil
 		c.UpdatedAt = nil
 		stripped = append(stripped, c)
@@ -134,6 +138,14 @@ func (s *ConnectionService) ImportConnections(ctx context.Context, path string) 
 			c.SecretRef = "conn-" + c.ID
 			needPw = true
 		}
+		// Tunnel password entries land passwordless the same way: the export
+		// never carries the secret, so the ref must be re-created here or
+		// validation would reject the whole entry.
+		needTunnelPw := false
+		if c.Tunnel.Enabled && c.Tunnel.TunnelNeedsSecret() && c.Tunnel.SecretRef == "" {
+			c.Tunnel.SecretRef = "conn-tunnel-" + c.ID
+			needTunnelPw = true
+		}
 		if err := c.Validate(); err != nil {
 			result.Skipped++
 			continue
@@ -143,7 +155,7 @@ func (s *ConnectionService) ImportConnections(ctx context.Context, path string) 
 			continue
 		}
 		result.Imported++
-		if needPw {
+		if needPw || needTunnelPw {
 			result.NeedPassword = append(result.NeedPassword, name)
 		}
 	}

@@ -224,6 +224,13 @@ func (c *Client) resolveAnchor(ctx context.Context, req domain.BrowseRequest, pa
 		if off > end {
 			return end, nil
 		}
+		if off < start {
+			// The log was already trimmed past the requested anchor
+			// (compaction/retention): clamp to the earliest surviving record
+			// instead of sending a negative / out-of-range fetch offset —
+			// symmetric with the backward branch's `off-shift < start` clamp.
+			return start, nil
+		}
 		return off, nil
 	case req.StartTimestamp != nil:
 		listed, err := c.adm.ListOffsetsAfterMilli(ctx, *req.StartTimestamp, req.Topic)

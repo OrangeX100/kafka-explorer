@@ -142,8 +142,11 @@ export function classifyError(err: unknown): { key: string; detail: string } {
   if (/组.*不存在|GROUPID_NOT_FOUND|group.*not found|has no offset/i.test(detail)) return { key: "error.groupMissing", detail };
   if (/正在重新平衡|REBALANCE_IN_PROGRESS|UNKNOWN_MEMBER_ID|MEMBER_ID_REQUIRED|stale member/i.test(detail)) return { key: "error.rebalance", detail };
   if (/COORDINATOR_NOT_AVAILABLE|NOT_COORDINATOR|COORDINATOR_LOAD_IN_PROGRESS/i.test(detail)) return { key: "error.coordinator", detail };
-  if (/认证失败|auth|sasl/i.test(detail)) return { key: "error.auth", detail };
+  // DENIED must be checked BEFORE auth: "Not authorized…" CONTAINS the
+  // substring "auth", so the auth rule used to swallow every authorization
+  // failure and the hint panel explained the wrong problem.
   if (/not authorized|unauthorized|forbidden|denied|授权/i.test(detail)) return { key: "error.denied", detail };
+  if (/认证失败|auth|sasl/i.test(detail)) return { key: "error.auth", detail };
   if (/UNSUPPORTED_VERSION|不支持.*需要 Kafka/i.test(detail)) return { key: "error.unsupportedVersion", detail };
   if (/already exists|已存在/i.test(detail)) return { key: "error.conflict", detail };
   if (/不存在|not found/i.test(detail)) return { key: "error.notFound", detail };

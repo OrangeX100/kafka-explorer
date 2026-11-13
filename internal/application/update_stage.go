@@ -99,6 +99,19 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 	dest := filepath.Join(dir, name)
 	part := dest + ".part"
 
+	// Housekeeping: previous staged installers and stray .part files used to
+	// accumulate ~50 MB per released version forever — the updates dir had no
+	// cleanup anywhere. Best-effort: a file still locked by an in-flight
+	// install simply survives until the next round.
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || e.Name() == name || e.Name() == name+".part" {
+				continue
+			}
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+
 	var lastErr error
 	for _, route := range downloadCandidates(assetURL) {
 		// routeErr must NOT shadow the cancellation checks below: the old
@@ -115,6 +128,14 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 			if err := os.Rename(part, dest); err != nil {
 				os.Remove(part)
 				return "", fmt.Errorf("暂存安装包失败: %w", err)
+			}
+			// Backfill the size when the manifest carried none: tryRoute
+			// learns ContentLength on its own copy of the parameter, so the
+			// final progress tick would otherwise report 0/0.
+			if assetSize <= 0 {
+				if st, statErr := os.Stat(dest); statErr == nil {
+					assetSize = st.Size()
+				}
 			}
 			progress(Progress{Bytes: assetSize, Total: assetSize})
 			return dest, nil
@@ -360,7 +381,9 @@ func (s *UpdateService) WriteWaiter(setupPath string, relaunch bool) error {
 	// logFile is embedded in a single-quoted PS string — a path containing '
 	// (e.g. a username) must be escaped by doubling, or the script breaks.
 	body := waiterScriptBody(logFile)
-	if err := os.WriteFile(script, []byte(body), 0o600); err != nil {
+	// UTF-8 BOM: Windows PowerShell 5.1 reads a BOM-less .ps1 as ANSI (GBK on
+	// zh-CN systems), which would mangle the non-ASCII timeout note.
+	if err := os.WriteFile(script, append([]byte("\xef\xbb\xbf"), []byte(body)...), 0o600); err != nil {
 		return fmt.Errorf("写入等待脚本失败: %w", err)
 	}
 	relaunchFlag := "0"
@@ -386,25 +409,40 @@ func systemRoot() string {
 	return `C:\Windows`
 }
 
-// waiterScriptBody builds the waiter PowerShell script. Two traps are baked
+// waiterScriptBody builds the waiter PowerShell script. The traps are baked
 // in here rather than at the call site so a regression test can pin them:
 // (1) Get-Process carries -ErrorAction SilentlyContinue — the app usually
 // exits BEFORE PowerShell starts, and without the flag the not-found error
 // escalates under $ErrorActionPreference='Stop' and kills the waiter
 // silently (no install, no log); (2) logFile is embedded in a single-quoted
 // PS string, so a path containing ' (e.g. a username like O'Brien) must be
-// escaped by doubling or the script fails to parse.
+// escaped by doubling or the script fails to parse; (3) the wait loop has a
+// HARD DEADLINE — Windows recycles PIDs aggressively, so after the app exits
+// another process can take over the waited-on PID and the waiter would
+// otherwise wait forever (app closed, nothing installs, no log); (4) the
+// staged installer and the script itself are removed after a successful
+// install, so DataDir/updates stops growing by ~50 MB per released version.
 func waiterScriptBody(logFile string) string {
 	psLogFile := strings.ReplaceAll(logFile, "'", "''")
+	logRef := "'" + psLogFile + "'"
 	return "$ErrorActionPreference = 'Stop'\n" +
 		"$waitFor = [int]$env:KE_UPDATE_PID\n" +
-		"while (Get-Process -Id $waitFor -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 100 }\n" +
+		"$deadline = (Get-Date).AddMinutes(10)\n" +
+		"while (Get-Process -Id $waitFor -ErrorAction SilentlyContinue) {\n" +
+		"  if ((Get-Date) -gt $deadline) {\n" +
+		"    '等待应用退出超时（PID 可能已被其他进程复用），继续安装' | Out-File -FilePath " + logRef + " -Encoding utf8 -Append\n" +
+		"    break\n" +
+		"  }\n" +
+		"  Start-Sleep -Milliseconds 100\n" +
+		"}\n" +
 		"try {\n" +
 		"  Start-Process -FilePath $env:KE_UPDATE_SETUP -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/SP-' -Wait -ErrorAction Stop\n" +
 		"  if ($env:KE_UPDATE_RELAUNCH -eq '1') { Start-Process -FilePath $env:KE_UPDATE_APP }\n" +
+		"  Remove-Item -FilePath $env:KE_UPDATE_SETUP -ErrorAction SilentlyContinue\n" +
 		"} catch {\n" +
-		"  $_ | Out-File -FilePath '" + psLogFile + "' -Encoding utf8\n" +
-		"}\n"
+		"  $_ | Out-File -FilePath " + logRef + " -Encoding utf8\n" +
+		"}\n" +
+		"Remove-Item -FilePath $PSCommandPath -ErrorAction SilentlyContinue\n"
 }
 
 // checksumStatus distinguishes "EVERY route confirmed this release has no

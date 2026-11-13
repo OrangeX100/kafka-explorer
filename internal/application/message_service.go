@@ -115,7 +115,9 @@ func (s *MessageService) Find(ctx context.Context, req domain.FindRequest) (Find
 
 // ProduceInput is the send-message form payload. Key/value arrive as base64
 // strings (the frontend encodes); an empty string means empty bytes, an
-// absent field means null key/value respectively.
+// absent field means null key/value respectively. STRICT: a value that is
+// not valid base64 is an error, never reinterpreted as raw text (see
+// b64Strict for why the old lenient fallback was removed).
 type ProduceInput struct {
 	ConnectionID string                 `json:"connectionId"`
 	Topic        string                 `json:"topic"`
@@ -145,13 +147,13 @@ func (s *MessageService) Produce(ctx context.Context, in ProduceInput) (kafka.Pr
 	}
 	var key, value []byte
 	if in.Key != nil {
-		key, err = b64OrRaw(*in.Key)
+		key, err = b64Strict("键", *in.Key)
 		if err != nil {
 			return kafka.ProduceResult{}, err
 		}
 	}
 	if in.Value != nil {
-		value, err = b64OrRaw(*in.Value)
+		value, err = b64Strict("值", *in.Value)
 		if err != nil {
 			return kafka.ProduceResult{}, err
 		}
@@ -186,14 +188,22 @@ func (s *MessageService) DeleteRecords(ctx context.Context, in DeleteRecordsInpu
 	return client.DeleteRecordsBefore(ctx, in.Topic, in.Offset, in.Partitions)
 }
 
-// b64OrRaw accepts base64 (contract default) and falls back to treating the
-// input as raw text, so curl-style debug calls still work.
-func b64OrRaw(s string) ([]byte, error) {
+// b64Strict enforces the ProduceInput wire contract: Key/Value ARE base64.
+// The old b64OrRaw fallback ("try base64, else treat as raw text") silently
+// corrupted plain text that happens to be valid base64 — "test" decoded into
+// 3 garbage bytes and landed in Kafka with no error anywhere, and the
+// half-fallback made the contract ambiguous ("sometimes raw, sometimes not").
+// Strict also matches the message HEADERS, which have always rejected
+// non-base64 outright. Raw text is inherently undetectable against a base64
+// alphabet ("test" IS valid base64) — the rule is now simply: callers encode.
+// The frontend always does; a script caller pays one `base64` command.
+func b64Strict(field, s string) ([]byte, error) {
 	if s == "" {
 		return []byte{}, nil
 	}
-	if decoded, err := base64.StdEncoding.DecodeString(s); err == nil {
-		return decoded, nil
+	raw, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s 不是合法 base64（应用内发送会自动编码；脚本直调请先 base64 编码）", domain.ErrInvalid, field)
 	}
-	return []byte(s), nil
+	return raw, nil
 }

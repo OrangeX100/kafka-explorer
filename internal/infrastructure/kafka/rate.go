@@ -57,13 +57,20 @@ func (c *Client) TopicRateHistogram(ctx context.Context, topic string, win domai
 				continue
 			}
 			partition := pd.Partition
+			// The anchor ADVANCES page by page: the first page starts at
+			// FromOffset, every following page continues from the previous
+			// page's NextAnchor. Re-sending the fixed FromOffset re-read the
+			// same first window until the maxRecords cap (the histogram
+			// counted one page's records ~200× while everything past it went
+			// uncounted — see the 044 review round).
+			anchor := win.FromOffset
 			for {
 				page, err := c.BrowsePage(ctx, domain.BrowseRequest{
 					Topic:       topic,
 					Partition:   &partition,
 					Direction:   "forward",
 					Limit:       pageSize,
-					StartOffset: &win.FromOffset,
+					StartOffset: &anchor,
 				})
 				if err != nil {
 					outErr = fmt.Errorf("扫描分区 %d 失败: %w", partition, err)
@@ -82,6 +89,7 @@ func (c *Client) TopicRateHistogram(ctx context.Context, topic string, win domai
 				if int64(len(recs)) >= maxRecords || ctx.Err() != nil {
 					break
 				}
+				anchor = *page.NextAnchor
 			}
 		}
 		outScanned = int64(len(recs))
@@ -148,13 +156,22 @@ func (c *Client) TopicRateHistogram(ctx context.Context, topic string, win domai
 			continue // user filtered to a single partition
 		}
 		partition := pd.Partition
+		// Same anchor-advance contract as the offset mode: the first page
+		// starts at the log start (no explicit anchor), every following page
+		// continues from the previous page's NextAnchor — without this the
+		// scan re-read page one until the record cap.
+		var anchor *int64
 		for {
-			page, err := c.BrowsePage(ctx, domain.BrowseRequest{
+			req := domain.BrowseRequest{
 				Topic:     topic,
 				Partition: &partition,
 				Direction: "forward",
 				Limit:     pageSize,
-			})
+			}
+			if anchor != nil {
+				req.StartOffset = anchor
+			}
+			page, err := c.BrowsePage(ctx, req)
 			if err != nil {
 				outErr = fmt.Errorf("扫描分区 %d 失败: %w", partition, err)
 				return
@@ -179,6 +196,7 @@ func (c *Client) TopicRateHistogram(ctx context.Context, topic string, win domai
 				outBuckets, outScanned = buckets, scanned
 				return
 			}
+			anchor = page.NextAnchor
 		}
 	}
 	outBuckets, outScanned = buckets, scanned

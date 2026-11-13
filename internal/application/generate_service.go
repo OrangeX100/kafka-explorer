@@ -102,16 +102,19 @@ func (s *MessageIOService) exportPartitions(ctx context.Context, client *kafka.C
 	return client.TopicPartitionIDs(ctx, in.Topic)
 }
 
-// exportRecords walks the From..To window per partition (cursors are
-// per-partition by contract) and renders one output line per record.
-func (s *MessageIOService) exportRecords(ctx context.Context, in domain.ExportMessagesInput) ([]string, error) {
+// exportWalk walks the From..To window per partition (cursors are
+// per-partition by contract) and emits one rendered output line per record.
+// Streaming by callback: ExportToFile writes as it goes, so a large export
+// never buffers fully in RAM — the previous version accumulated every line
+// (up to the 1M cap) before writing, despite its comment claiming otherwise.
+func (s *MessageIOService) exportWalk(ctx context.Context, in domain.ExportMessagesInput, emit func(string) error) (int, error) {
 	client, err := s.pool.Acquire(ctx, in.ConnectionID)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	partitions, err := s.exportPartitions(ctx, client, in)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	// Schema-aware rows: resolve through the SAME per-connection registry
 	// binding the browse path uses (adapter carries the connection id).
@@ -119,8 +122,9 @@ func (s *MessageIOService) exportRecords(ctx context.Context, in domain.ExportMe
 	if in.Decoded && s.decoder != nil {
 		registry = decodeAdapter{in.ConnectionID, s.decoder}
 	}
-	var lines []string
-	limit := 500
+	const limit = 500
+	const maxLines = 1_000_000 // hard cap: a runaway export must not eat RAM
+	written := 0
 	for _, partition := range partitions {
 		var anchor int64 = in.From
 		for {
@@ -129,7 +133,7 @@ func (s *MessageIOService) exportRecords(ctx context.Context, in domain.ExportMe
 				StartOffset: &anchor, Direction: "forward", Limit: limit,
 			})
 			if err != nil {
-				return nil, err
+				return written, err
 			}
 			for _, m := range page.Messages {
 				// To is OPTIONAL (nil = export to the end) — the dialog's default
@@ -138,21 +142,24 @@ func (s *MessageIOService) exportRecords(ctx context.Context, in domain.ExportMe
 				if in.To != nil && m.Offset > *in.To {
 					break
 				}
-				lines = append(lines, exportRow(ctx, m, in.Format, registry))
+				if err := emit(exportRow(ctx, m, in.Format, registry)); err != nil {
+					return written, err
+				}
+				written++
 			}
 			if in.To != nil && page.NextAnchor != nil && *page.NextAnchor > *in.To {
-				break // the window closed inside this page
+				return written, nil // the window closed inside this page
 			}
 			if page.Exhausted || page.NextAnchor == nil {
 				break
 			}
-			if len(lines) > 1_000_000 { // hard cap: a runaway export must not eat RAM
-				return nil, fmt.Errorf("%w: export exceeds 1M records", domain.ErrInvalid)
+			if written > maxLines {
+				return written, fmt.Errorf("%w: export exceeds 1M records", domain.ErrInvalid)
 			}
 			anchor = *page.NextAnchor
 		}
 	}
-	return lines, nil
+	return written, nil
 }
 
 // Export returns the selected window as raw text in the requested format
@@ -160,8 +167,11 @@ func (s *MessageIOService) exportRecords(ctx context.Context, in domain.ExportMe
 // Text is returned to the wails layer (which owns the clipboard) for the
 // in-app copy path.
 func (s *MessageIOService) Export(ctx context.Context, in domain.ExportMessagesInput) (string, error) {
-	lines, err := s.exportRecords(ctx, in)
-	if err != nil {
+	var lines []string
+	if _, err := s.exportWalk(ctx, in, func(line string) error {
+		lines = append(lines, line)
+		return nil
+	}); err != nil {
 		return "", err
 	}
 	return renderExport(lines, in.Format), nil
@@ -171,32 +181,25 @@ func (s *MessageIOService) Export(ctx context.Context, in domain.ExportMessagesI
 // user via the native save dialog) and returns the record count. Rows are
 // written incrementally so a large export never buffers fully in RAM.
 func (s *MessageIOService) ExportToFile(ctx context.Context, in domain.ExportMessagesInput, path string) (int64, error) {
-	lines, err := s.exportRecords(ctx, in)
-	if err != nil {
-		return 0, err
-	}
 	f, err := os.Create(path)
 	if err != nil {
 		return 0, fmt.Errorf("创建导出文件失败: %w", err)
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
-	var count int64
 	if in.Format == "csv" {
 		if _, err := w.WriteString(csvHeader + "\n"); err != nil {
 			return 0, err
 		}
 	}
-	for _, line := range lines {
-		if _, err := w.WriteString(line + "\n"); err != nil {
-			return 0, err
-		}
-		count++
+	count, err := s.exportWalk(ctx, in, func(line string) error {
+		_, werr := w.WriteString(line + "\n")
+		return werr
+	})
+	if ferr := w.Flush(); err == nil {
+		err = ferr
 	}
-	if err := w.Flush(); err != nil {
-		return 0, err
-	}
-	return count, nil
+	return int64(count), err
 }
 
 func exportRow(ctx context.Context, m domain.Message, format string, registry decode.RegistryClient) string {

@@ -19,7 +19,7 @@ func TestNewestPageExhausted(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	client, err := kafka.Open(ctx, newConn(t), "")
+	client, err := kafka.Open(ctx, newConn(t), "", nil)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

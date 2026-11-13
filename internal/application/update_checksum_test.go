@@ -142,7 +142,8 @@ func TestStageUpdateMalformedSidecarHardFails(t *testing.T) {
 
 // TestWaiterScriptBodyPinsTheTwoTraps: the race-proof Get-Process flag and
 // the single-quote escaping of the embedded log path (a broken script here
-// meant "app quits, nothing installs, nothing logged").
+// meant "app quits, nothing installs, nothing logged"), plus the PID-reuse
+// deadline and the post-install cleanup added in the 044 review round.
 func TestWaiterScriptBodyPinsTheTwoTraps(t *testing.T) {
 	body := waiterScriptBody(`C:\Users\o'brien\AppData\update_waiter.err.log`)
 	if !strings.Contains(body, "Get-Process -Id $waitFor -ErrorAction SilentlyContinue") {
@@ -153,5 +154,17 @@ func TestWaiterScriptBodyPinsTheTwoTraps(t *testing.T) {
 	}
 	if strings.Contains(body, `o'brien'`) {
 		t.Fatal("escaped quote leaked into the embedded path")
+	}
+	if !strings.Contains(body, "(Get-Date).AddMinutes(10)") {
+		t.Fatal("REGRESSION: wait loop lost the PID-reuse deadline — a recycled PID would hang the waiter forever")
+	}
+	if !strings.Contains(body, "Remove-Item -FilePath $env:KE_UPDATE_SETUP") {
+		t.Fatal("REGRESSION: staged installer is no longer removed after install — updates dir grows forever")
+	}
+	if !strings.Contains(body, "Remove-Item -FilePath $PSCommandPath") {
+		t.Fatal("REGRESSION: waiter script no longer self-deletes after install")
+	}
+	if strings.Count(body, `o''brien`) != 2 {
+		t.Fatalf("REGRESSION: the log path is embedded %d times; BOTH (timeout note + catch) must be quote-escaped", strings.Count(body, `o''brien`))
 	}
 }

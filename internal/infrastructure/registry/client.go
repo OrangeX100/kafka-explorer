@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -89,6 +90,14 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
+// esc escapes a subject name for a URL path segment. Subjects are cluster
+// data — a name carrying a space, '?', '#' or '%' interpolated raw corrupted
+// the request (the server routed it to the wrong path). Kafka topic names
+// cannot contain '/', so PathEscape's %2F encoding is not a practical risk.
+func esc(s string) string {
+	return url.PathEscape(s)
+}
+
 // RegistryAPIError is a non-2xx registry response carrying the registry's
 // own error text. Error() keeps the exact wording every existing caller
 // prints; status-based branching uses errors.As.
@@ -149,7 +158,7 @@ type latestResponse struct {
 // GetSubject returns the latest version of a subject.
 func (c *Client) GetSubject(ctx context.Context, subject string) (domain.SchemaSubject, error) {
 	var lr latestResponse
-	if err := c.raw(ctx, http.MethodGet, "/subjects/"+subject+"/versions/latest", nil, &lr); err != nil {
+	if err := c.raw(ctx, http.MethodGet, "/subjects/"+esc(subject)+"/versions/latest", nil, &lr); err != nil {
 		return domain.SchemaSubject{}, err
 	}
 	out := domain.SchemaSubject{
@@ -168,13 +177,13 @@ func (c *Client) GetSubject(ctx context.Context, subject string) (domain.SchemaS
 // ListVersions returns every version of a subject.
 func (c *Client) ListVersions(ctx context.Context, subject string) ([]domain.SchemaVersion, error) {
 	var numbers []int
-	if err := c.raw(ctx, http.MethodGet, "/subjects/"+subject+"/versions", nil, &numbers); err != nil {
+	if err := c.raw(ctx, http.MethodGet, "/subjects/"+esc(subject)+"/versions", nil, &numbers); err != nil {
 		return nil, err
 	}
 	out := make([]domain.SchemaVersion, 0, len(numbers))
 	for _, n := range numbers {
 		var lr latestResponse
-		path := fmt.Sprintf("/subjects/%s/versions/%d", subject, n)
+		path := fmt.Sprintf("/subjects/%s/versions/%d", esc(subject), n)
 		if err := c.raw(ctx, http.MethodGet, path, nil, &lr); err != nil {
 			return nil, err
 		}
@@ -196,7 +205,7 @@ func (c *Client) CheckCompatibility(ctx context.Context, subject, schema, schema
 // versions deleted but still resolvable via ?deleted=true; permanent=true
 // removes them from storage entirely.
 func (c *Client) DeleteSubject(ctx context.Context, subject string, permanent bool) error {
-	path := "/subjects/" + subject
+	path := "/subjects/" + esc(subject)
 	if permanent {
 		path += "?permanent=true"
 	}
@@ -206,7 +215,7 @@ func (c *Client) DeleteSubject(ctx context.Context, subject string, permanent bo
 // DeleteVersion removes one version of a subject (soft unless permanent).
 // Returns the schema id that was removed.
 func (c *Client) DeleteVersion(ctx context.Context, subject string, version int, permanent bool) (int, error) {
-	path := fmt.Sprintf("/subjects/%s/versions/%d", subject, version)
+	path := fmt.Sprintf("/subjects/%s/versions/%d", esc(subject), version)
 	if permanent {
 		path += "?permanent=true"
 	}
@@ -222,7 +231,7 @@ func (c *Client) DeleteVersion(ctx context.Context, subject string, version int,
 // GetVersion fetches one exact version of a subject.
 func (c *Client) GetVersion(ctx context.Context, subject string, version int) (domain.SchemaVersion, error) {
 	var lr latestResponse
-	path := fmt.Sprintf("/subjects/%s/versions/%d", subject, version)
+	path := fmt.Sprintf("/subjects/%s/versions/%d", esc(subject), version)
 	if err := c.raw(ctx, http.MethodGet, path, nil, &lr); err != nil {
 		return domain.SchemaVersion{}, err
 	}
@@ -239,7 +248,7 @@ func (c *Client) GetSubjectConfig(ctx context.Context, subject string) (string, 
 	var cfg struct {
 		CompatibilityLevel string `json:"compatibilityLevel"`
 	}
-	if err := c.raw(ctx, http.MethodGet, "/config/"+subject, nil, &cfg); err != nil {
+	if err := c.raw(ctx, http.MethodGet, "/config/"+esc(subject), nil, &cfg); err != nil {
 		return "", err
 	}
 	return cfg.CompatibilityLevel, nil
@@ -247,7 +256,7 @@ func (c *Client) GetSubjectConfig(ctx context.Context, subject string) (string, 
 
 // SetSubjectConfig sets the per-subject compatibility level (PUT /config/<s>).
 func (c *Client) SetSubjectConfig(ctx context.Context, subject, level string) error {
-	return c.raw(ctx, http.MethodPut, "/config/"+subject, map[string]string{"compatibility": level}, nil)
+	return c.raw(ctx, http.MethodPut, "/config/"+esc(subject), map[string]string{"compatibility": level}, nil)
 }
 
 // GetGlobalConfig reads the registry-wide compatibility level.
@@ -280,7 +289,7 @@ func (c *Client) CheckCompatibilityVersion(ctx context.Context, subject string, 
 		IsCompatible bool     `json:"is_compatible"`
 		Messages     []string `json:"messages"`
 	}
-	path := "/compatibility/subjects/" + subject + "/versions/" + ver + "?verbose=true"
+	path := "/compatibility/subjects/" + esc(subject) + "/versions/" + ver + "?verbose=true"
 	if err := c.raw(ctx, http.MethodPost, path, body, &out); err != nil {
 		return domain.CompatibilityCheck{}, err
 	}
@@ -301,7 +310,7 @@ func (c *Client) RegisterSchema(ctx context.Context, subject, schema, schemaType
 		ID      int `json:"id"`
 		Version int `json:"version"`
 	}
-	if err := c.raw(ctx, http.MethodPost, "/subjects/"+subject+"/versions", body, &out); err != nil {
+	if err := c.raw(ctx, http.MethodPost, "/subjects/"+esc(subject)+"/versions", body, &out); err != nil {
 		return 0, 0, err
 	}
 	return out.ID, out.Version, nil

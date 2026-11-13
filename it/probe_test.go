@@ -70,13 +70,13 @@ func TestFullMessagePath(t *testing.T) {
 	secrets := nopSecrets{}
 
 	// 1. dial + auth (what the connection form's 测试连接 does)
-	brokers, err := kafka.TestConnection(ctx, conn, secrets, "")
+	brokers, err := kafka.TestConnection(ctx, conn, secrets, "", "")
 	if err != nil {
 		t.Fatalf("test connection: %v", err)
 	}
 	t.Logf("brokers: %v", brokers)
 
-	client, err := kafka.Open(ctx, conn, "")
+	client, err := kafka.Open(ctx, conn, "", nil)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestFullMessagePath(t *testing.T) {
 func TestTopicDetailLatency(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	client, err := kafka.Open(ctx, newConn(t), "")
+	client, err := kafka.Open(ctx, newConn(t), "", nil)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestTopicDetailLatency(t *testing.T) {
 func TestBrowseCrossTopicIsolation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	client, err := kafka.Open(ctx, newConn(t), "")
+	client, err := kafka.Open(ctx, newConn(t), "", nil)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

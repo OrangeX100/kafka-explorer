@@ -15,7 +15,7 @@ func TestInternalTopicCounts(t *testing.T) {
 	pool := kafka.NewPool(nopRepo{conn}, nopSecrets{})
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	client, err := kafka.Open(ctx, conn, "")
+	client, err := kafka.Open(ctx, conn, "", nil)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

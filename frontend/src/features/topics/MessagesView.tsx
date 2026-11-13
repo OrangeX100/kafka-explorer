@@ -190,7 +190,7 @@ export function MessagesView({
           pageSize,
           pattern: findPattern,
           regex: useRegex,
-          maxScan: 100000,
+          maxScan: useAppSettings.getState().settings?.maxScan ?? 100000,
         }) as never,
       );
       if (seq !== requestSeq.current) return;

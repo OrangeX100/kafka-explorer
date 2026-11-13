@@ -5,6 +5,8 @@ package application
 
 import (
 	"context"
+	crand "crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -202,6 +204,12 @@ func (s *ConnectionService) Delete(ctx context.Context, id string) error {
 	if conn.SecretRef != "" {
 		_ = s.secrets.Delete(secretService, conn.SecretRef)
 	}
+	// The tunnel secret lives under its OWN ref: skipping it left the SSH
+	// password behind in the OS credential store after the connection was
+	// gone — exactly the leak the SecretStore contract exists to prevent.
+	if conn.Tunnel.SecretRef != "" {
+		_ = s.secrets.Delete(secretService, conn.Tunnel.SecretRef)
+	}
 	s.pool.Evict(id)
 	return s.repo.Delete(ctx, id)
 }
@@ -230,10 +238,18 @@ func (s *ConnectionService) Test(ctx context.Context, conn domain.Connection, pa
 	return result
 }
 
-// newID is a tiny uniqueness helper; crypto randomness is unnecessary for
-// config rows (no security property depends on unpredictability).
+// newID generates an entity id for config rows. crypto/rand, not timestamps:
+// IDs feed SQLite primary keys with upsert semantics, so a collision would
+// silently OVERWRITE an existing row — the old ms+nanos-truncate form had a
+// real (if small) collision window, and unpredictability comes for free.
 func newID() string {
-	return fmt.Sprintf("%d-%04d", time.Now().UnixMilli(), time.Now().UnixNano()%10000)
+	var b [8]byte
+	if _, err := crand.Read(b[:]); err != nil {
+		// crypto/rand does not fail on supported platforms; degrade to time
+		// rather than abort the whole save flow.
+		return fmt.Sprintf("t-%d-%d", time.Now().UnixMilli(), time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 const secretService = "kafka-explorer"

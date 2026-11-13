@@ -20,16 +20,22 @@ import (
 type Client struct {
 	base     string
 	http     *http.Client
-	username string
-	password string
+	// streamHTTP has NO client-level timeout: http.Client.Timeout covers the
+	// whole body read, so the 15s limit would kill every push query
+	// (EMIT CHANGES) after exactly 15s mid-stream. QueryStream's lifetime is
+	// governed by its request context (the UI's stop button / handler TTL).
+	streamHTTP *http.Client
+	username   string
+	password   string
 }
 
 func New(url, user, pass string) *Client {
 	return &Client{
-		base:     strings.TrimRight(url, "/"),
-		http:     &http.Client{Timeout: 15 * time.Second},
-		username: user,
-		password: pass,
+		base:       strings.TrimRight(url, "/"),
+		http:       &http.Client{Timeout: 15 * time.Second},
+		streamHTTP: &http.Client{},
+		username:   user,
+		password:   pass,
 	}
 }
 
@@ -221,7 +227,7 @@ func (c *Client) QueryStream(ctx context.Context, sql string, onRow RowHandler) 
 	// the default JSON array would buffer the whole (endless) response.
 	req.Header.Set("Accept", "application/vnd.ksqlapi.delimited.v1")
 	c.setAuth(req)
-	resp, err := c.http.Do(req)
+	resp, err := c.streamHTTP.Do(req)
 	if err != nil {
 		return err
 	}

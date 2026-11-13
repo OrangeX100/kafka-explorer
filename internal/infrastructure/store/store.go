@@ -50,12 +50,12 @@ func Open(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	// Single writer process; busy timeout avoids transient SQLITE_BUSY when
-	// the UI hammers settings while a background write is flushing.
-	if _, err := db.Exec(`PRAGMA busy_timeout=3000`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("set busy timeout: %w", err)
-	}
+	// NOTE on busy handling: a `db.Exec("PRAGMA busy_timeout=...")` here only
+	// reaches ONE pooled connection — every later connection from database/sql
+	// ran without it. The ncruces driver already sets a 1-MINUTE busy timeout
+	// on every new connection when no _pragma DSN option is given, so the old
+	// per-conn Exec actually LOWERED one connection to 3s while the rest kept
+	// 60s. The driver default is correct and universal; nothing to set here.
 	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, err

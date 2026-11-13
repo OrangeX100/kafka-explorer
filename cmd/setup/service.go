@@ -331,6 +331,17 @@ func (s *setupService) runEngine(dir string) (installErr error) {
 		err = runEngineViaExplorerCmd(engine, engineArgs(explorerLog), workDir, explorerLog)
 		if err != nil {
 			problems = append(problems, "explorer: "+describeRunErr(err))
+			// errTimeout means the engine RAN but outlasted the wait budget —
+			// escalating now would start a SECOND concurrent Inno instance
+			// against the same install dir (its mutex makes one exit, but the
+			// half-written state confused both runs). Keep waiting on the
+			// engine's own log instead; only an engine that never started
+			// (errStartBlocked) or definitively failed earns the escalation.
+			if errors.Is(err, errTimeout) {
+				if werr := waitForEngineLog(explorerLog, time.Now().Add(5*time.Minute), 10*time.Minute); werr == nil {
+					return nil
+				}
+			}
 		}
 		// One-click script: the engine with the exact silent args, GBK
 		// encoded (cmd.exe reads batch files in the ANSI codepage). The
@@ -397,12 +408,22 @@ type installProgress struct {
 // passes. It is best-effort: if the log never appears (engine blocked),
 // the UI keeps a slow synthetic crawl instead of a dead bar.
 func (p *installProgress) run() {
-	defer func() {
-		if p.emit != nil {
-			p.emit("setup:progress", map[string]any{"pct": 100, "done": true})
-		}
-	}()
+	succeeded := false
 	seen := -1 // -1 = log not started yet
+	defer func() {
+		if p.emit == nil {
+			return
+		}
+		// done:true ONLY on real success — the old unconditional defer
+		// emitted 100/done even when the log ended in failure, a lie in the
+		// event contract (the current UI ignores `done`, but any consumer
+		// that trusts it would show a completed install for a failed one).
+		pct := 0
+		if seen > 0 {
+			pct = seen
+		}
+		p.emit("setup:progress", map[string]any{"pct": pct, "done": succeeded})
+	}()
 	for time.Now().Before(p.deadline) {
 		time.Sleep(400 * time.Millisecond)
 		data, err := os.ReadFile(p.logPath)
@@ -427,6 +448,7 @@ func (p *installProgress) run() {
 			}
 		}
 		if done || failed {
+			succeeded = done
 			return
 		}
 	}
