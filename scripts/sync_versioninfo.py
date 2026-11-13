@@ -30,12 +30,17 @@ def main():
     with open(TEMPLATE, encoding="utf-8") as f:
         data = json.load(f)
 
-    # beta.N carries its sequence in the numeric Patch field (0.2.0-beta.1
+    # beta.N carries its sequence in the numeric Build field (0.2.0-beta.1
     # → 0.2.0.1) so Explorer's 版本 column orders prereleases sensibly.
     patch = int(m.group(4).split(".")[1]) if m.group(4) and re.match(r"beta\.(\d+)$", m.group(4)) else 0
     parts = [int(m.group(1)), int(m.group(2)), int(m.group(3)), patch]
-    data["FixedFileInfo"]["FileVersion"] = dict(zip(("Major", "Minor", "Micro", "Patch"), parts))
-    data["FixedFileInfo"]["ProductVersion"] = dict(zip(("Major", "Minor", "Micro", "Patch"), parts))
+    # goversioninfo's FileVersion struct is {Major, Minor, Patch, Build} —
+    # the old "Micro" key decoded into NOTHING, so the numeric version was
+    # always x.y.0.0 (the "FixedFileInfo.FileVersion (0.4.0.0) and
+    # StringFileInfo.FileVersion do not match" warning on every build, and a
+    # stale numeric version in Explorer's 属性 page).
+    data["FixedFileInfo"]["FileVersion"] = dict(zip(("Major", "Minor", "Patch", "Build"), parts))
+    data["FixedFileInfo"]["ProductVersion"] = dict(zip(("Major", "Minor", "Patch", "Build"), parts))
     s = data["StringFileInfo"]
     s["FileVersion"] = version
     s["ProductVersion"] = version
