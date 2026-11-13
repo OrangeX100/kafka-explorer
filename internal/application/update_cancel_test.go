@@ -59,7 +59,7 @@ func TestStageUpdateCancelMidDownload(t *testing.T) {
 		close(cancelled)
 	}()
 
-	svc := NewUpdateService("0.2.0")
+	svc := NewUpdateService("0.2.0", nil)
 	staged, err := svc.StageUpdate(t.Context(), srv.URL, total, "", func(Progress) {}, cancelled)
 
 	// Cancellation is a silent no-op: nil error, nil staged path.
@@ -95,7 +95,7 @@ func TestStageUpdateCancelWhileConnecting(t *testing.T) {
 		close(cancelled)
 	}()
 
-	svc := NewUpdateService("0.2.0")
+	svc := NewUpdateService("0.2.0", nil)
 	svc.client = &http.Client{Timeout: 60 * time.Second}
 	staged, err := svc.StageUpdate(t.Context(), srv.URL, 1<<20, "", func(Progress) {}, cancelled)
 
@@ -132,7 +132,7 @@ func TestStageUpdateCompleteStillWorks(t *testing.T) {
 
 	// dest lives in the REAL updates dir (updatesDir is process-global) —
 	// assert on the returned path and clean the artifact up.
-	svc := NewUpdateService("0.2.0")
+	svc := NewUpdateService("0.2.0", nil)
 	staged, err := svc.StageUpdate(t.Context(), srv.URL+"/asset.exe", total, "", func(Progress) {}, make(chan struct{}))
 	if err != nil {
 		t.Fatalf("complete download: %v", err)
@@ -158,7 +158,7 @@ func TestStageUpdateWrongSizeIsRejected(t *testing.T) {
 	defer cleanup()
 
 	cancelled := make(chan struct{})
-	svc := NewUpdateService("0.2.0")
+	svc := NewUpdateService("0.2.0", nil)
 	_, err := svc.StageUpdate(t.Context(), srv.URL, 1<<20, "", func(Progress) {}, cancelled)
 	if err == nil {
 		t.Fatal("short body must be rejected by the size gate")

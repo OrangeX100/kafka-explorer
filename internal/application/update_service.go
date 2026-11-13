@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"kafkaexplorer/internal/domain"
 )
 
@@ -44,6 +46,9 @@ type UpdateCheck struct {
 type UpdateService struct {
 	current string
 	client  *http.Client
+	// log: nil = silent (tests). Carries the legacy-downgrade notice — the
+	// comment at the checksumMissing branch promises "say so in the log".
+	log *zap.Logger
 	// baseURL: https://api.github.com in production; tests point it at a
 	// local fixture to exercise the conditional-request flow deterministically.
 	baseURL string
@@ -60,7 +65,7 @@ type conditionalCache struct {
 	body []byte
 }
 
-func NewUpdateService(currentVersion string) *UpdateService {
+func NewUpdateService(currentVersion string, log *zap.Logger) *UpdateService {
 	return &UpdateService{
 		current: currentVersion,
 		// Bounded: an unreachable update server must never hang the caller
@@ -68,6 +73,7 @@ func NewUpdateService(currentVersion string) *UpdateService {
 		client:  &http.Client{Timeout: 10 * time.Second},
 		etag:    map[string]conditionalCache{},
 		baseURL: "https://api.github.com",
+		log:     log,
 	}
 }
 

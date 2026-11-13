@@ -23,6 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+
 	"kafkaexplorer/internal/appdir"
 	"kafkaexplorer/internal/domain"
 )
@@ -291,7 +293,10 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 			want = sidecar
 		case checksumMissing:
 			// legacy release without a sidecar: keep the legacy size-only
-			// downgrade, but say so in the log
+			// downgrade — but the decision is logged, not silent ("say so in
+			// the log" promise from the checksumMissing comment).
+			s.log.Warn("安装包校验文件缺失（legacy 发布），仅按文件大小校验后放行",
+				zap.String("asset", assetURL))
 			return part, nil
 		default: // unreachable or malformed: hard fail
 			os.Remove(part)
@@ -381,12 +386,15 @@ func systemRoot() string {
 	return `C:\Windows`
 }
 
-// checksumStatus distinguishes "this release has no sidecar at all"
-// (legacy downgrade) from "we could not fetch it" (hard fail).
+// checksumStatus distinguishes "EVERY route confirmed this release has no
+// sidecar at all" (legacy downgrade — a deliberate decision, logged) from
+// "we could not fetch it" (hard fail). A single 404 among mixed failures is
+// NOT proof of absence: a hijacked direct route returning 404 while a
+// mirror would serve the real sidecar must NOT trigger the downgrade.
 type checksumStatus int
 
 const (
-	checksumMissing checksumStatus = iota // HTTP 404: legacy release, no sidecar published
+	checksumMissing checksumStatus = iota // every route answered 404
 	checksumOK                            // digest parsed successfully
 	checksumFailed                        // unreachable / malformed: hard fail, never silently pass
 )
@@ -395,6 +403,7 @@ const (
 // returns the hex digest it carries.
 func fetchExpectedChecksum(ctx context.Context, urls []string) (string, checksumStatus) {
 	var lastErr error
+	sawMissing := false
 	for _, url := range urls {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
@@ -409,7 +418,8 @@ func fetchExpectedChecksum(ctx context.Context, urls []string) (string, checksum
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 		resp.Body.Close()
 		if resp.StatusCode == http.StatusNotFound {
-			return "", checksumMissing // legacy release: no sidecar published
+			sawMissing = true // this route has no sidecar; keep trying the others
+			continue
 		}
 		if resp.StatusCode != http.StatusOK {
 			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
@@ -424,7 +434,10 @@ func fetchExpectedChecksum(ctx context.Context, urls []string) (string, checksum
 		}
 		return strings.ToLower(line), checksumOK
 	}
-	_ = lastErr
+	if sawMissing && lastErr == nil {
+		// every route confirmed absence: legacy release, logged downgrade
+		return "", checksumMissing
+	}
 	return "", checksumFailed
 }
 

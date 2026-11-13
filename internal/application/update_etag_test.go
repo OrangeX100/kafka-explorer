@@ -67,7 +67,7 @@ func TestUpdateCheckFallbackToAPIAndEtag(t *testing.T) {
 	defer api.Close()
 
 	// Static world: the manifest routes all 404 → Check falls back to API.
-	svc := NewUpdateService("0.2.0")
+	svc := NewUpdateService("0.2.0", nil)
 	svc.baseURL = api.URL
 
 	first, err := svc.Check(t.Context(), "owner/repo")
@@ -93,7 +93,7 @@ func TestUpdateCheckRateLimitMessage(t *testing.T) {
 	}))
 	defer api.Close()
 
-	svc := NewUpdateService("0.2.0")
+	svc := NewUpdateService("0.2.0", nil)
 	svc.baseURL = api.URL
 	_, err := svc.Check(t.Context(), "owner/repo")
 	if err == nil {

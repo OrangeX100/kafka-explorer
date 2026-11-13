@@ -54,7 +54,7 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 	ioSvc := appsvc.NewMessageIOService(pool)
 	settingsSvc := appsvc.NewSettingsService(dbw)
 	connectSvc := appsvc.NewConnectService(dbw, secrets)
-	updateSvc := appsvc.NewUpdateService(buildinfo.Version)
+	updateSvc := appsvc.NewUpdateService(buildinfo.Version, log)
 
 	// re-point the ARP 卸载 button at the styled wrapper (Inno re-writes
 	// the key on every install/upgrade and no setup hook runs after that)
