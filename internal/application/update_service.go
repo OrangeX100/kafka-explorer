@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"kafkaexplorer/internal/domain"
@@ -39,6 +40,20 @@ type UpdateCheck struct {
 type UpdateService struct {
 	current string
 	client  *http.Client
+	// baseURL: https://api.github.com in production; tests point it at a
+	// local fixture to exercise the conditional-request flow deterministically.
+	baseURL string
+	// Conditional-request cache: GitHub does NOT count a 304 (If-None-Match
+	// hit) against the unauthenticated 60 req/hour limit, so repeated
+	// "check update" clicks stay free while a release is unchanged. Keyed
+	// by repo. In-memory only — a restart spends one request, which is fine.
+	mu   sync.Mutex
+	etag map[string]conditionalCache
+}
+
+type conditionalCache struct {
+	etag string
+	body []byte
 }
 
 func NewUpdateService(currentVersion string) *UpdateService {
@@ -46,7 +61,9 @@ func NewUpdateService(currentVersion string) *UpdateService {
 		current: currentVersion,
 		// Bounded: an unreachable update server must never hang the caller
 		// (the settings page shows a friendly timeout, not a frozen button).
-		client: &http.Client{Timeout: 10 * time.Second},
+		client:  &http.Client{Timeout: 10 * time.Second},
+		etag:    map[string]conditionalCache{},
+		baseURL: "https://api.github.com",
 	}
 }
 
@@ -61,7 +78,7 @@ func (s *UpdateService) Check(ctx context.Context, repo string) (UpdateCheck, er
 		return UpdateCheck{}, fmt.Errorf("%w: 更新源格式不正确，应为 owner/repo（例如 your-github/kafka-explorer）", domain.ErrInvalid)
 	}
 
-	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
+	url := fmt.Sprintf("%s/repos/%s/releases/latest", s.baseURL, repo)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return UpdateCheck{}, fmt.Errorf("%w: 构造更新请求失败", domain.ErrUnavailable)
@@ -69,6 +86,15 @@ func (s *UpdateService) Check(ctx context.Context, repo string) (UpdateCheck, er
 	// GitHub API requires a UA; the Accept header pins the stable JSON shape.
 	req.Header.Set("User-Agent", "kafka-explorer-updater")
 	req.Header.Set("Accept", "application/vnd.github+json")
+	// Conditional request: a 304 costs ZERO of the 60 req/hour unauthenticated
+	// budget, so hammering "check update" while a release is unchanged never
+	// trips the rate limit.
+	s.mu.Lock()
+	cached, hasCache := s.etag[repo]
+	s.mu.Unlock()
+	if hasCache {
+		req.Header.Set("If-None-Match", cached.etag)
+	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -76,13 +102,25 @@ func (s *UpdateService) Check(ctx context.Context, repo string) (UpdateCheck, er
 	}
 	defer resp.Body.Close()
 	switch {
+	case resp.StatusCode == http.StatusNotModified && hasCache:
+		// Unchanged release: serve the cached body (no quota spent).
+		return parseRelease(s.current, cached.body)
 	case resp.StatusCode == http.StatusNotFound:
 		// GitHub answers 404 for BOTH "no releases yet" and "private repo,
 		// unauthenticated" — the latter is the normal state while the
 		// project is still private.
 		return UpdateCheck{}, fmt.Errorf("%w: 更新源 %s 尚无发布版本，或仓库仍为私有（转公开后即可检查）", domain.ErrNotFound, repo)
 	case resp.StatusCode == http.StatusForbidden:
-		return UpdateCheck{}, fmt.Errorf("%w: 更新源请求被限流，请稍后再试", domain.ErrUnavailable)
+		// Rate limited (or blocked). X-RateLimit-Reset names the epoch the
+		// window resets at — say the actual minutes instead of "later".
+		msg := "更新源请求被限流"
+		if reset := resp.Header.Get("X-RateLimit-Reset"); reset != "" {
+			if epoch, err := strconv.ParseInt(reset, 10, 64); err == nil {
+				mins := int(time.Until(time.Unix(epoch, 0)).Minutes()) + 1
+				msg = fmt.Sprintf("更新源请求被限流（GitHub 对未认证请求每小时 60 次），约 %d 分钟后恢复，也可稍后重试", mins)
+			}
+		}
+		return UpdateCheck{}, fmt.Errorf("%w: %s", domain.ErrUnavailable, msg)
 	case resp.StatusCode != http.StatusOK:
 		return UpdateCheck{}, fmt.Errorf("%w: 更新源返回异常状态 %d", domain.ErrUnavailable, resp.StatusCode)
 	}
@@ -91,6 +129,18 @@ func (s *UpdateService) Check(ctx context.Context, repo string) (UpdateCheck, er
 	if err != nil {
 		return UpdateCheck{}, fmt.Errorf("%w: 读取更新源响应失败", domain.ErrUnavailable)
 	}
+	// Cache the body + ETag for the next conditional round-trip.
+	if etag := resp.Header.Get("ETag"); etag != "" {
+		s.mu.Lock()
+		s.etag[repo] = conditionalCache{etag: etag, body: body}
+		s.mu.Unlock()
+	}
+	return parseRelease(s.current, body)
+}
+
+// parseRelease turns one releases/latest JSON body into an UpdateCheck.
+// Shared by the fresh-200 and the 304-cached paths so both behave identically.
+func parseRelease(currentVersion string, body []byte) (UpdateCheck, error) {
 	var release struct {
 		TagName string `json:"tag_name"`
 		HTMLURL string `json:"html_url"`
@@ -111,8 +161,8 @@ func (s *UpdateService) Check(ctx context.Context, repo string) (UpdateCheck, er
 		notes = notes[:2000] + "…"
 	}
 	out := UpdateCheck{
-		HasUpdate: versionLess(s.current, latest),
-		Current:   s.current,
+		HasUpdate: versionLess(currentVersion, latest),
+		Current:   currentVersion,
 		Latest:    latest,
 		URL:       release.HTMLURL,
 		Notes:     notes,
