@@ -207,6 +207,10 @@ func (h *SchemaRegistryHandler) SetSubjectConfig(ctx context.Context, registryID
 	return h.svc.SetSubjectConfig(ctx, registryID, subject, level)
 }
 
+func (h *SchemaRegistryHandler) GetSubjectConfig(ctx context.Context, registryID, subject string) (string, error) {
+	return h.svc.SubjectConfig(ctx, registryID, subject)
+}
+
 func (h *SchemaRegistryHandler) GlobalConfig(ctx context.Context, registryID string) (domain.GlobalConfig, error) {
 	return h.svc.GlobalConfig(ctx, registryID)
 }

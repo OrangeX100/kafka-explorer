@@ -370,6 +370,17 @@ func (s *SchemaRegistryService) SetSubjectConfig(ctx context.Context, registryID
 	return s.client(r, "").SetSubjectConfig(ctx, subject, level)
 }
 
+// SubjectConfig reads one subject's stored compatibility level. "" means
+// no override exists (the registry default applies) — callers render that
+// as the effective default instead of a bare empty value.
+func (s *SchemaRegistryService) SubjectConfig(ctx context.Context, registryID, subject string) (string, error) {
+	r, err := s.store.get(ctx, registryID)
+	if err != nil {
+		return "", err
+	}
+	return s.client(r, "").GetSubjectConfig(ctx, subject)
+}
+
 // GlobalConfig reads the registry-wide compatibility level.
 func (s *SchemaRegistryService) GlobalConfig(ctx context.Context, registryID string) (domain.GlobalConfig, error) {
 	r, err := s.store.get(ctx, registryID)

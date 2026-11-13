@@ -282,6 +282,9 @@ export const registryApi = {
     schemaRegistryHandler.DeleteVersion(registryId, subject, version, permanent ?? false) as never,
   setSubjectConfig: (registryId: string, subject: string, level: string): Promise<void> =>
     schemaRegistryHandler.SetSubjectConfig(registryId, subject, level) as never,
+  /** Per-subject compat level as stored ("" = no override → registry default). */
+  subjectConfig: (registryId: string, subject: string): Promise<string> =>
+    schemaRegistryHandler.GetSubjectConfig(registryId, subject) as never,
   globalConfig: (registryId: string): Promise<GlobalConfig> =>
     schemaRegistryHandler.GlobalConfig(registryId) as never,
   setGlobalConfig: (registryId: string, level: string): Promise<void> =>

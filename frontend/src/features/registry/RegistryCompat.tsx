@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { Select } from "../common/controls.js";
 import { registryApi, friendlyError } from "../../shared/api.js";
@@ -6,10 +6,12 @@ import { useToast } from "../../state/stores.js";
 import { t } from "../../shared/i18n.js";
 import type { CompatibilityCheck, SchemaSubject, SchemaVersion } from "../../shared/contracts-admin.js";
 
-// Compatibility workbench : the candidate
-// editor posts against a chosen anchor version, and the subject's
-// compatibility level is adjustable in place with the semantics hint next
-// to the control.
+// Compatibility workbench: the candidate editor posts against a chosen
+// anchor version, and the subject's compatibility level is adjustable in
+// place. The level shown here is LOCAL state seeded from the registry (the
+// subject prop's compatibility is a list snapshot that goes stale after an
+// in-place change — selecting a level used to "snap back" to the stale
+// value while the registry had actually stored it).
 const COMPAT_LEVELS = [
   "BACKWARD",
   "BACKWARD_TRANSITIVE",
@@ -18,7 +20,19 @@ const COMPAT_LEVELS = [
   "FULL",
   "FULL_TRANSITIVE",
   "NONE",
-];
+] as const;
+
+// One-line semantics per level — rendered under the select so the choice
+// is self-explaining (option labels keep the registry terminology).
+const LEVEL_DESC: Record<string, string> = {
+  BACKWARD: "reg.levelBackward",
+  BACKWARD_TRANSITIVE: "reg.levelBackwardT",
+  FORWARD: "reg.levelForward",
+  FORWARD_TRANSITIVE: "reg.levelForwardT",
+  FULL: "reg.levelFull",
+  FULL_TRANSITIVE: "reg.levelFullT",
+  NONE: "reg.levelNone",
+};
 
 export function CompatTab({
   registryId,
@@ -34,7 +48,25 @@ export function CompatTab({
   const [checkAnchor, setCheckAnchor] = useState<string>("latest");
   const [check, setCheck] = useState<CompatibilityCheck | null>(null);
   const [busy, setBusy] = useState(false);
+  // The level is read from the registry itself: the subject list snapshot
+  // may be stale ("" = no override → the registry default applies).
+  const [level, setLevelState] = useState<string>("NONE");
   const toast = { show: useToast((s) => s.show) };
+
+  useEffect(() => {
+    let alive = true;
+    registryApi
+      .subjectConfig(registryId, subject.name)
+      .then((cfg) => {
+        if (alive) setLevelState(cfg || "NONE");
+      })
+      .catch(() => {
+        if (alive) setLevelState(subject.compatibility || "NONE");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [registryId, subject.name, subject.compatibility]);
 
   const anchorOptions = [
     { value: "latest", label: t("reg.checkAgainstLatest") },
@@ -55,10 +87,13 @@ export function CompatTab({
   };
 
   const setLevel = async (level: string) => {
+    const prev = level;
     try {
       await registryApi.setSubjectConfig(registryId, subject.name, level);
+      setLevelState(level); // optimistic: the registry confirmed the write
       toast.show(t("reg.configSaved"), "ok");
     } catch (err) {
+      setLevelState(prev); // keep the registry's last known value
       toast.show(friendlyError(err), "error");
     }
   };
@@ -67,14 +102,14 @@ export function CompatTab({
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-3">
       <div className="flex flex-wrap items-center gap-2 text-11 text-ink-300">
         <span>{t("reg.compatLevel")}</span>
-        <div className="w-56">
+        <div className="w-64">
           <Select
-            value={subject.compatibility || "NONE"}
-            options={COMPAT_LEVELS.map((l) => ({ value: l, label: l }))}
+            value={level}
+            options={COMPAT_LEVELS.map((l) => ({ value: l, label: `${l} · ${t(LEVEL_DESC[l])}` }))}
             onChange={(v) => void setLevel(v)}
           />
         </div>
-        <span className="text-10 text-ink-400">{t("reg.compatHint")}</span>
+        <span className="text-10 text-ink-400">{t((LEVEL_DESC[level] ?? "reg.levelNone") + "_long")}</span>
         <div className="flex-1" />
         <div className="w-40">
           <Select value={checkAnchor} options={anchorOptions} onChange={setCheckAnchor} />

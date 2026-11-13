@@ -549,6 +549,13 @@
   "reg.colType": "类型",
   "reg.colVersion": "版本",
   "reg.compatHint": "修改立即生效；_TRANSITIVE 会检查全部历史版本",
+  "reg.levelBackward": "向后兼容",
+  "reg.levelBackwardT": "向后兼容（含历史）",
+  "reg.levelForward": "向前兼容",
+  "reg.levelForwardT": "向前兼容（含历史）",
+  "reg.levelFull": "双向兼容",
+  "reg.levelFullT": "双向兼容（含历史）",
+  "reg.levelNone": "不检查兼容性",
   "reg.compatLevel": "兼容性级别",
   "reg.compatible": "兼容 ✓",
   "reg.configSaved": "兼容性级别已更新",
@@ -800,5 +807,12 @@
   "ws.brokers": "Broker",
   "ws.compare": "对比",
   "ws.quotas": "配额",
-  "ws.switchConnection": "切换连接"
+  "ws.switchConnection": "切换连接",
+  "reg.levelBackward_long": "向后兼容：新版 schema 可读取旧版本写入的数据",
+  "reg.levelBackwardT_long": "向后兼容（含历史）：新版 schema 可读取所有历史版本写入的数据",
+  "reg.levelForward_long": "向前兼容：旧版本 schema 可读取新版 schema 写入的数据",
+  "reg.levelForwardT_long": "向前兼容（含历史）：所有历史版本 schema 可读取新版 schema 写入的数据",
+  "reg.levelFull_long": "双向兼容：新版 schema 与上一版本双向兼容",
+  "reg.levelFullT_long": "双向兼容（含历史）：新版 schema 与所有历史版本双向兼容",
+  "reg.levelNone_long": "不检查兼容性：任何 schema 都可注册（慎用，混用后难以回退）"
 }

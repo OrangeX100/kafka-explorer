@@ -549,6 +549,13 @@
   "reg.colType": "Type",
   "reg.colVersion": "Version",
   "reg.compatHint": "Applies immediately; _TRANSITIVE checks all historical versions",
+  "reg.levelBackward": "backward only",
+  "reg.levelBackwardT": "backward, all history",
+  "reg.levelForward": "forward only",
+  "reg.levelForwardT": "forward, all history",
+  "reg.levelFull": "full (last version)",
+  "reg.levelFullT": "full (all history)",
+  "reg.levelNone": "no compatibility check",
   "reg.compatLevel": "Compatibility level",
   "reg.compatible": "Compatible ✓",
   "reg.configSaved": "Compatibility level updated",
@@ -800,5 +807,12 @@
   "ws.brokers": "Brokers",
   "ws.compare": "Compare",
   "ws.quotas": "Quotas",
-  "ws.switchConnection": "Switch connection"
+  "ws.switchConnection": "Switch connection",
+  "reg.levelBackward_long": "Backward: new schemas read data written by the previous version",
+  "reg.levelBackwardT_long": "Backward (transitive): new schemas read data written by ALL historical versions",
+  "reg.levelForward_long": "Forward: the previous schema reads data written by new schemas",
+  "reg.levelForwardT_long": "Forward (transitive): ALL historical schemas read data written by new schemas",
+  "reg.levelFull_long": "Full: new schema is both backward and forward compatible with the last version",
+  "reg.levelFullT_long": "Full (transitive): new schema is compatible with ALL historical versions",
+  "reg.levelNone_long": "No compatibility check: any schema can register (careful — hard to undo once mixed)"
 }
