@@ -38,10 +38,14 @@ export function CompatTab({
   registryId,
   subject,
   versions,
+  onCompatChanged,
 }: {
   registryId: string;
   subject: SchemaSubject;
   versions: SchemaVersion[] | null;
+  // Parent refresh hook: after a successful write the subject LIST snapshot
+  // (rail badge, header badge) must be re-fetched or it shows the old level.
+  onCompatChanged?: () => void;
 }) {
   const latest = versions?.find((v) => v.version === subject.version);
   const [candidate, setCandidate] = useState(() => prettySchema(subject.schema));
@@ -92,6 +96,7 @@ export function CompatTab({
       await registryApi.setSubjectConfig(registryId, subject.name, level);
       setLevelState(level); // optimistic: the registry confirmed the write
       toast.show(t("reg.configSaved"), "ok");
+      onCompatChanged?.(); // refresh the parent's subject snapshot (badges)
     } catch (err) {
       setLevelState(prev); // keep the registry's last known value
       toast.show(friendlyError(err), "error");

@@ -170,6 +170,20 @@ func (s *ConnectionService) CloneConnection(ctx context.Context, id, newName str
 			}
 		}
 	}
+	// Tunnel secret: same independence rule. The clone gets its own ref AND
+	// its own copy of the password/passphrase — sharing the source's ref
+	// would make an edit on either side silently rewrite the other's secret.
+	clone.Tunnel.SecretRef = ""
+	if clone.Tunnel.Enabled {
+		clone.Tunnel.SecretRef = "conn-tunnel-" + clone.ID
+		if src.Tunnel.SecretRef != "" {
+			if sec, err := s.secrets.Get(secretService, src.Tunnel.SecretRef); err == nil && sec != "" {
+				if err := s.secrets.Set(secretService, clone.Tunnel.SecretRef, sec); err != nil {
+					return domain.Connection{}, fmt.Errorf("copy tunnel password: %w", err)
+				}
+			}
+		}
+	}
 	if _, err := s.Save(ctx, SaveInput{Connection: clone}); err != nil {
 		return domain.Connection{}, err
 	}

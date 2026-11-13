@@ -47,6 +47,10 @@ export function RegistryView() {
   }, []);
 
   const load = useCallback(async () => {
+    // connection names feed the binding badges — refresh them WITH the
+    // registries, otherwise a connection renamed on the connections page
+    // leaves stale badge labels here
+    connectionsApi.list().then((c) => setConnections(c ?? [])).catch(() => {});
     setRegistries(null);
     setLoadError(null);
     try {
@@ -76,15 +80,31 @@ export function RegistryView() {
     void load();
   }, [load]);
 
-  const loadSubjects = useCallback(async (id: string) => {
+  const loadSubjects = useCallback(async (id: string): Promise<SchemaSubject[]> => {
     setSubjects(null);
     setSelected(null);
     setSubjectsError(null);
     try {
-      setSubjects((await registryApi.subjects(id)) ?? []);
+      const list = (await registryApi.subjects(id)) ?? [];
+      setSubjects(list);
+      return list;
     } catch (err) {
       setSubjectsError(err);
       setSubjects([]);
+      return [];
+    }
+  }, []);
+
+  // Silent refresh: updates the subject LIST without clearing the selection
+  // — the compat workbench's write path (a full reload would blank the
+  // detail pane for a second and yank the user out of the tab they're in).
+  const refreshSubjectsSilent = useCallback(async (id: string): Promise<SchemaSubject[]> => {
+    try {
+      const list = (await registryApi.subjects(id)) ?? [];
+      setSubjects(list);
+      return list;
+    } catch {
+      return [];
     }
   }, []);
 
@@ -294,6 +314,17 @@ export function RegistryView() {
                 subject={selected}
                 onDeleted={() => activeId && loadSubjects(activeId)}
                 onRemove={removeSubject}
+                // compat-level changes must refresh the subject list so the
+                // rail badge (and the header badge) show the stored level —
+                // silently, keeping the open detail pane and selection
+                onCompatChanged={() => {
+                  if (activeId) {
+                    void refreshSubjectsSilent(activeId).then((fresh) => {
+                      const found = fresh.find((s) => s.name === selected.name);
+                      if (found) setSelected(found);
+                    });
+                  }
+                }}
               />
             ) : (
               <EmptyState icon={<FileCode size={20} />} title={t("reg.schema")} desc={t("reg.pickSubject")} />
@@ -330,10 +361,12 @@ export function RegistryView() {
           onClose={() => setRegistering(false)}
           onRegistered={(subject) => {
             setRegistering(false);
-            void loadSubjects(activeId);
-            // Reopen the registered subject so the new version is visible.
-            const found = (subjects ?? []).find((s) => s.name === subject);
-            if (found) setSelected(found);
+            // Reopen the registered subject from the REFRESHED list — the
+            // stale closure used to select an out-of-date object.
+            void loadSubjects(activeId).then((fresh) => {
+              const found = fresh.find((s) => s.name === subject);
+              if (found) setSelected(found);
+            });
           }}
         />
       )}

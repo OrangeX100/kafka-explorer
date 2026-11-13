@@ -26,11 +26,16 @@ export function SchemaDetail({
   subject,
   onDeleted,
   onRemove,
+  onCompatChanged,
 }: {
   registryId: string;
   subject: SchemaSubject;
   onDeleted: () => void;
   onRemove: (subject: SchemaSubject, permanent: boolean) => Promise<void>;
+  // Fired after a compatibility-level write so the parent can refresh the
+  // subject list — the rail/header badges read a LIST snapshot that would
+  // otherwise go stale (the compat tab's own select is local state).
+  onCompatChanged?: () => void;
 }) {
   const [tab, setTab] = useState<DetailTab>("schema");
   const [versions, setVersions] = useState<SchemaVersion[] | null>(null);
@@ -120,7 +125,7 @@ export function SchemaDetail({
             onDelete={removeVersion}
           />
         )}
-        {tab === "compat" && <CompatTab registryId={registryId} subject={subject} versions={versions} />}
+        {tab === "compat" && <CompatTab registryId={registryId} subject={subject} versions={versions} onCompatChanged={onCompatChanged} />}
         {tab === "diff" && <DiffTab versions={versions} latest={subject.version} subjectName={subject.name} />}
       </div>
     </div>
