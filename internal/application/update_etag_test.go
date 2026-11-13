@@ -19,7 +19,7 @@ import (
 const fixtureReleaseBody = `{"tag_name":"v9.9.9","html_url":"https://example.com/r","body":"notes",
 	"assets":[{"name":"KafkaExplorer_Setup_9.9.9.exe","size":123,"browser_download_url":"https://example.com/dl"}]}`
 
-const fixtureManifest = `{"tagName":"v9.9.9","notes":"manifest notes","assetName":"KafkaExplorer_Setup_9.9.9.exe","assetSize":456}`
+const fixtureManifest = `{"tagName":"v9.9.9","notes":"manifest notes","assetName":"KafkaExplorer_Setup_9.9.9.exe","assetSize":456,"assetSHA256":"abc123"}`
 
 func TestParseManifest(t *testing.T) {
 	got, err := parseManifest("0.2.0", "owner/repo", []byte(fixtureManifest))
@@ -31,6 +31,9 @@ func TestParseManifest(t *testing.T) {
 	}
 	if got.URL != "https://github.com/owner/repo/releases/tag/v9.9.9" {
 		t.Fatalf("release URL wrong: %s", got.URL)
+	}
+	if got.AssetSha256 != "abc123" {
+		t.Fatalf("manifest sha not carried: %q", got.AssetSha256)
 	}
 	notUpd, err := parseManifest("9.9.9", "owner/repo", []byte(fixtureManifest))
 	if err != nil {

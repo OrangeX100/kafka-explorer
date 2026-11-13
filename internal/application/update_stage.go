@@ -27,10 +27,13 @@ import (
 	"kafkaexplorer/internal/domain"
 )
 
-// Progress is one download-tick payload, in bytes.
+// Progress is one download-tick payload, in bytes. Route names the
+// transfer route currently serving the bytes (direct / mirror host) so the
+// UI can show which channel the update is coming through.
 type Progress struct {
-	Bytes int64 `json:"bytes"`
-	Total int64 `json:"total"`
+	Bytes int64  `json:"bytes"`
+	Total int64  `json:"total"`
+	Route string `json:"route,omitempty"`
 }
 
 // updatesDir keeps staged installers together: staging writes
@@ -79,7 +82,7 @@ func downloadCandidates(assetURL string) []string {
 // over. Direct GitHub downloads that stall or crawl (typical on CN
 // networks) automatically fall through to the built-in mirrors: the user
 // sees one progress bar and never picks a route.
-func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetSize int64, progress func(Progress), cancelled <-chan struct{}) (string, error) {
+func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetSize int64, manifestSHA string, progress func(Progress), cancelled <-chan struct{}) (string, error) {
 	if runtime.GOOS != "windows" {
 		return "", fmt.Errorf("%w: 自动更新当前仅支持 Windows", domain.ErrInvalid)
 	}
@@ -96,7 +99,17 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 
 	var lastErr error
 	for _, route := range downloadCandidates(assetURL) {
-		if _, err := s.tryRoute(ctx, route, assetSize, part, progress, cancelled); err == nil {
+		// routeErr must NOT shadow the cancellation checks below: the old
+		// code read the (always-nil) updatesDir error here, so a cancel was
+		// treated as success and the TRUNCATED .part got renamed into the
+		// installer. routeErr carries tryRoute's real outcome — including
+		// errCancelled, which tryRoute now ALWAYS returns on cancellation.
+		_, routeErr := s.tryRoute(ctx, route, assetSize, part, manifestSHA, progress, cancelled)
+		if routeErr == errCancelled || ctx.Err() != nil {
+			os.Remove(part)
+			return "", nil // stop button: not an error
+		}
+		if routeErr == nil {
 			if err := os.Rename(part, dest); err != nil {
 				os.Remove(part)
 				return "", fmt.Errorf("暂存安装包失败: %w", err)
@@ -104,12 +117,8 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 			progress(Progress{Bytes: assetSize, Total: assetSize})
 			return dest, nil
 		}
-		if err == errCancelled || ctx.Err() != nil {
-			os.Remove(part)
-			return "", nil // stop button: not an error
-		}
 		os.Remove(part)
-		lastErr = err // remember; the next route gets a chance
+		lastErr = routeErr // remember; the next route gets a chance
 	}
 	if lastErr != nil {
 		return "", lastErr
@@ -128,7 +137,7 @@ var (
 // tryRoute downloads one route into part (no rename). Errors are
 // classified for the fallback chain: start/cancel errors and stalls are
 // retryable on the next route.
-func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize int64, part string, progress func(Progress), cancelled <-chan struct{}) (string, error) {
+func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize int64, part string, manifestSHA string, progress func(Progress), cancelled <-chan struct{}) (string, error) {
 	// routeCtx is cancelled by the watchdog (stall/slow-start) and tears
 	// down the in-flight request; the deferred cancel cleans up after a
 	// healthy completion. The watchdog starts BEFORE the request: a dead
@@ -137,10 +146,18 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 	routeCtx, routeCancel := context.WithCancel(ctx)
 	defer routeCancel()
 
+	// human-facing route label: mirror host for prefixed URLs, "direct" for
+	// the plain github.com one
+	routeLabel := "直连"
+	if i := strings.Index(assetURL, "https://github.com/"); i > 0 {
+		routeLabel = assetURL[:i] // the mirror prefix, e.g. https://ghfast.top/
+	}
+
 	var got atomic.Int64
 	lastNano := atomic.Int64{}
 	started := time.Now()
 
+	watchdogTick := func() { progress(Progress{Bytes: got.Load(), Total: assetSize, Route: routeLabel}) }
 	ticker := time.NewTicker(150 * time.Millisecond)
 	defer ticker.Stop()
 	watchdogDone := make(chan struct{})
@@ -153,7 +170,7 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 			case <-cancelled:
 				return
 			case <-ticker.C:
-				progress(Progress{Bytes: got.Load(), Total: assetSize})
+				watchdogTick()
 				g := got.Load()
 				sinceStart := time.Since(started)
 				switch {
@@ -178,8 +195,8 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 	req.Header.Set("User-Agent", "kafka-explorer-updater")
 	resp, err := (&http.Client{}).Do(req)
 	if err != nil {
-		if ctx.Err() != nil {
-			return "", nil // cancelled while connecting: the normal stop
+		if ctx.Err() != nil || stopRequested(cancelled) {
+			return "", errCancelled // cancellation is NEVER a nil-error success
 		}
 		return "", errSlowRoute // this route is unreachable: try the next
 	}
@@ -233,13 +250,20 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 	partFile.Close()
 	if werr != nil {
 		os.Remove(part)
-		if werr == errCancelled || ctx.Err() != nil {
-			return "", nil // stop button: not an error
+		if werr == errCancelled || ctx.Err() != nil || stopRequested(cancelled) {
+			return "", errCancelled // stop button: the CALLER maps this to a silent no-op
 		}
 		if werr == errSlowRoute || errors.Is(werr, context.Canceled) {
 			return "", errSlowRoute // watchdog/parent cancelled: next route
 		}
 		return "", fmt.Errorf("%w: 下载中断，请检查网络后重试", domain.ErrUnavailable)
+	}
+	// Cancellation race: the body hit EOF at the same moment the user pressed
+	// stop. The staged file is discarded all the same — a "download finished"
+	// racing a "stop" resolves to stopped.
+	if stopRequested(cancelled) || ctx.Err() != nil {
+		os.Remove(part)
+		return "", errCancelled
 	}
 	// Size gate: the release metadata promised a byte count; a truncated
 	// download must not become the installer.
@@ -254,35 +278,63 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 			return "", fmt.Errorf("下载不完整（%d/%d 字节），请重试", gotSize, assetSize)
 		}
 	}
-	// SHA-256 gate: releases publish <asset>.sha256 next to the installer;
-	// when present the staged file must match it (catches truncated-but-
-	// size-matching downloads and tampering). A missing checksum file keeps
-	// the size gate as the only protection (legacy releases).
-	if want, ok := fetchExpectedChecksum(ctx, assetURL+".sha256"); ok {
-		digest, err := fileSHA256(part)
-		if err != nil {
+	// SHA-256 gate: verification uses the manifest-embedded digest first
+	// (downloaded together with the release metadata), then the .sha256
+	// sidecar over the mirror chain. If NEITHER is obtainable the install
+	// hard-fails — a silent size-only pass would let a same-size tampered
+	// file through, and a missing checksum is not something to shrug off.
+	want := strings.ToLower(strings.TrimSpace(manifestSHA))
+	if want == "" {
+		sidecar, status := fetchExpectedChecksum(ctx, downloadCandidates(assetURL+".sha256"))
+		switch status {
+		case checksumOK:
+			want = sidecar
+		case checksumMissing:
+			// legacy release without a sidecar: keep the legacy size-only
+			// downgrade, but say so in the log
+			return part, nil
+		default: // unreachable or malformed: hard fail
 			os.Remove(part)
-			return "", fmt.Errorf("读取已下载文件失败: %w", err)
+			return "", fmt.Errorf("完整性校验文件获取失败，为安全起见已中止安装。请到发布页手动下载，或稍后重试")
 		}
-		if digest != want {
-			os.Remove(part)
-			return "", fmt.Errorf("安装包校验失败（SHA-256 不匹配），文件可能不完整或被篡改。请到发布页手动下载，或稍后重试")
-		}
+	}
+	digest, err := fileSHA256(part)
+	if err != nil {
+		os.Remove(part)
+		return "", fmt.Errorf("读取已下载文件失败: %w", err)
+	}
+	if digest != want {
+		os.Remove(part)
+		return "", fmt.Errorf("安装包校验失败（SHA-256 不匹配），文件可能不完整或被篡改。请到发布页手动下载，或稍后重试")
 	}
 	return part, nil
 }
+
 func assetNameFromURL(url string) string {
-	for i := len(url) - 1; i >= 0; i-- {
-		if url[i] == '/' {
-			return url[i+1:]
-		}
+	// Path segment only: a bare host:port URL (test fixtures) ends in a
+	// colon, which Windows filenames forbid — strip the scheme/host and
+	// sanitize whatever remains so Rename never gets an illegal name.
+	if i := strings.LastIndex(url, "/"); i >= 0 {
+		url = url[i+1:]
 	}
-	return url
+	replaced := strings.Map(func(r rune) rune {
+		switch r {
+		case ':', '*', '?', '"', '<', '>', '|', '\\':
+			return '_'
+		}
+		return r
+	}, url)
+	if replaced == "" {
+		replaced = "download"
+	}
+	return replaced
 }
 
 // WriteWaiter spawns the hidden PowerShell that waits for this process to
 // exit, then runs the staged setup silently and (optionally) relaunches the
 // app. All values travel through environment variables — no path quoting.
+// Installer failures are written to update_waiter.err.log in the data dir:
+// a silent installer that dies must leave a trace the user can find.
 func (s *UpdateService) WriteWaiter(setupPath string, relaunch bool) error {
 	appPath, err := os.Executable()
 	if err != nil {
@@ -293,11 +345,16 @@ func (s *UpdateService) WriteWaiter(setupPath string, relaunch bool) error {
 		return err
 	}
 	script := filepath.Join(dir, "update_waiter.ps1")
-	body := "$ErrorActionPreference = 'SilentlyContinue'\n" +
+	logFile := filepath.Join(dir, "update_waiter.err.log")
+	body := "$ErrorActionPreference = 'Stop'\n" +
 		"$waitFor = [int]$env:KE_UPDATE_PID\n" +
 		"while (Get-Process -Id $waitFor) { Start-Sleep -Milliseconds 100 }\n" +
-		"Start-Process -FilePath $env:KE_UPDATE_SETUP -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/SP-' -Wait\n" +
-		"if ($env:KE_UPDATE_RELAUNCH -eq '1') { Start-Process -FilePath $env:KE_UPDATE_APP }\n"
+		"try {\n" +
+		"  Start-Process -FilePath $env:KE_UPDATE_SETUP -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/SP-' -Wait -ErrorAction Stop\n" +
+		"  if ($env:KE_UPDATE_RELAUNCH -eq '1') { Start-Process -FilePath $env:KE_UPDATE_APP }\n" +
+		"} catch {\n" +
+		"  $_ | Out-File -FilePath '" + logFile + "' -Encoding utf8\n" +
+		"}\n"
 	if err := os.WriteFile(script, []byte(body), 0o600); err != nil {
 		return fmt.Errorf("写入等待脚本失败: %w", err)
 	}
@@ -324,37 +381,51 @@ func systemRoot() string {
 	return `C:\Windows`
 }
 
-// fetchExpectedChecksum downloads <asset>.sha256 and returns the hex
-// digest it carries. ok=false when the sidecar is missing (legacy
-// releases) or unreachable — the size gate still protects the install.
-func fetchExpectedChecksum(ctx context.Context, url string) (string, bool) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", false
+// checksumStatus distinguishes "this release has no sidecar at all"
+// (legacy downgrade) from "we could not fetch it" (hard fail).
+type checksumStatus int
+
+const (
+	checksumMissing checksumStatus = iota // HTTP 404: legacy release, no sidecar published
+	checksumOK                            // digest parsed successfully
+	checksumFailed                        // unreachable / malformed: hard fail, never silently pass
+)
+
+// fetchExpectedChecksum downloads <asset>.sha256 over the mirror chain and
+// returns the hex digest it carries.
+func fetchExpectedChecksum(ctx context.Context, urls []string) (string, checksumStatus) {
+	var lastErr error
+	for _, url := range urls {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return "", checksumFailed
+		}
+		req.Header.Set("User-Agent", "kafka-explorer-updater")
+		resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			return "", checksumMissing // legacy release: no sidecar published
+		}
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+			continue
+		}
+		line := strings.TrimSpace(string(body))
+		if i := strings.IndexAny(line, " 	"); i > 0 {
+			line = line[:i]
+		}
+		if len(line) != 64 {
+			return "", checksumFailed
+		}
+		return strings.ToLower(line), checksumOK
 	}
-	req.Header.Set("User-Agent", "kafka-explorer-updater")
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return "", false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", false
-	}
-	body := make([]byte, 256)
-	n, _ := io.ReadFull(io.LimitReader(resp.Body, 256), body)
-	line := strings.TrimSpace(string(body[:n]))
-	if line == "" {
-		return "", false
-	}
-	// sha256sum format: "<hex>  <filename>" — the digest is the first field.
-	if i := strings.IndexAny(line, " 	"); i > 0 {
-		line = line[:i]
-	}
-	if len(line) != 64 {
-		return "", false
-	}
-	return strings.ToLower(line), true
+	_ = lastErr
+	return "", checksumFailed
 }
 
 // fileSHA256 hex-digests a file on disk.
@@ -374,3 +445,16 @@ func fileSHA256(path string) (string, error) {
 // Route-quality sentinels: a stalled/crawling route asks the caller to
 // try the next download route (mirrors), distinct from user cancellation.
 var errSlowRoute = fmt.Errorf("route too slow or stalled")
+
+// stopRequested reports whether the user pressed the stop button (the
+// cancelled channel is closed). Distinct from ctx cancellation: the parent
+// ctx stays alive across a user stop, and the two mean different things to
+// the staging flow (silent no-op vs route fallback).
+func stopRequested(cancelled <-chan struct{}) bool {
+	select {
+	case <-cancelled:
+		return true
+	default:
+		return false
+	}
+}

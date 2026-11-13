@@ -353,8 +353,8 @@ export const systemApi = {
   // Content reader for files the user just picked (schema uploads, imports).
   readTextFile: (path: string): Promise<string> => systemHandler.ReadTextFile(path) as never,
   checkUpdate: (repo: string): Promise<UpdateCheck> => systemHandler.CheckUpdate(repo) as never,
-  stageUpdate: (repo: string, assetUrl: string, assetSize: number, requestId: string): Promise<void> =>
-    systemHandler.StageUpdate(repo, assetUrl, assetSize, requestId) as never,
+  stageUpdate: (repo: string, assetUrl: string, assetSize: number, manifestSha: string, requestId: string): Promise<void> =>
+    systemHandler.StageUpdate(repo, assetUrl, assetSize, manifestSha, requestId) as never,
   cancelUpdate: (): Promise<void> => systemHandler.CancelUpdate() as never,
   installStaged: (stagedPath: string, relaunch: boolean): Promise<void> =>
     systemHandler.InstallStaged(stagedPath, relaunch) as never,

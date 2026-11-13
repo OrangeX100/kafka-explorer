@@ -88,8 +88,17 @@ tasks:
     vars:
       VERSION: '{{.VERSION | default "0.4.0"}}'
       VERSIONINFOVERSION: '{{.VERSIONINFOVERSION | default "0.4.0.0"}}'
-      # winget installs per-user; override ISCC when Inno Setup lives elsewhere.
-      ISCC: '{{.ISCC | default "C:/Users/51293/AppData/Local/Programs/Inno Setup 6/ISCC.exe"}}'
+      # winget/choco install Inno Setup per-user or machine-wide; the sh
+      # probe tries both and errors with an override hint when neither
+      # exists (CI passes ISCC= explicitly — see .github/workflows/release.yml).
+      ISCC:
+        sh: |
+          for p in "$LOCALAPPDATA/Programs/Inno Setup 6/ISCC.exe" "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/c/Program Files/Inno Setup 6/ISCC.exe"; do
+            [ -f "$p" ] && cygpath -m "$p" && exit 0
+          done
+          echo "" >&2
+          echo "ISCC.exe not found — install Inno Setup (choco install innosetup) or pass ISCC=/path/to/ISCC.exe" >&2
+          exit 1
 
   test:
     desc: Go unit + contract tests

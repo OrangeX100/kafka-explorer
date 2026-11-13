@@ -78,12 +78,18 @@ jobs:
           # quota involved. Keep the fields in sync with
           # internal/application update_service.go releaseManifest.
           SIZE=$(stat -c %s "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe")
+          # assetSHA256 lets the in-app updater verify the download against
+          # the manifest itself (no sidecar round-trip, no missing-sidecar
+          # downgrade path) — keep the field names in sync with
+          # internal/application update_service.go releaseManifest.
+          SHA=$(sed -n 2p < <(certutil -hashfile "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe" SHA256) | tr -d ' ')
           cat > latest.json <<EOF
           {
             "tagName": "${GITHUB_REF_NAME}",
             "notes": "Kafka Explorer ${GITHUB_REF_NAME#v}。安装包含卸载器与自动更新；SHA-256 见 .sha256 附件。详见仓库 README。",
             "assetName": "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe",
-            "assetSize": ${SIZE}
+            "assetSize": ${SIZE},
+            "assetSHA256": "${SHA}"
           }
           EOF
           cat latest.json

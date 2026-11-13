@@ -258,6 +258,8 @@ export interface UpdateCheck {
   assetUrl?: string;
   assetSize?: number;
   assetName?: string;
+  /** digest embedded in latest.json — preferred for staging verification. */
+  assetSha256?: string;
 }
 
 // ---- Kafka Connect ----

@@ -5,6 +5,7 @@ package keyring
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/zalando/go-keyring"
 
@@ -37,8 +38,14 @@ func (s *Store) Get(_, ref string) (string, error) {
 
 func (s *Store) Delete(_, ref string) error {
 	if err := keyring.Delete(s.service, ref); err != nil {
-		// Deleting a missing secret is fine: the caller's intent is achieved.
-		return nil
+		// A missing secret is fine: the caller's intent is achieved (go-keyring
+		// reports it as ErrNotFound on every platform). Any OTHER failure —
+		// daemon down, access denied — is real and must surface: swallowing
+		// it would leave live credentials behind after the user deleted the
+		// connection, which looks exactly like a leak from the outside.
+		if !strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return fmt.Errorf("keyring delete %s: %w", ref, err)
+		}
 	}
 	return nil
 }

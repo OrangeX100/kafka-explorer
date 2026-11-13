@@ -2,9 +2,11 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -42,11 +44,9 @@ func TestTryRouteAbandonsDeadRoute(t *testing.T) {
 	defer srv.Close()
 
 	s := &UpdateService{}
-	u, _ := url.Parse(srv.URL)
-	_ = u
 	cancelled := make(chan struct{})
 	started := time.Now()
-	_, err := s.tryRoute(context.Background(), srv.URL+"/asset.exe", 4, "unused.part",
+	_, err := s.tryRoute(context.Background(), srv.URL+"/asset.exe", 4, "unused.part", "",
 		func(Progress) {}, cancelled)
 	if err == nil {
 		t.Fatal("dead route was not abandoned")
@@ -56,20 +56,29 @@ func TestTryRouteAbandonsDeadRoute(t *testing.T) {
 	}
 }
 
-// A healthy route must complete: the happy path of the route runner.
+// A healthy route must complete: the happy path of the route runner, with
+// its sidecar served by the same fixture (the .sha256 request is the asset
+// URL + ".sha256").
 func TestTryRouteCompletes(t *testing.T) {
 	body := make([]byte, 1<<20) // 1MB, above slowStartBytes
 	for i := range body {
 		body[i] = byte(i % 251)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	sum := sha256.Sum256(body)
+	sidecar := hex.EncodeToString(sum[:]) + "  part"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".sha256") {
+			_, _ = w.Write([]byte(sidecar))
+			return
+		}
 		w.Write(body)
 	}))
 	defer srv.Close()
 
 	s := &UpdateService{}
 	part := t.TempDir() + "/part"
-	_, err := s.tryRoute(context.Background(), srv.URL, int64(len(body)), part,
+	_, err := s.tryRoute(context.Background(), srv.URL+"/asset.exe", int64(len(body)), part, "",
 		func(Progress) {}, make(chan struct{}))
 	if err != nil {
 		t.Fatalf("healthy route failed: %v", err)

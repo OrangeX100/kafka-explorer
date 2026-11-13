@@ -31,6 +31,7 @@ export function UpdateSection({
   const [phase, setPhase] = useState<Phase>("idle");
   const [bytes, setBytes] = useState(0);
   const [total, setTotal] = useState(0);
+  const [route, setRoute] = useState("");
   const [staged, setStaged] = useState("");
   const reqID = useRef(`u-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
   const isWindows = /^windows/i.test(navigator.userAgent);
@@ -49,13 +50,15 @@ export function UpdateSection({
   };
 
   // Progress + completion events for the staged download (id-filtered so a
-  // second About mount ignores a stale stream).
+  // second About mount ignores a stale stream). route shows which mirror
+  // is serving the bytes (transparency, see the staging route fallback).
   useEffect(() => {
     const offProgress = Events.On("system:update:progress", (ev: unknown) => {
-      const data = (ev as { data?: { id: string; bytes: number; total: number } })?.data;
+      const data = (ev as { data?: { id: string; bytes: number; total: number; route?: string } })?.data;
       if (!data || data.id !== reqID.current) return;
       setBytes(data.bytes);
       setTotal(data.total);
+      setRoute(data.route ?? "");
     });
     const offDone = Events.On("system:update:done", (ev: unknown) => {
       const data = (ev as { data?: { id: string; failed: boolean; staged: string; error?: string } })?.data;
@@ -77,7 +80,13 @@ export function UpdateSection({
     setBytes(0);
     setTotal(result.assetSize || 0);
     reqID.current = `u-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    void systemApi.stageUpdate(settings.updateRepo.trim(), result.assetUrl, result.assetSize || 0, reqID.current);
+    void systemApi.stageUpdate(
+      settings.updateRepo.trim(),
+      result.assetUrl,
+      result.assetSize || 0,
+      result.assetSha256 ?? "",
+      reqID.current,
+    );
   };
 
   const cancelDownload = () => {
@@ -178,7 +187,10 @@ export function UpdateSection({
                 <div className="h-full bg-accent transition-[width] duration-150" style={{ width: `${pct}%` }} />
               </div>
               <div className="mt-1 flex items-center justify-between text-10 text-ink-400">
-                <span>{t("settings.updateDownloading")}</span>
+                <span>
+                  {t("settings.updateDownloading")}
+                  {route !== "" && route !== "直连" ? ` · ${route}` : ""}
+                </span>
                 <span>
                   {mb(bytes)}/{mb(total)} MB · {pct}%
                 </span>
