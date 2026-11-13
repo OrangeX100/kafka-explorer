@@ -69,6 +69,25 @@ jobs:
           echo "$SHA  KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe" > "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe.sha256"
           cat "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe.sha256"
 
+      - name: Update manifest (latest.json)
+        shell: bash
+        working-directory: bin/installer
+        run: |
+          # the in-app updater reads THIS static file as its primary check
+          # source (releases/latest/download/latest.json) — no GitHub API
+          # quota involved. Keep the fields in sync with
+          # internal/application update_service.go releaseManifest.
+          SIZE=$(stat -c %s "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe")
+          cat > latest.json <<EOF
+          {
+            "tagName": "${GITHUB_REF_NAME}",
+            "notes": "Kafka Explorer ${GITHUB_REF_NAME#v}。安装包含卸载器与自动更新；SHA-256 见 .sha256 附件。详见仓库 README。",
+            "assetName": "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe",
+            "assetSize": ${SIZE}
+          }
+          EOF
+          cat latest.json
+
       - name: Publish release
         shell: bash
         working-directory: bin/installer
@@ -80,4 +99,5 @@ jobs:
             --notes "See the repository README for the full capability list. SHA-256 is in the .sha256 sidecar." \
             --latest \
             "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe" \
-            "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe.sha256"
+            "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe.sha256" \
+            "latest.json"

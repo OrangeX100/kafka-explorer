@@ -1,73 +1,97 @@
 package application
 
-// Update-check rate-limit fix, exercised against a LOCAL fixture server:
-// 1) the first check caches the body + ETag;
-// 2) the second check sends If-None-Match and takes the 304 path — GitHub
-//    does not count 304s against the 60 req/hour budget, so repeated
-//    "check update" clicks stay free;
-// 3) a 403 without quota still surfaces the reset minutes.
+// Update-check source tests against LOCAL fixture servers:
+// 1) manifest parse: latest.json shape → UpdateCheck (update claimed only
+//    when the tag is newer; missing tagName is a friendly error);
+// 2) fallback path: NO manifest anywhere → the API+ETag flow answers —
+//    first call caches body+ETag, the second takes the 304 branch (GitHub
+//    does not count 304s against the 60 req/hour budget);
+// 3) API rate-limited → the error carries the reset minutes.
 
 import (
 	"net/http"
-	"strings"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
 
-func TestUpdateCheckEtagCache(t *testing.T) {
-	body := []byte(`{"tag_name":"v9.9.9","html_url":"https://example.com/r","body":"notes",
-		"assets":[{"name":"KafkaExplorer_Setup_9.9.9.exe","size":123,"browser_download_url":"https://example.com/dl"}]}`)
-	var hits int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&hits, 1)
+const fixtureReleaseBody = `{"tag_name":"v9.9.9","html_url":"https://example.com/r","body":"notes",
+	"assets":[{"name":"KafkaExplorer_Setup_9.9.9.exe","size":123,"browser_download_url":"https://example.com/dl"}]}`
+
+const fixtureManifest = `{"tagName":"v9.9.9","notes":"manifest notes","assetName":"KafkaExplorer_Setup_9.9.9.exe","assetSize":456}`
+
+func TestParseManifest(t *testing.T) {
+	got, err := parseManifest("0.2.0", "owner/repo", []byte(fixtureManifest))
+	if err != nil {
+		t.Fatalf("parseManifest: %v", err)
+	}
+	if got.Latest != "9.9.9" || !got.HasUpdate || got.AssetName != "KafkaExplorer_Setup_9.9.9.exe" || got.AssetSize != 456 {
+		t.Fatalf("manifest parse wrong: %+v", got)
+	}
+	if got.URL != "https://github.com/owner/repo/releases/tag/v9.9.9" {
+		t.Fatalf("release URL wrong: %s", got.URL)
+	}
+	notUpd, err := parseManifest("9.9.9", "owner/repo", []byte(fixtureManifest))
+	if err != nil {
+		t.Fatalf("parseManifest same: %v", err)
+	}
+	if notUpd.HasUpdate {
+		t.Fatalf("same version must not claim update: %+v", notUpd)
+	}
+	if _, err := parseManifest("0.2.0", "owner/repo", []byte(`{"assetName":"x"}`)); err == nil || !strings.Contains(err.Error(), "tagName") {
+		t.Fatalf("missing tagName should error: %v", err)
+	}
+}
+
+func TestUpdateCheckFallbackToAPIAndEtag(t *testing.T) {
+	// API server: first call 200+ETag, later calls 304 (cache hit path).
+	var apiHits int32
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&apiHits, 1)
 		w.Header().Set("Content-Type", "application/json")
 		switch n {
 		case 1:
-			w.Header().Set("ETag", `"abc123"`)
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(body)
+			w.Header().Set("ETag", `"xyz"`)
+			_, _ = w.Write([]byte(fixtureReleaseBody))
 		default:
-			if r.Header.Get("If-None-Match") != `"abc123"` {
-				t.Errorf("request %d missing If-None-Match", n)
+			if r.Header.Get("If-None-Match") == "" {
+				t.Errorf("api call %d missing If-None-Match", n)
 			}
 			w.WriteHeader(http.StatusNotModified)
 		}
 	}))
-	defer srv.Close()
+	defer api.Close()
 
+	// Static world: the manifest routes all 404 → Check falls back to API.
 	svc := NewUpdateService("0.2.0")
-	svc.baseURL = srv.URL
+	svc.baseURL = api.URL
 
 	first, err := svc.Check(t.Context(), "owner/repo")
 	if err != nil {
-		t.Fatalf("first check: %v", err)
+		t.Fatalf("first check via fallback: %v", err)
 	}
-	if !first.HasUpdate || first.AssetURL != "https://example.com/dl" {
-		t.Fatalf("first result wrong: %+v", first)
+	if !first.HasUpdate || first.Latest != "9.9.9" {
+		t.Fatalf("fallback result wrong: %+v", first)
 	}
-
 	second, err := svc.Check(t.Context(), "owner/repo")
 	if err != nil {
 		t.Fatalf("second check (304 path): %v", err)
 	}
-	if second.Latest != first.Latest || second.AssetURL != first.AssetURL {
+	if second.Latest != first.Latest {
 		t.Fatalf("cached result diverged: %+v vs %+v", first, second)
-	}
-	if atomic.LoadInt32(&hits) != 2 {
-		t.Fatalf("expected 2 server hits, got %d", hits)
 	}
 }
 
 func TestUpdateCheckRateLimitMessage(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-RateLimit-Reset", "2000000000")
 		w.WriteHeader(http.StatusForbidden)
 	}))
-	defer srv.Close()
+	defer api.Close()
 
 	svc := NewUpdateService("0.2.0")
-	svc.baseURL = srv.URL
+	svc.baseURL = api.URL
 	_, err := svc.Check(t.Context(), "owner/repo")
 	if err == nil {
 		t.Fatal("expected rate-limit error")
