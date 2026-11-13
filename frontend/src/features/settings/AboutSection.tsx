@@ -159,6 +159,14 @@ export function UpdateSection({
               </button>
             </div>
           )}
+          {result.hasUpdate && isWindows && phase === "idle" && !result.assetUrl && (
+            // No installer attached to this release (or the check ran while
+            // rate-limited): say WHY one-click update is unavailable instead
+            // of silently showing only the release-page link.
+            <div className="mt-2 rounded border border-warn/40 bg-warn/10 px-2 py-1.5 text-10 leading-relaxed text-warn">
+              {t("settings.updateNoAsset")}
+            </div>
+          )}
           {result.hasUpdate && isWindows && phase === "idle" && result.assetUrl && (
             <button className="btn btn-accent mt-2" onClick={startDownload}>
               <Download size={12} /> {t("settings.updateDownload")}

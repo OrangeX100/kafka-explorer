@@ -629,7 +629,7 @@
   "reg.versionDeleted": "版本已删除",
   "settings.about": "关于",
   "settings.appearance": "外观",
-  "settings.autoCheckFound": "启动检查发现新版本 {0}，可在「设置 → 版本与更新」查看",
+  "settings.autoCheckFound": "发现新版本 {0}，可在「设置 → 版本与更新」一键下载安装（每次更新仅提醒一次）",
   "settings.autoCheckUpdate": "启动时自动检查更新",
   "settings.autoSaved": "更改会自动保存",
   "settings.backupExport": "导出全部配置",
@@ -814,5 +814,6 @@
   "reg.levelForwardT_long": "向前兼容（含历史）：所有历史版本 schema 可读取新版 schema 写入的数据",
   "reg.levelFull_long": "双向兼容：新版 schema 与上一版本双向兼容",
   "reg.levelFullT_long": "双向兼容（含历史）：新版 schema 与所有历史版本双向兼容",
-  "reg.levelNone_long": "不检查兼容性：任何 schema 都可注册（慎用，混用后难以回退）"
+  "reg.levelNone_long": "不检查兼容性：任何 schema 都可注册（慎用，混用后难以回退）",
+  "settings.updateNoAsset": "该版本未提供自动更新包（或检查时更新源临时不可用），请通过上方「打开发布页」手动下载安装；稍后重新检查通常可恢复一键更新。"
 }

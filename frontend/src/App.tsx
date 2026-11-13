@@ -52,13 +52,18 @@ export default function App() {
     void refresh();
     void loadSettings().then(() => {
       // One-shot update check at boot (setting-gated): silent on failure —
-      // a network problem must never become a startup error toast.
+      // a network problem must never become a startup error toast. The
+      // reminder fires ONCE PER VERSION (ke.updateNotifiedAtVersion): a
+      // user who defers the update must not be re-nagged every launch.
       const s = useAppSettings.getState().settings;
       if (!s?.autoCheckUpdate || !s.updateRepo) return;
       systemApi
         .checkUpdate(s.updateRepo)
         .then((r) => {
-          if (r.hasUpdate) toast.show(t("settings.autoCheckFound", r.latest), "info");
+          if (!r.hasUpdate) return;
+          if (localStorage.getItem("ke.updateNotifiedAtVersion") === r.latest) return;
+          localStorage.setItem("ke.updateNotifiedAtVersion", r.latest);
+          toast.show(t("settings.autoCheckFound", r.latest), "info");
         })
         .catch(() => {});
     });
