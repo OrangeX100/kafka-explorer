@@ -251,7 +251,9 @@ function LocalDecodeBar({ payloadBase64 }: { payloadBase64: string }) {
     setOpen(true);
     setResult(null);
     try {
-      const list = ((await registryApi.listLocal()) ?? []).filter((s) => s.schemaType === "AVRO");
+      // The offline decoder handles Avro / Protobuf (dual-format) / JSON —
+      // offer every saved schema, labelled with its type.
+      const list = (await registryApi.listLocal()) ?? [];
       setSchemas(list);
     } catch (err) {
       setSchemas([]);
