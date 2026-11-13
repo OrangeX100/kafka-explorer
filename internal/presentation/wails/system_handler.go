@@ -12,9 +12,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"kafkaexplorer/internal/application"
 	wailsapp "github.com/wailsapp/wails/v3/pkg/application"
 	"kafkaexplorer/internal/appdir"
+	"kafkaexplorer/internal/application"
 	"kafkaexplorer/internal/buildinfo"
 )
 
@@ -33,14 +33,14 @@ func promptSingleSelection(path string, err error) (string, error) {
 // AppInfo is the About-page payload: build identity plus the local paths a
 // user may need when reporting a problem (log file, data dir).
 type AppInfo struct {
-	Version    string `json:"version"`    // semantic version, e.g. 0.1.0-dev
-	Commit     string `json:"commit"`     // short git revision ("" in dev builds)
-	GoVersion  string `json:"goVersion"`  // Go runtime this binary was built with
-	OS         string `json:"os"`         // GOOS
-	Arch       string `json:"arch"`       // GOARCH
-	DataDir    string `json:"dataDir"`    // per-user data directory
-	LogFile    string `json:"logFile"`    // zap log file inside DataDir
-	StartedAt  int64  `json:"startedAt"`  // process start, unix ms
+	Version   string `json:"version"`   // semantic version, e.g. 0.1.0-dev
+	Commit    string `json:"commit"`    // short git revision ("" in dev builds)
+	GoVersion string `json:"goVersion"` // Go runtime this binary was built with
+	OS        string `json:"os"`        // GOOS
+	Arch      string `json:"arch"`      // GOARCH
+	DataDir   string `json:"dataDir"`   // per-user data directory
+	LogFile   string `json:"logFile"`   // zap log file inside DataDir
+	StartedAt int64  `json:"startedAt"` // process start, unix ms
 }
 
 // SystemHandler exposes app identity and the update check. Read-only: the
@@ -59,7 +59,11 @@ type SystemHandler struct {
 	// emit publishes download progress to the frontend (system:update:progress).
 	emit   func(topic string, data ...any)
 	cancel context.CancelFunc
-	mu     sync.Mutex
+	// stageGen identifies the currently registered stage download: the
+	// goroutine's cleanup must only clear h.cancel when it is STILL the
+	// registered one (a superseding stage owns it by then).
+	stageGen int64
+	mu       sync.Mutex
 }
 
 func NewSystemHandler(update *application.UpdateService, log *zap.Logger) *SystemHandler {

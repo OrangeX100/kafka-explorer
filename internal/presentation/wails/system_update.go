@@ -12,6 +12,7 @@ package wails
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 
 	"go.uber.org/zap"
@@ -27,8 +28,16 @@ func (h *SystemHandler) StageUpdate(ctx context.Context, repo string, assetURL s
 	if runtime.GOOS != "windows" {
 		return fmt.Errorf("自动更新当前仅支持 Windows")
 	}
-	ctx, cancel := context.WithCancel(ctx)
 	h.mu.Lock()
+	// Re-entry guard: a second download supersedes the first — both would
+	// write the SAME <name>.part file and corrupt each other. Cancelling the
+	// old registration makes its goroutine abort, clean up and exit.
+	if h.cancel != nil {
+		h.cancel()
+	}
+	h.stageGen++
+	gen := h.stageGen
+	ctx, cancel := context.WithCancel(ctx)
 	h.cancel = cancel
 	h.mu.Unlock()
 
@@ -36,7 +45,11 @@ func (h *SystemHandler) StageUpdate(ctx context.Context, repo string, assetURL s
 		defer func() {
 			cancel()
 			h.mu.Lock()
-			h.cancel = nil
+			// Clear OUR registration only: after a supersede, h.cancel is the
+			// newer stage's cancel and must survive this goroutine's exit.
+			if h.stageGen == gen {
+				h.cancel = nil
+			}
 			h.mu.Unlock()
 		}()
 		staged, err := h.update.StageUpdate(ctx, assetURL, assetSize, manifestSha, func(p application.Progress) {
@@ -50,7 +63,10 @@ func (h *SystemHandler) StageUpdate(ctx context.Context, repo string, assetURL s
 		failed := err != nil
 		stagedPath := staged
 		if err == nil && staged == "" {
-			failed = false // cancelled — frontend resets via the empty id-less done
+			// cancelled: done carries failed=false with an EMPTY staged
+			// path — the frontend maps that exact pair to idle (AboutSection
+			// done handler); it must NOT be read as a staged success.
+			failed = false
 		}
 		if err != nil && staged == "" {
 			stagedPath = ""
@@ -85,6 +101,12 @@ func (h *SystemHandler) CancelUpdate() {
 // the installer finishes.
 func (h *SystemHandler) InstallStaged(stagedPath string, relaunch bool) error {
 	h.log.Info("update install", zap.String("path", stagedPath), zap.Bool("relaunch", relaunch))
+	// Existence gate: the waiter's Start-Process would fail only AFTER this
+	// process quit — a dead app plus an err.log nobody reads. Fail NOW with
+	// an actionable message so the user can re-check and re-download.
+	if st, statErr := os.Stat(stagedPath); statErr != nil || st.IsDir() {
+		return fmt.Errorf("暂存的安装包不存在或已被清理，请重新检查更新并下载")
+	}
 	if err := h.update.WriteWaiter(stagedPath, relaunch); err != nil {
 		return err
 	}

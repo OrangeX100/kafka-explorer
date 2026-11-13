@@ -63,6 +63,14 @@ export function UpdateSection({
     const offDone = Events.On("system:update:done", (ev: unknown) => {
       const data = (ev as { data?: { id: string; failed: boolean; staged: string; error?: string } })?.data;
       if (!data || data.id !== reqID.current) return;
+      // Cancelled staging arrives as failed=false with an EMPTY path — that
+      // pair means "stopped", not "staged": mapping it to the staged phase
+      // left a dead install button on screen after every cancel.
+      if (!data.failed && !data.staged) {
+        setPhase("idle");
+        setStaged("");
+        return;
+      }
       setPhase(data.failed ? "idle" : "staged");
       setStaged(data.failed ? "" : data.staged);
       if (data.failed && data.error) setError(data.error);

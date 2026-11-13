@@ -351,15 +351,15 @@ func (s *UpdateService) WriteWaiter(setupPath string, relaunch bool) error {
 	}
 	script := filepath.Join(dir, "update_waiter.ps1")
 	logFile := filepath.Join(dir, "update_waiter.err.log")
-	body := "$ErrorActionPreference = 'Stop'\n" +
-		"$waitFor = [int]$env:KE_UPDATE_PID\n" +
-		"while (Get-Process -Id $waitFor) { Start-Sleep -Milliseconds 100 }\n" +
-		"try {\n" +
-		"  Start-Process -FilePath $env:KE_UPDATE_SETUP -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/SP-' -Wait -ErrorAction Stop\n" +
-		"  if ($env:KE_UPDATE_RELAUNCH -eq '1') { Start-Process -FilePath $env:KE_UPDATE_APP }\n" +
-		"} catch {\n" +
-		"  $_ | Out-File -FilePath '" + logFile + "' -Encoding utf8\n" +
-		"}\n"
+	// The wait loop MUST tolerate a missing PID: this app usually exits
+	// BEFORE PowerShell finishes starting — a bare Get-Process throws a
+	// non-terminating error that $ErrorActionPreference='Stop' escalates,
+	// killing the waiter before a single byte is installed, with no log
+	// (measured on this machine: nonexistent PID → script exits 1).
+	// SilentlyContinue keeps the loop semantics: not-found = "go install".
+	// logFile is embedded in a single-quoted PS string — a path containing '
+	// (e.g. a username) must be escaped by doubling, or the script breaks.
+	body := waiterScriptBody(logFile)
 	if err := os.WriteFile(script, []byte(body), 0o600); err != nil {
 		return fmt.Errorf("写入等待脚本失败: %w", err)
 	}
@@ -384,6 +384,27 @@ func systemRoot() string {
 		return root
 	}
 	return `C:\Windows`
+}
+
+// waiterScriptBody builds the waiter PowerShell script. Two traps are baked
+// in here rather than at the call site so a regression test can pin them:
+// (1) Get-Process carries -ErrorAction SilentlyContinue — the app usually
+// exits BEFORE PowerShell starts, and without the flag the not-found error
+// escalates under $ErrorActionPreference='Stop' and kills the waiter
+// silently (no install, no log); (2) logFile is embedded in a single-quoted
+// PS string, so a path containing ' (e.g. a username like O'Brien) must be
+// escaped by doubling or the script fails to parse.
+func waiterScriptBody(logFile string) string {
+	psLogFile := strings.ReplaceAll(logFile, "'", "''")
+	return "$ErrorActionPreference = 'Stop'\n" +
+		"$waitFor = [int]$env:KE_UPDATE_PID\n" +
+		"while (Get-Process -Id $waitFor -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 100 }\n" +
+		"try {\n" +
+		"  Start-Process -FilePath $env:KE_UPDATE_SETUP -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/SP-' -Wait -ErrorAction Stop\n" +
+		"  if ($env:KE_UPDATE_RELAUNCH -eq '1') { Start-Process -FilePath $env:KE_UPDATE_APP }\n" +
+		"} catch {\n" +
+		"  $_ | Out-File -FilePath '" + psLogFile + "' -Encoding utf8\n" +
+		"}\n"
 }
 
 // checksumStatus distinguishes "EVERY route confirmed this release has no
