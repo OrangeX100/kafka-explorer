@@ -86,19 +86,16 @@ tasks:
       - cmd /c copy /y "bin\installer\KafkaExplorer_Setup.exe" "bin\installer\KafkaExplorer_Setup_{{.VERSION}}.exe"
       - certutil -hashfile bin/installer/KafkaExplorer_Setup.exe SHA256
     vars:
-      VERSION: '{{.VERSION | default "0.4.0"}}'
-      VERSIONINFOVERSION: '{{.VERSIONINFOVERSION | default "0.4.0.0"}}'
-      # winget/choco install Inno Setup per-user or machine-wide; the sh
-      # probe tries both and errors with an override hint when neither
-      # exists (CI passes ISCC= explicitly — see .github/workflows/release.yml).
-      ISCC:
-        sh: |
-          for p in "$LOCALAPPDATA/Programs/Inno Setup 6/ISCC.exe" "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/c/Program Files/Inno Setup 6/ISCC.exe"; do
-            [ -f "$p" ] && cygpath -m "$p" && exit 0
-          done
-          echo "" >&2
-          echo "ISCC.exe not found — install Inno Setup (choco install innosetup) or pass ISCC=/path/to/ISCC.exe" >&2
-          exit 1
+      VERSION: '{{.VERSION | default "0.4.1"}}'
+      VERSIONINFOVERSION: '{{.VERSIONINFOVERSION | default "0.4.1.0"}}'
+      # Default = the machine-wide choco install location. The release
+      # workflow probes both choco and per-user locations and passes ISCC=
+      # explicitly — do NOT replace this with a vars sh: probe: go-task runs
+      # it under its own POSIX shell on Windows where cygpath/POSIX paths do
+      # not resolve, so the probe fails on CI even when Inno Setup exists
+      # (observed on the v0.4.1 tag build). Local devs with a per-user
+      # install keep overriding via `task installer ISCC=...`.
+      ISCC: '{{.ISCC | default "C:/Program Files (x86)/Inno Setup 6/ISCC.exe"}}'
 
   test:
     desc: Go unit + contract tests
