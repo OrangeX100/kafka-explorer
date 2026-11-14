@@ -107,6 +107,9 @@ func (h *SystemHandler) StageUpdate(ctx context.Context, repo string, assetURL s
 				h.mu.Unlock()
 			} else {
 				// No digest → the install gate could not verify → do not arm.
+				// The done event must ALSO stop advertising the path: a
+				// staged banner whose 立即安装 always fails ("尚未暂存")
+				// would trap the user in a dead loop (045 regression round).
 				h.log.Warn("staged installer digest unavailable; install candidate not armed",
 					zap.String("id", requestID), zap.Error(shaErr))
 				h.mu.Lock()
@@ -114,6 +117,7 @@ func (h *SystemHandler) StageUpdate(ctx context.Context, repo string, assetURL s
 					h.stagedPath, h.stagedSHA = "", ""
 				}
 				h.mu.Unlock()
+				stagedPath = ""
 			}
 		}
 		if h.emit != nil {

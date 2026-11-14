@@ -16,6 +16,10 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
+
+	"kafkaexplorer/internal/appdir"
 )
 
 // buildFakeSetup compiles an empty main package into a real exe: the
@@ -35,6 +39,52 @@ func buildFakeSetup(t *testing.T, outPath string) {
 	if out, err := exec.Command(goBin, "build", "-o", outPath, src).CombinedOutput(); err != nil {
 		t.Fatalf("build fixture setup: %v\n%s", err, out)
 	}
+}
+
+// TestWriteWaiterPassesSplitArgv intercepts WriteWaiter's REAL launch call
+// and pins the argv shape there — the 044 folded-argv bug lived at this
+// call site, so a regression that inlines a folded string back into
+// WriteWaiter must fail here even if launchDetached itself stays correct.
+func TestWriteWaiterPassesSplitArgv(t *testing.T) {
+	var gotProgram string
+	var gotArgs []string
+	old := launchDetachedFn
+	launchDetachedFn = func(program string, args []string, _ map[string]string) error {
+		gotProgram, gotArgs = program, args
+		return nil
+	}
+	defer func() { launchDetachedFn = old }()
+
+	svc := NewUpdateService("0.4.5", zap.NewNop())
+	script := filepath.Join(t.TempDir(), "update_waiter.ps1")
+	if err := svc.WriteWaiter(script, true); err != nil {
+		t.Fatalf("WriteWaiter: %v", err)
+	}
+	defer os.Remove(filepath.Join(mustDataDir(), "update_waiter.ps1"))
+
+	if filepath.Base(gotProgram) != "powershell.exe" {
+		t.Fatalf("program = %q, want powershell", gotProgram)
+	}
+	if len(gotArgs) != 5 {
+		t.Fatalf("REGRESSION: argv must be split into 5 tokens, got %d: %v", len(gotArgs), gotArgs)
+	}
+	if gotArgs[0] != "-NoProfile" || gotArgs[1] != "-ExecutionPolicy" ||
+		gotArgs[2] != "Bypass" || gotArgs[3] != "-File" {
+		t.Fatalf("argv tokens wrong: %v", gotArgs)
+	}
+	// WriteWaiter derives the script path from DataDir itself — the argv
+	// must carry THAT path (a mismatch here would break -File silently).
+	if want := filepath.Join(mustDataDir(), "update_waiter.ps1"); gotArgs[4] != want {
+		t.Fatalf("script arg = %q, want %q", gotArgs[4], want)
+	}
+}
+
+func mustDataDir() string {
+	dir, err := appdir.DataDir()
+	if err != nil {
+		panic(err)
+	}
+	return dir
 }
 
 func TestWaiterScriptRunsEndToEnd(t *testing.T) {

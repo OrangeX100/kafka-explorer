@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"kafkaexplorer/internal/appdir"
+	"kafkaexplorer/internal/buildinfo"
 	"kafkaexplorer/internal/domain"
 )
 
@@ -89,12 +90,28 @@ func downloadCandidates(assetURL string) []string {
 // renderer must not be able to aim download-and-install at its own server
 // (the digest gate alone is not an anchor: the renderer also supplies
 // manifestSha, so it could pair its own URL with the matching digest).
+//
+// Release builds additionally pin the REPO via buildinfo.UpdateRepo (stamped
+// at build time, unreachable from the renderer): the host prefix alone lets
+// a compromised webview aim the pipeline at ANY github repo with its own
+// digest. Dev builds stamp "" and keep host-only pinning.
 var assetURLGuard = defaultAssetURLGuard
 
 func defaultAssetURLGuard(assetURL string) error {
 	const ghPrefix = "https://github.com/"
 	if !strings.HasPrefix(assetURL, ghPrefix) {
 		return fmt.Errorf("%w: 更新包地址不受支持（仅支持 GitHub 发布下载链接），已中止安装", domain.ErrInvalid)
+	}
+	// Only the release-download shape is ever consumed; a bare github prefix
+	// stages a file named "download" and dies at the install name gate —
+	// refuse it here so the error lands at the responsible boundary.
+	if !strings.Contains(assetURL, "/releases/download/") {
+		return fmt.Errorf("%w: 更新包地址不是发布下载链接，已中止安装", domain.ErrInvalid)
+	}
+	if repo := buildinfo.UpdateRepo; repo != "" {
+		if !strings.HasPrefix(assetURL, ghPrefix+repo+"/releases/download/") {
+			return fmt.Errorf("%w: 更新包地址与本应用的发布仓库（%s）不一致，已中止安装", domain.ErrInvalid, repo)
+		}
 	}
 	return nil
 }
@@ -434,7 +451,7 @@ func (s *UpdateService) WriteWaiter(setupPath string, relaunch bool) error {
 	if relaunch {
 		relaunchFlag = "1"
 	}
-	return launchDetached(
+	return launchDetachedFn(
 		filepath.Join(systemRoot(), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
 		// MUST be split argv: one folded string makes PowerShell parse the
 		// whole "-NoProfile … -File …" as a COMMAND and exit 1 before running
@@ -449,8 +466,15 @@ func (s *UpdateService) WriteWaiter(setupPath string, relaunch bool) error {
 	)
 }
 
+// launchDetachedFn lets tests intercept the REAL call site (WriteWaiter):
+// the 044 folded-argv bug lived at that call site, not inside
+// launchDetached itself — pinning only the helper would survive a
+// regression that inlines a folded string back into WriteWaiter.
+var launchDetachedFn = launchDetached
+
 // waiterArgs builds the waiter's argv in split form — pinned by a test that
-// actually launches PowerShell, because a folded string fails silently.
+// intercepts WriteWaiter's actual launch call, because a folded string
+// fails silently.
 func waiterArgs(script string) []string {
 	return []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script}
 }

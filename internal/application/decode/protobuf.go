@@ -163,41 +163,33 @@ func resolveProtobufSchema(ctx context.Context, schema string) (*descriptorpb.Fi
 // bytes are not an indexes frame (malformed, or already bare) — callers
 // keep the bare-payload error.
 //
-// Spec: each index is a zigzag varint and the array ends at the first 0
-// varint — which doubles as the whole encoding for the top-level [0] case
-// (single 0x00 byte, message follows immediately).
+// Wire spec (MessageIndexes.java, confirmed against the Java/Go/Python
+// SerDes): a zigzag-varint COUNT first, then exactly that many zigzag-varint
+// indexes. A count of 0 is the compact shortcut for the top-level [0]
+// default — a single 0x00 byte, message follows immediately. There is NO
+// terminator; the count bounds the array.
 func stripConfluentIndexes(payload []byte) ([]int, []byte, bool) {
 	if len(payload) == 0 {
 		return nil, payload, false
 	}
-	indexes, n, ok := readZigzagVarints(payload)
-	if !ok || len(indexes) == 0 {
+	count, n, ok := readZigzagVarint(payload)
+	if !ok || count < 0 {
 		return nil, payload, false
 	}
-	return indexes, payload[n:], true
-}
-
-// readZigzagVarints decodes zigzag varints until the 0 terminator (which is
-// consumed) and returns the decoded values plus the number of bytes
-// consumed. The top-level [0] shortcut is normalized: a leading 0 varint
-// reports exactly [0]. ok=false on truncation or oversized varints.
-func readZigzagVarints(b []byte) ([]int, int, bool) {
-	var out []int
-	consumed := 0
-	for {
-		v, n, ok := readZigzagVarint(b[consumed:])
-		if !ok {
-			return nil, 0, false
-		}
-		consumed += n
-		if v == 0 {
-			if len(out) == 0 {
-				out = []int{0} // [0] shortcut: the terminator IS the index
-			}
-			return out, consumed, true
-		}
-		out = append(out, int(v))
+	if count == 0 {
+		return []int{0}, payload[n:], true
 	}
+	indexes := make([]int, 0, count)
+	consumed := n
+	for i := int64(0); i < count; i++ {
+		v, k, ok := readZigzagVarint(payload[consumed:])
+		if !ok {
+			return nil, payload, false
+		}
+		indexes = append(indexes, int(v))
+		consumed += k
+	}
+	return indexes, payload[consumed:], true
 }
 
 // readZigzagVarint decodes one zigzag-encoded varint: value and byte count.

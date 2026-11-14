@@ -395,8 +395,9 @@ func TestProtobufSerDesSecondMessageIndex(t *testing.T) {
 	// Event bytes built by hand: field 2 (name) LEN "hi" = 0x12 0x02 'h' 'i'.
 	// Under the FIRST message these bytes would fail (its field 2 is absent),
 	// so success here proves the [1] index selected the second message.
+	// [1] wire bytes: count zigzag(1)=0x02, index zigzag(1)=0x02.
 	eventBytes := []byte{0x12, 0x02, 'h', 'i'}
-	r := DecodeValue(context.Background(), framed(202, append([]byte{0x02, 0x00}, eventBytes...)), "auto", reg)
+	r := DecodeValue(context.Background(), framed(202, append([]byte{0x02, 0x02}, eventBytes...)), "auto", reg)
 	if r.Error != "" {
 		t.Fatalf("[1] index frame failed: %v", r.Error)
 	}
@@ -405,7 +406,12 @@ func TestProtobufSerDesSecondMessageIndex(t *testing.T) {
 	}
 }
 
-// TestStripConfluentIndexes pins the byte-level parser directly.
+// TestStripConfluentIndexes pins the byte-level parser against the REAL
+// wire format (count-prefixed zigzag varints, per MessageIndexes.java):
+// [0]→00; [1]→02 02; [2]→02 04; [1,2]→04 02 04; [0,1]→04 00 02. The 045
+// round first shipped a "zero-terminator" format that does not exist —
+// only the [0] frame coincidentally matched, hiding the bug behind
+// green tests.
 func TestStripConfluentIndexes(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -415,11 +421,16 @@ func TestStripConfluentIndexes(t *testing.T) {
 		ok      bool
 	}{
 		{"top-level shortcut", []byte{0x00, 0x08, 0x01}, []int{0}, []byte{0x08, 0x01}, true},
-		{"second message", []byte{0x02, 0x00, 0x08, 0x01}, []int{1}, []byte{0x08, 0x01}, true},
-		{"nested path", []byte{0x02, 0x04, 0x00, 0x08, 0x01}, []int{1, 2}, []byte{0x08, 0x01}, true},
+		{"shortcut with empty body", []byte{0x00}, []int{0}, []byte{}, true},
+		{"second message", []byte{0x02, 0x02, 0x08, 0x01}, []int{1}, []byte{0x08, 0x01}, true},
+		{"third message", []byte{0x02, 0x04, 0x08, 0x01}, []int{2}, []byte{0x08, 0x01}, true},
+		{"nested path", []byte{0x04, 0x02, 0x04, 0x08, 0x01}, []int{1, 2}, []byte{0x08, 0x01}, true},
+		{"top-level then nested", []byte{0x04, 0x00, 0x02, 0x08, 0x01}, []int{0, 1}, []byte{0x08, 0x01}, true},
 		{"empty payload", []byte{}, nil, []byte{}, false},
-		{"truncated varint", []byte{0x80}, nil, []byte{0x80}, false},
-		{"terminator only, no body", []byte{0x00}, []int{0}, []byte{}, true},
+		{"truncated count varint", []byte{0x80}, nil, []byte{0x80}, false},
+		{"truncated index list", []byte{0x02, 0x80}, nil, []byte{0x02, 0x80}, false},
+		{"single index, empty body", []byte{0x02, 0x02}, []int{1}, []byte{}, true},
+		{"negative count", []byte{0x01, 0x08, 0x01}, nil, []byte{0x01, 0x08, 0x01}, false},
 	}
 	for _, tc := range cases {
 		indexes, body, ok := stripConfluentIndexes(tc.in)

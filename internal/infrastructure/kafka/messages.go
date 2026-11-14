@@ -79,10 +79,6 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 		}
 	}
 
-	// Poll until ANY record arrives (a GUI page does not need to be full),
-	// an error races the deadline, or the deadline expires. The previous
-	// 300ms second-poll gave up on cold public-internet fetches and showed
-	// "no messages" for partitions that had data.
 	// Poll until the page is FULL, a poll round returns ZERO records (the
 	// broker has nothing buffered — the log boundary or a slow broker,
 	// bounded by pageCtx), or an error fires. One poll returning ANY records
@@ -91,6 +87,14 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 	// big-message partition yields < limit records per round — the old
 	// "any records → done" loop mis-read every short round as the log end,
 	// which truncated paging, rate scans AND exports (044 review round).
+	//
+	// kgo does NOT wake a poller on an empty fetch response, so a zero round
+	// blocks until pageCtx expires — a short page would eat the whole 4s
+	// deadline on EVERY partition's last page (rate scans pay it per
+	// partition). The cachedBounds fast-path answers "already at the log
+	// boundary" after each round with no extra RPC (resolveAnchor just
+	// refreshed the cache), and breaks out early instead.
+	forward := req.Direction != "backward"
 	var records []*kgo.Record
 	var fetchErr error
 	dataLoss := false
@@ -115,23 +119,42 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 		if fetchErr != nil && pageCtx.Err() == nil && !dataLoss {
 			return domain.BrowsePage{}, mapErr(fmt.Errorf("fetch %s-%d: %w", req.Topic, partition, fetchErr))
 		}
-		records = append(records, fetched...)
 		if len(fetched) == 0 {
-			// Nothing buffered this round. On a dataLoss re-poll keep
-			// polling until the page deadline delivers the surviving
-			// records; otherwise this round IS the boundary.
-			if dataLoss && pageCtx.Err() == nil && len(records) == 0 {
-				continue
-			}
+			// Nothing buffered this round: the poller only wakes on records
+			// or errors, so a zero round here means the deadline expired (or
+			// an error above). The dataLoss reposition case is handled by the
+			// next poll — if it delivers nothing either, the short-page exit
+			// below reports an exhausted page.
 			break
 		}
-	}
-	if len(records) == 0 && fetchErr == nil && dataLoss && pageCtx.Err() != nil {
-		return domain.BrowsePage{Exhausted: true, Messages: []domain.Message{}}, nil
+		records = append(records, fetched...)
+		if len(records) < limit {
+			// Short page: only here does "are we at the boundary already?"
+			// need deciding before the next (deadline-eating) poll round.
+			starts, ends, ok := c.cachedBounds(req.Topic)
+			if !ok {
+				continue
+			}
+			var minOff, maxOff int64 = records[0].Offset, records[0].Offset
+			for _, r := range records {
+				if r.Offset < minOff {
+					minOff = r.Offset
+				}
+				if r.Offset > maxOff {
+					maxOff = r.Offset
+				}
+			}
+			if forward {
+				if end, has := ends[partition]; has && maxOff+1 >= end {
+					break // the log end is inside this page — nothing more to poll
+				}
+			} else if start, has := starts[partition]; has && minOff <= start {
+				break // the log start is inside this page
+			}
+		}
 	}
 
 	page := domain.BrowsePage{Messages: []domain.Message{}}
-	forward := req.Direction != "backward"
 	sort.Slice(records, func(i, j int) bool {
 		if forward {
 			return records[i].Offset < records[j].Offset
@@ -363,6 +386,17 @@ func (c *Client) cachedEnds(topic string) (map[int32]int64, bool) {
 	defer c.boundsMu.Unlock()
 	e, ok := c.boundsCache[topic]
 	return e.ends, ok && time.Now().Before(e.expires)
+}
+
+// cachedBounds returns the TTL-cached log start+end maps when fresh — the
+// poll loop's boundary fast-path (short pages must not wait out the poll
+// deadline just to learn the partition ended; resolveAnchor has just
+// refreshed this cache, so it is always hot here).
+func (c *Client) cachedBounds(topic string) (map[int32]int64, map[int32]int64, bool) {
+	c.boundsMu.Lock()
+	defer c.boundsMu.Unlock()
+	e, ok := c.boundsCache[topic]
+	return e.starts, e.ends, ok && time.Now().Before(e.expires)
 }
 
 // partitionKeys lists the partition ids of a consume map.

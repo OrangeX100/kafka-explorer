@@ -52,7 +52,12 @@ export function ResetOffsetDialog({
   // invalidation a stale plan lets the user execute a target they never
   // previewed (preview offset=100 → switch to latest → apply commits
   // "latest"). Offset reset is irreversible; the plan must always match.
+  // previewSeq additionally kills an IN-FLIGHT preview whose response would
+  // otherwise re-light the apply button after the invalidation (timestamp
+  // dry-runs over many partitions take seconds — the form is editable then).
+  const previewSeq = useRef(0);
   useEffect(() => {
+    previewSeq.current++;
     setPlan(null);
   }, [topic, mode, absolute, timestamp, partitionsText]);
 
@@ -76,12 +81,15 @@ export function ResetOffsetDialog({
 
   const preview = async () => {
     setBusy(true);
+    const seq = ++previewSeq.current;
     try {
-      setPlan(await groupsApi.resetOffset(buildTarget(true)));
+      const plan = await groupsApi.resetOffset(buildTarget(true));
+      if (seq !== previewSeq.current) return; // form changed mid-flight
+      setPlan(plan);
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      if (seq === previewSeq.current) toast.show(friendlyError(err), "error");
     } finally {
-      setBusy(false);
+      if (seq === previewSeq.current) setBusy(false);
     }
   };
 

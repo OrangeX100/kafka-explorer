@@ -354,8 +354,12 @@ func (c *Client) DeleteRecordsBefore(ctx context.Context, topic string, offset i
 	if err != nil {
 		return mapErr(err)
 	}
+	// Report the FIRST partition error: map iteration order is random, and
+	// overwriting in the closure reported whichever partition came last —
+	// now that the multi-partition map is actually populated (045 fix) this
+	// aggregation is load-bearing.
 	resps.Each(func(r kadm.DeleteRecordsResponse) {
-		if r.Err != nil {
+		if r.Err != nil && err == nil {
 			err = mapErr(fmt.Errorf("delete records %s-%d: %w", r.Topic, r.Partition, r.Err))
 		}
 	})
