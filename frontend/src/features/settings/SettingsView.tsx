@@ -41,10 +41,17 @@ export function SettingsView() {
     const json = JSON.stringify(settings);
     if (json === lastSavedRef.current) return;
     lastSavedRef.current = json;
+    const sentJSON = json;
     const timer = setTimeout(() => {
       settingsApi
         .save(settings)
         .then((saved) => {
+          // Echo guard (045 round): an edit made while this save was in
+          // flight scheduled its own save — applying this older echo would
+          // revert the user's newer edit on screen AND the resulting effect
+          // rerun would clear the pending timer, losing the edit on both
+          // ends. Skip: the newer save's own echo lands later.
+          if (lastSavedRef.current !== sentJSON) return;
           setSettings(saved);
           useAppSettings.getState().update(saved);
           useTheme.getState().set(saved.theme as Theme);

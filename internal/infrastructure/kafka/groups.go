@@ -184,7 +184,11 @@ func (c *Client) ResetOffset(ctx context.Context, t domain.OffsetResetTarget) ([
 	sort.Slice(partitions, func(i, j int) bool { return partitions[i] < partitions[j] })
 
 	plan := make([]domain.OffsetResetPlan, 0, len(partitions))
-	os := kadm.Offsets{}
+	// ONE inner map for the whole loop: rebuilding it per partition (the old
+	// `os[t.Topic] = map…{}` inside the loop) submitted ONLY the last
+	// partition to CommitOffsets — the broker reset one partition while the
+	// plan reported every partition reset.
+	os := kadm.Offsets{t.Topic: map[int32]kadm.Offset{}}
 	for _, p := range partitions {
 		target, ok := targets.Lookup(t.Topic, p)
 		if !ok || target.Err != nil {
@@ -207,7 +211,6 @@ func (c *Client) ResetOffset(ctx context.Context, t domain.OffsetResetTarget) ([
 			NewOffset: target.Offset,
 			LogEnd:    logEnd,
 		})
-		os[t.Topic] = map[int32]kadm.Offset{}
 		os[t.Topic][p] = kadm.Offset{Topic: t.Topic, Partition: p, At: target.Offset}
 	}
 

@@ -10,6 +10,6 @@ type fmtCancelled struct{}
 func (fmtCancelled) Error() string { return "cancelled" }
 
 // launchDetached is Windows-only; other platforms never stage an installer.
-func launchDetached(program, args string, env map[string]string) error {
+func launchDetached(program string, args []string, env map[string]string) error {
 	return nil
 }

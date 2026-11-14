@@ -20,12 +20,16 @@ const LIMITS = [
 // wave (SSH tunnel UI, task restart + config edit, compat workbench, the
 // manifest/API plumbing); splitting them is planned for 0.5.x, and until
 // then the overage is a registered decision, not a silent slide.
+// MessagesView: +14 lines from the 045 cross-partition GoTo race guard
+// (pendingGoto skip flag); split is planned with the batch-3 seq-guard
+// refactor that unifies the per-view request guards.
 const EXEMPT = new Set([
   "src/features/admin/ConnectDialogs.tsx",
   "src/features/connections/ConnectionDialog.tsx",
   "src/features/shell/Sidebar.tsx",
   "src/shared/api.ts",
   "src/shared/contracts-admin.ts",
+  "src/features/topics/MessagesView.tsx",
 ]);
 
 function* walk(dir) {

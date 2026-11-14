@@ -118,7 +118,7 @@ func (c *Client) ListConnectors(ctx context.Context) ([]ConnectorSummary, error)
 					Worker string `json:"worker_id"`
 				} `json:"connector"`
 			}
-			if err := c.get(ctx, "/connectors/"+n+"/status", &st); err != nil {
+			if err := c.get(ctx, "/connectors/"+esc(n)+"/status", &st); err != nil {
 				out = append(out, ConnectorSummary{Name: n, State: "UNKNOWN"})
 				continue
 			}

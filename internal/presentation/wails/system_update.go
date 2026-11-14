@@ -8,17 +8,36 @@ package wails
 // human-reading rate ticks (150ms), well below the WS-threshold class.
 // InstallStaged spawns the silent-setup waiter and then quits the app; the
 // waiter installs and (optionally) relaunches.
+//
+// TWO hard rules learned the hard way (044 review round):
+//   - The background download must NOT derive from the wails call ctx: the
+//     binding-call processor defers cancel() when the METHOD RETURNS
+//     (wails alpha2.117 messageprocessor_call.go), so a ctx-derived goroutine
+//     dies instantly and the download silently no-ops. Cancellation travels
+//     only through h.cancel (stop button / supersede) via context.WithoutCancel.
+//   - The renderer never names the install candidate. The handler remembers
+//     what IT staged (path + SHA-256, recorded only from a successful staging
+//     of the current generation); InstallStaged re-verifies dir/name/digest
+//     before spawning the waiter. A compromised webview can at most press
+//     "install" on what the app itself downloaded.
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"runtime"
 
 	"go.uber.org/zap"
 
 	"kafkaexplorer/internal/application"
 )
+
+// stagedAssetNameRe pins the install candidate to the release workflow's
+// asset naming. The path lives in DataDir/updates and this shape — anything
+// else the handler remembers is not ours to execute.
+var stagedAssetNameRe = regexp.MustCompile(`^KafkaExplorer_Setup_[^/\\<>:"|?*]+\.exe$`)
 
 // StageUpdate downloads the setup for repo in the background. requestID
 // tags the progress events so the frontend filters its own stream.
@@ -37,8 +56,13 @@ func (h *SystemHandler) StageUpdate(ctx context.Context, repo string, assetURL s
 	}
 	h.stageGen++
 	gen := h.stageGen
-	ctx, cancel := context.WithCancel(ctx)
+	// See the file-header hard rule: derive from WithoutCancel, never from
+	// the call ctx — the call ctx dies when this method returns.
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	h.cancel = cancel
+	// A new stage invalidates any remembered install candidate: its staged
+	// file gets housekept away by this download anyway.
+	h.stagedPath, h.stagedSHA = "", ""
 	h.mu.Unlock()
 
 	go func() {
@@ -52,14 +76,14 @@ func (h *SystemHandler) StageUpdate(ctx context.Context, repo string, assetURL s
 			}
 			h.mu.Unlock()
 		}()
-		staged, err := h.update.StageUpdate(ctx, assetURL, assetSize, manifestSha, func(p application.Progress) {
+		staged, err := h.update.StageUpdate(runCtx, assetURL, assetSize, manifestSha, func(p application.Progress) {
 			if h.emit != nil {
 				h.emit("system:update:progress", map[string]any{
 					"id": requestID, "bytes": p.Bytes, "total": p.Total,
 					"route": p.Route, "failed": false,
 				})
 			}
-		}, ctx.Done())
+		}, runCtx.Done())
 		failed := err != nil
 		stagedPath := staged
 		if err == nil && staged == "" {
@@ -70,6 +94,27 @@ func (h *SystemHandler) StageUpdate(ctx context.Context, repo string, assetURL s
 		}
 		if err != nil && staged == "" {
 			stagedPath = ""
+		}
+		if err == nil && staged != "" {
+			// Record the install candidate for InstallStaged. Recording is
+			// generation-gated: a supersede that landed mid-download must
+			// not re-arm a candidate for a generation that already lost.
+			if sha, shaErr := h.update.SHA256File(staged); shaErr == nil {
+				h.mu.Lock()
+				if h.stageGen == gen {
+					h.stagedPath, h.stagedSHA = staged, sha
+				}
+				h.mu.Unlock()
+			} else {
+				// No digest → the install gate could not verify → do not arm.
+				h.log.Warn("staged installer digest unavailable; install candidate not armed",
+					zap.String("id", requestID), zap.Error(shaErr))
+				h.mu.Lock()
+				if h.stageGen == gen {
+					h.stagedPath, h.stagedSHA = "", ""
+				}
+				h.mu.Unlock()
+			}
 		}
 		if h.emit != nil {
 			payload := map[string]any{
@@ -98,22 +143,50 @@ func (h *SystemHandler) CancelUpdate() {
 
 // InstallStaged launches the silent-setup waiter; the caller then quits the
 // app (quit chain injected by bootstrap). relaunch restarts the app after
-// the installer finishes.
-func (h *SystemHandler) InstallStaged(stagedPath string, relaunch bool) error {
-	h.log.Info("update install", zap.String("path", stagedPath), zap.Bool("relaunch", relaunch))
-	// Existence gate: the waiter's Start-Process would fail only AFTER this
-	// process quit — a dead app plus an err.log nobody reads. Fail NOW with
-	// an actionable message so the user can re-check and re-download.
-	if st, statErr := os.Stat(stagedPath); statErr != nil || st.IsDir() {
-		return fmt.Errorf("暂存的安装包不存在或已被清理，请重新检查更新并下载")
+// the installer finishes. The install candidate is the handler's OWN
+// remembered staging — the renderer only presses the button.
+func (h *SystemHandler) InstallStaged(relaunch bool) error {
+	path, err := h.verifyStaged()
+	if err != nil {
+		return err
 	}
-	if err := h.update.WriteWaiter(stagedPath, relaunch); err != nil {
+	h.log.Info("update install", zap.String("path", path), zap.Bool("relaunch", relaunch))
+	if err := h.update.WriteWaiter(path, relaunch); err != nil {
 		return err
 	}
 	if h.quit != nil {
 		h.quit()
 	}
 	return nil
+}
+
+// verifyStaged re-checks the remembered candidate: existence (the waiter's
+// Start-Process would otherwise fail only AFTER this process quit), the
+// app-owned updates dir + release asset name shape, and a fresh digest match
+// (the file could have been touched between staging and install).
+func (h *SystemHandler) verifyStaged() (string, error) {
+	h.mu.Lock()
+	path, want := h.stagedPath, h.stagedSHA
+	h.mu.Unlock()
+	if path == "" || want == "" {
+		return "", fmt.Errorf("尚未暂存安装包，请先检查更新并下载")
+	}
+	if st, statErr := os.Stat(path); statErr != nil || st.IsDir() {
+		return "", fmt.Errorf("暂存的安装包不存在或已被清理，请重新检查更新并下载")
+	}
+	dir, dirErr := h.update.UpdatesDir()
+	if dirErr != nil {
+		return "", fmt.Errorf("定位暂存目录失败: %w", dirErr)
+	}
+	if filepath.Clean(filepath.Dir(path)) != filepath.Clean(dir) ||
+		!stagedAssetNameRe.MatchString(filepath.Base(path)) {
+		return "", fmt.Errorf("暂存路径校验失败，请重新检查更新并下载")
+	}
+	got, err := h.update.SHA256File(path)
+	if err != nil || got != want {
+		return "", fmt.Errorf("暂存安装包校验失败，请重新检查更新并下载")
+	}
+	return path, nil
 }
 
 func errorText(err error) string {

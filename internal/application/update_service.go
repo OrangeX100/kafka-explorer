@@ -77,6 +77,19 @@ func NewUpdateService(currentVersion string, log *zap.Logger) *UpdateService {
 	}
 }
 
+// SHA256File hex-digests a local file. Exported for the wails layer: the
+// install gate re-verifies the staged installer's digest before spawning
+// the waiter (the renderer never names a path; the handler remembers both).
+func (s *UpdateService) SHA256File(path string) (string, error) {
+	return fileSHA256(path)
+}
+
+// UpdatesDir exposes the staged-installer directory so the wails install
+// gate can pin the candidate to the app-owned location.
+func (s *UpdateService) UpdatesDir() (string, error) {
+	return updatesDir()
+}
+
 // Check queries the latest release for repo ("owner/repo") and compares it
 // semantically against the current version. Primary source is the
 // release-attached latest.json manifest (a STATIC download — no GitHub API

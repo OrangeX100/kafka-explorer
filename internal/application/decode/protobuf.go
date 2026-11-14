@@ -1,9 +1,13 @@
 package decode
 
-// Confluent-framed Protobuf decoding: the wire payload is a raw protobuf
-// message (no field framing), so decoding needs a dynamic message built
-// from the registry's schema. Registries differ in HOW they store protobuf
-// schemas and GET /schemas/ids/{id} simply returns whatever was stored:
+// Confluent-framed Protobuf decoding: after the 5-byte magic+schema-id
+// header the wire carries EITHER a raw protobuf message (legacy/privately
+// produced writers) OR the standard SerDes message-indexes frame followed
+// by the message bytes — decodeProtobufJSON tries bare first and falls
+// back to stripping the indexes, so both writers decode. Decoding needs a
+// dynamic message built from the registry's schema. Registries differ in
+// HOW they store protobuf schemas and GET /schemas/ids/{id} simply returns
+// whatever was stored:
 //   - base64 of a serialized FileDescriptorSet (Confluent SR with the
 //     kafka-protobuf-serializer family)
 //   - .proto source text (several third-party registries; observed in the
@@ -104,35 +108,126 @@ func entryFile(fds *descriptorpb.FileDescriptorSet) string {
 	return ""
 }
 
-// decodeProtobufJSON renders one Confluent-framed Protobuf payload as
-// JSON. schema is the registry's schema field for the record's schema id.
+// decodeProtobufJSON renders one Confluent-framed Protobuf payload as JSON.
+// schema is the registry's schema field for the record's schema id.
 // The schema's own file's first message is the message used (registries
-// conventionally register one subject per message).
+// conventionally register one subject per message), unless the wire carries
+// a message-index path pointing elsewhere.
+//
+// Wire order — bare first, then the Confluent message-indexes frame: the
+// caller hands us the bytes AFTER the 5-byte magic+schema-id header, and
+// two writers exist in the wild. Standard Confluent SerDes append a
+// message-indexes section (a zigzag-varint array; a top-level message
+// encodes as the single byte 0x00) which proto.Unmarshal rejects outright
+// ("invalid field number") — the 044-round blind spot that failed EVERY
+// standard SerDes-produced Protobuf record. Legacy / privately produced
+// writers put the raw message right after the header. Trying bare first
+// keeps those working; a bare parse ALWAYS fails on index-framed bytes
+// (the array terminator 0x00 is field number 0), so the fallback cannot
+// misfire on a truly index-framed payload.
 func decodeProtobufJSON(ctx context.Context, payload []byte, schema string) Result {
+	fds, entry, err := resolveProtobufSchema(ctx, schema)
+	if err != nil {
+		return Result{Format: "protobuf", Error: err.Error()}
+	}
+	bare := decodeProtobufFDSetJSON(payload, fds, entry, nil)
+	if bare.Error == "" {
+		return bare
+	}
+	indexes, body, ok := stripConfluentIndexes(payload)
+	if !ok {
+		return bare // not an indexes frame: the bare error is the real one
+	}
+	return decodeProtobufFDSetJSON(body, fds, entry, indexes)
+}
+
+// resolveProtobufSchema compiles/decodes the registry's schema (either
+// storage format) once so both wire attempts share the descriptor set.
+func resolveProtobufSchema(ctx context.Context, schema string) (*descriptorpb.FileDescriptorSet, string, error) {
 	if isProtoText(schema) {
 		fds, err := compileProtoText(ctx, schema)
 		if err != nil {
-			return Result{Format: "protobuf", Error: fmt.Sprintf("解析 .proto 文本失败: %v", err)}
+			return nil, "", fmt.Errorf("解析 .proto 文本失败: %v", err)
 		}
-		return decodeProtobufFDSetJSON(payload, fds, compiledEntry)
+		return fds, compiledEntry, nil
 	}
 	var fds descriptorpb.FileDescriptorSet
 	if _, err := decodeFDSet(schema, &fds); err != nil {
-		return Result{Format: "protobuf", Error: err.Error()}
+		return nil, "", err
 	}
-	return decodeProtobufFDSetJSON(payload, &fds, entryFile(&fds))
+	return &fds, entryFile(&fds), nil
+}
+
+// stripConfluentIndexes splits a Confluent message-indexes frame into the
+// index path and the raw protobuf bytes that follow it. ok=false means the
+// bytes are not an indexes frame (malformed, or already bare) — callers
+// keep the bare-payload error.
+//
+// Spec: each index is a zigzag varint and the array ends at the first 0
+// varint — which doubles as the whole encoding for the top-level [0] case
+// (single 0x00 byte, message follows immediately).
+func stripConfluentIndexes(payload []byte) ([]int, []byte, bool) {
+	if len(payload) == 0 {
+		return nil, payload, false
+	}
+	indexes, n, ok := readZigzagVarints(payload)
+	if !ok || len(indexes) == 0 {
+		return nil, payload, false
+	}
+	return indexes, payload[n:], true
+}
+
+// readZigzagVarints decodes zigzag varints until the 0 terminator (which is
+// consumed) and returns the decoded values plus the number of bytes
+// consumed. The top-level [0] shortcut is normalized: a leading 0 varint
+// reports exactly [0]. ok=false on truncation or oversized varints.
+func readZigzagVarints(b []byte) ([]int, int, bool) {
+	var out []int
+	consumed := 0
+	for {
+		v, n, ok := readZigzagVarint(b[consumed:])
+		if !ok {
+			return nil, 0, false
+		}
+		consumed += n
+		if v == 0 {
+			if len(out) == 0 {
+				out = []int{0} // [0] shortcut: the terminator IS the index
+			}
+			return out, consumed, true
+		}
+		out = append(out, int(v))
+	}
+}
+
+// readZigzagVarint decodes one zigzag-encoded varint: value and byte count.
+func readZigzagVarint(b []byte) (int64, int, bool) {
+	var u uint64
+	var shift uint
+	for i, byteVal := range b {
+		if i >= 10 { // a varint never exceeds 10 bytes
+			return 0, 0, false
+		}
+		u |= uint64(byteVal&0x7F) << shift
+		if byteVal&0x80 == 0 {
+			return int64(u>>1) ^ -int64(u&1), i + 1, true
+		}
+		shift += 7
+	}
+	return 0, 0, false // truncated varint
 }
 
 // decodeProtobufFDSetJSON builds a dynamic message from the descriptor
 // set, unmarshals the wire payload and renders it as pretty JSON.
 // entryName selects which file carries the schema's own message (when
-// empty, the first message anywhere in the set is used).
-func decodeProtobufFDSetJSON(payload []byte, fds *descriptorpb.FileDescriptorSet, entryName string) Result {
+// empty, the first message anywhere in the set is used). indexes is the
+// Confluent wire's message-index path (nil = first message).
+func decodeProtobufFDSetJSON(payload []byte, fds *descriptorpb.FileDescriptorSet, entryName string, indexes []int) Result {
 	files, err := protodesc.NewFiles(fds)
 	if err != nil {
 		return Result{Format: "protobuf", Error: fmt.Sprintf("构建描述符失败: %v", err)}
 	}
-	md, err := firstMessageDesc(files, entryName)
+	md, err := messageDescFor(files, entryName, indexes)
 	if err != nil {
 		return Result{Format: "protobuf", Error: err.Error()}
 	}
@@ -150,6 +245,34 @@ func decodeProtobufFDSetJSON(payload []byte, fds *descriptorpb.FileDescriptorSet
 		return Result{Format: "protobuf", Text: string(pretty)}
 	}
 	return Result{Format: "protobuf", Text: string(asJSON)}
+}
+
+// messageDescFor resolves the message descriptor the wire's index path
+// points at. nil indexes (and the [0] shortcut) keep the historic "entry
+// file's first message" behavior; a deeper path navigates the entry file's
+// top-level messages, then nested types in order — that is the Confluent
+// index semantics ([1,0] = second top-level message, its first nested type).
+func messageDescFor(files *protoregistry.Files, entryName string, indexes []int) (protoreflect.MessageDescriptor, error) {
+	if len(indexes) == 0 || (len(indexes) == 1 && indexes[0] == 0) {
+		return firstMessageDesc(files, entryName)
+	}
+	fd, err := files.FindFileByPath(entryName)
+	if err != nil {
+		return nil, fmt.Errorf("无法定位 schema 文件 %q 以解析消息索引 %v", entryName, indexes)
+	}
+	ms := fd.Messages()
+	if indexes[0] < 0 || indexes[0] >= ms.Len() {
+		return nil, fmt.Errorf("消息索引 %v 超出 schema 的消息范围", indexes)
+	}
+	cur := ms.Get(indexes[0])
+	for _, idx := range indexes[1:] {
+		ns := cur.Messages() // nested message types, in declaration order
+		if idx < 0 || idx >= ns.Len() {
+			return nil, fmt.Errorf("消息索引 %v 超出 schema 的消息范围", indexes)
+		}
+		cur = ns.Get(idx)
+	}
+	return cur, nil
 }
 
 // firstMessageDesc returns the schema's own message descriptor: the

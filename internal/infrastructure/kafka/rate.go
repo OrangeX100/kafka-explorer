@@ -104,10 +104,19 @@ func (c *Client) TopicRateHistogram(ctx context.Context, topic string, win domai
 			}
 			return
 		}
-		minTs := recs[0].ts
-		maxTs := recs[len(recs)-1].ts
-		if maxTs < minTs {
-			maxTs = minTs
+		// True min/max across ALL records: recs is appended per partition in
+		// map iteration order (Go randomizes it), so recs[0]/recs[last] were
+		// "first scanned / last scanned", not the oldest/newest timestamps —
+		// a lagging partition collapsed the window (span→1) and clamped every
+		// newer record into the last bucket (044 review round).
+		minTs, maxTs := recs[0].ts, recs[0].ts
+		for _, r := range recs {
+			if r.ts < minTs {
+				minTs = r.ts
+			}
+			if r.ts > maxTs {
+				maxTs = r.ts
+			}
 		}
 		span := maxTs - minTs
 		if span <= 0 {

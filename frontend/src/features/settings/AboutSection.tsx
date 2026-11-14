@@ -69,7 +69,9 @@ export function UpdateSection({
     if (!staged) return;
     upd.toInstalling();
     try {
-      await systemApi.installStaged(staged, true);
+      // The handler installs what IT staged (path + digest remembered
+      // backend-side); the renderer only presses the button (045 hardening).
+      await systemApi.installStaged(true);
       // The app quits right after this; the silent installer takes over.
     } catch (err) {
       upd.installFailed(friendlyError(err));
@@ -151,37 +153,42 @@ export function UpdateSection({
               <Download size={12} /> {t("settings.updateDownload")}
             </button>
           )}
-          {phase === "downloading" && (
-            <div className="mt-2">
-              <div className="h-1.5 overflow-hidden rounded bg-ink-800">
-                <div className="h-full bg-accent transition-[width] duration-150" style={{ width: `${pct}%` }} />
-              </div>
-              <div className="mt-1 flex items-center justify-between text-10 text-ink-400">
-                <span>
-                  {t("settings.updateDownloading")}
-                  {route !== "" && route !== "直连" ? ` · ${route}` : ""}
-                </span>
-                <span>
-                  {mb(bytes)}/{mb(total)} MB · {pct}%
-                </span>
-                <button className="btn !px-1.5 !py-0 text-10" onClick={cancelDownload}>
-                  {t("settings.updateCancel")}
-                </button>
-              </div>
-            </div>
-          )}
-          {phase === "staged" && (
-            <div className="mt-2 rounded border border-ok/40 bg-ok/10 px-2.5 py-2 text-11 text-ink-100">
-              {t("settings.updateStaged")}
-              <button className="btn btn-accent ml-2 !px-2 !py-0.5" onClick={() => void installNow()}>
-                {t("settings.updateInstall")}
-              </button>
-            </div>
-          )}
-          {phase === "installing" && (
-            <div className="mt-2 text-11 text-ink-300">{t("settings.updateInstalling")}</div>
-          )}
         </div>
+      )}
+      {/* Update lifecycle lives in the SESSION-GLOBAL store (state/update.ts)
+          so a download outlives this component — these blocks render OUTSIDE
+          the result block on purpose: `result` is component-local and resets
+          on remount, and the staged result must still be installable after
+          navigating away and back (045 round). */}
+      {phase === "downloading" && (
+        <div className="mt-3 rounded border border-accent/30 bg-accent/10 px-2.5 py-2 text-xs text-ink-100">
+          <div className="h-1.5 overflow-hidden rounded bg-ink-800">
+            <div className="h-full bg-accent transition-[width] duration-150" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="mt-1 flex items-center justify-between text-10 text-ink-400">
+            <span>
+              {t("settings.updateDownloading")}
+              {route !== "" && route !== "直连" ? ` · ${route}` : ""}
+            </span>
+            <span>
+              {mb(bytes)}/{mb(total)} MB · {pct}%
+            </span>
+            <button className="btn !px-1.5 !py-0 text-10" onClick={cancelDownload}>
+              {t("settings.updateCancel")}
+            </button>
+          </div>
+        </div>
+      )}
+      {phase === "staged" && (
+        <div className="mt-3 rounded border border-ok/40 bg-ok/10 px-2.5 py-2 text-11 text-ink-100">
+          {t("settings.updateStaged")}
+          <button className="btn btn-accent ml-2 !px-2 !py-0.5" onClick={() => void installNow()}>
+            {t("settings.updateInstall")}
+          </button>
+        </div>
+      )}
+      {phase === "installing" && (
+        <div className="mt-3 text-11 text-ink-300">{t("settings.updateInstalling")}</div>
       )}
     </section>
   );

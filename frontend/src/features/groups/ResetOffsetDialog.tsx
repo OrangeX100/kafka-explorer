@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal } from "../common/Modal.js";
 import { groupsApi } from "../../shared/api.js";
 import { useToast } from "../../state/stores.js";
@@ -46,6 +46,15 @@ export function ResetOffsetDialog({
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const closeRef = useRef<() => void>(() => {});
+
+  // Preview drift guard (045 round): the plan describes the form AS IT WAS
+  // when 预览 ran, while apply() builds from the CURRENT form — without this
+  // invalidation a stale plan lets the user execute a target they never
+  // previewed (preview offset=100 → switch to latest → apply commits
+  // "latest"). Offset reset is irreversible; the plan must always match.
+  useEffect(() => {
+    setPlan(null);
+  }, [topic, mode, absolute, timestamp, partitionsText]);
 
   const buildTarget = (dryRun: boolean) => {
     const partitions = partitionsText

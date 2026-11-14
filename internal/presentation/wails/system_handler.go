@@ -63,7 +63,12 @@ type SystemHandler struct {
 	// goroutine's cleanup must only clear h.cancel when it is STILL the
 	// registered one (a superseding stage owns it by then).
 	stageGen int64
-	mu       sync.Mutex
+	// stagedPath/stagedSHA remember what THIS handler staged (set only from
+	// a successful staging of the current generation). InstallStaged installs
+	// THIS candidate after re-verification — the renderer never names a path.
+	stagedPath string
+	stagedSHA  string
+	mu         sync.Mutex
 }
 
 func NewSystemHandler(update *application.UpdateService, log *zap.Logger) *SystemHandler {

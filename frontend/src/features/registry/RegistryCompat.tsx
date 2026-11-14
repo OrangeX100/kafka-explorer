@@ -90,15 +90,18 @@ export function CompatTab({
     }
   };
 
-  const setLevel = async (level: string) => {
-    const prev = level;
+  // The parameter MUST NOT be named `level`: it shadows the state variable,
+  // so the failure branch's "rollback" (`prev = level` = the NEW value)
+  // actually wrote the FAILED value into state — the select showed a level
+  // the registry never accepted (045 round).
+  const applyLevel = async (next: string) => {
     try {
-      await registryApi.setSubjectConfig(registryId, subject.name, level);
-      setLevelState(level); // optimistic: the registry confirmed the write
+      await registryApi.setSubjectConfig(registryId, subject.name, next);
+      setLevelState(next); // the registry confirmed the write
       toast.show(t("reg.configSaved"), "ok");
       onCompatChanged?.(); // refresh the parent's subject snapshot (badges)
     } catch (err) {
-      setLevelState(prev); // keep the registry's last known value
+      setLevelState(level); // keep the registry's last known value
       toast.show(friendlyError(err), "error");
     }
   };
@@ -111,7 +114,7 @@ export function CompatTab({
           <Select
             value={level}
             options={COMPAT_LEVELS.map((l) => ({ value: l, label: `${l} · ${t(LEVEL_DESC[l])}` }))}
-            onChange={(v) => void setLevel(v)}
+            onChange={(v) => void applyLevel(v)}
           />
         </div>
         <span className="text-10 text-ink-400">{t((LEVEL_DESC[level] ?? "reg.levelNone") + "_long")}</span>

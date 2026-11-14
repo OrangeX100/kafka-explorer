@@ -142,11 +142,12 @@ export function classifyError(err: unknown): { key: string; detail: string } {
   if (/组.*不存在|GROUPID_NOT_FOUND|group.*not found|has no offset/i.test(detail)) return { key: "error.groupMissing", detail };
   if (/正在重新平衡|REBALANCE_IN_PROGRESS|UNKNOWN_MEMBER_ID|MEMBER_ID_REQUIRED|stale member/i.test(detail)) return { key: "error.rebalance", detail };
   if (/COORDINATOR_NOT_AVAILABLE|NOT_COORDINATOR|COORDINATOR_LOAD_IN_PROGRESS/i.test(detail)) return { key: "error.coordinator", detail };
-  // DENIED must be checked BEFORE auth: "Not authorized…" CONTAINS the
-  // substring "auth", so the auth rule used to swallow every authorization
-  // failure and the hint panel explained the wrong problem.
-  if (/not authorized|unauthorized|forbidden|denied|授权/i.test(detail)) return { key: "error.denied", detail };
-  if (/认证失败|auth|sasl/i.test(detail)) return { key: "error.auth", detail };
+  // DENIED before AUTH: "Not authorized…" CONTAINS the substring "auth", so
+  // the denied rule must run first — but "unauthorized" (401, wrong
+  // credentials) belongs to AUTH and is NOT matched here (045 round: the
+  // 044 reorder mis-filed every 401 as a permission problem).
+  if (/not authorized|forbidden|denied|授权/i.test(detail)) return { key: "error.denied", detail };
+  if (/认证失败|auth|sasl|unauthorized/i.test(detail)) return { key: "error.auth", detail };
   if (/UNSUPPORTED_VERSION|不支持.*需要 Kafka/i.test(detail)) return { key: "error.unsupportedVersion", detail };
   if (/already exists|已存在/i.test(detail)) return { key: "error.conflict", detail };
   if (/不存在|not found/i.test(detail)) return { key: "error.notFound", detail };
@@ -359,8 +360,10 @@ export const systemApi = {
   stageUpdate: (repo: string, assetUrl: string, assetSize: number, manifestSha: string, requestId: string): Promise<void> =>
     systemHandler.StageUpdate(repo, assetUrl, assetSize, manifestSha, requestId) as never,
   cancelUpdate: (): Promise<void> => systemHandler.CancelUpdate() as never,
-  installStaged: (stagedPath: string, relaunch: boolean): Promise<void> =>
-    systemHandler.InstallStaged(stagedPath, relaunch) as never,
+  // The handler installs what IT staged (path + digest remembered
+  // backend-side); the renderer only presses the button (045 hardening).
+  installStaged: (relaunch: boolean): Promise<void> =>
+    systemHandler.InstallStaged(relaunch) as never,
 };
 
 export const topicApi = {

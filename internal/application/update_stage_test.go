@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -82,5 +84,58 @@ func TestTryRouteCompletes(t *testing.T) {
 		func(Progress) {}, make(chan struct{}))
 	if err != nil {
 		t.Fatalf("healthy route failed: %v", err)
+	}
+}
+
+// TestStageUpdateHousekeepingOnlyTouchesOurArtifacts pins the 045 narrowing:
+// the pre-download cleanup removes ONLY release-asset shaped installers and
+// .part leftovers — the old wipe-everything pass silently deleted anything
+// else the user parked in DataDir/updates.
+func TestStageUpdateHousekeepingOnlyTouchesOurArtifacts(t *testing.T) {
+	payload := []byte("housekeeping payload")
+	sum := sha256.Sum256(payload)
+	manifestSHA := hex.EncodeToString(sum[:])
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	dir, err := updatesDir()
+	if err != nil {
+		t.Fatalf("updates dir: %v", err)
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	keep := filepath.Join(dir, "user-notes.txt")
+	oldSetup := filepath.Join(dir, stagedSetupPrefix+"9.9.9.exe")
+	strayPart := filepath.Join(dir, "leftover.part")
+	if err := os.WriteFile(keep, []byte("keep me"), 0o600); err != nil {
+		t.Fatalf("seed keep file: %v", err)
+	}
+	if err := os.WriteFile(oldSetup, []byte("old"), 0o600); err != nil {
+		t.Fatalf("seed old setup: %v", err)
+	}
+	if err := os.WriteFile(strayPart, []byte("stray"), 0o600); err != nil {
+		t.Fatalf("seed stray part: %v", err)
+	}
+	defer os.Remove(keep)
+
+	svc := &UpdateService{}
+	staged, err := svc.StageUpdate(t.Context(), srv.URL+"/KafkaExplorer_Setup_0.0.0-test.exe", int64(len(payload)), manifestSHA, func(Progress) {}, make(chan struct{}))
+	if err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	defer os.Remove(staged)
+
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatal("REGRESSION: user file in updates dir was deleted by housekeeping")
+	}
+	if _, err := os.Stat(oldSetup); !os.IsNotExist(err) {
+		t.Fatal("old staged setup was not housekept")
+	}
+	if _, err := os.Stat(strayPart); !os.IsNotExist(err) {
+		t.Fatal("stray .part was not housekept")
+	}
+	if _, err := os.Stat(staged); err != nil {
+		t.Fatalf("newly staged installer missing: %v", err)
 	}
 }

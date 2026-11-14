@@ -83,20 +83,26 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 	// an error races the deadline, or the deadline expires. The previous
 	// 300ms second-poll gave up on cold public-internet fetches and showed
 	// "no messages" for partitions that had data.
+	// Poll until the page is FULL, a poll round returns ZERO records (the
+	// broker has nothing buffered — the log boundary or a slow broker,
+	// bounded by pageCtx), or an error fires. One poll returning ANY records
+	// is NOT a full page: kgo serves at most one broker fetch response per
+	// round (per-partition cap FetchMaxPartitionBytes, default 1 MiB), so a
+	// big-message partition yields < limit records per round — the old
+	// "any records → done" loop mis-read every short round as the log end,
+	// which truncated paging, rate scans AND exports (044 review round).
 	var records []*kgo.Record
 	var fetchErr error
 	dataLoss := false
-	for len(records) == 0 && fetchErr == nil {
-		fetches := pc.PollRecords(pageCtx, limit)
+	for len(records) < limit && fetchErr == nil {
+		fetches := pc.PollRecords(pageCtx, limit-len(records))
+		fetched := fetches.Records()
 		fetches.EachError(func(_ string, _ int32, err error) {
 			// ErrDataLoss: a time-offset resolved position is older than the
 			// compacted/trimmed log start — kgo already repositioned to the
 			// log start; the next poll returns the surviving records. A GUI
 			// page must NOT fail on this: rate scans and old-window browsing
 			// both hit it. Let the loop re-poll (bounded by pageCtx).
-			// *kgo.ErrDataLoss: the resolved position is older than the
-			// trimmed log start — kgo repositioned automatically; keep
-			// re-polling (bounded by pageCtx) for the surviving records.
 			var dle *kgo.ErrDataLoss
 			if errors.As(err, &dle) {
 				dataLoss = true
@@ -106,13 +112,22 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 				fetchErr = err
 			}
 		})
-		if len(records) == 0 && fetchErr == nil && dataLoss && pageCtx.Err() != nil {
-			return domain.BrowsePage{Exhausted: true, Messages: []domain.Message{}}, nil
-		}
 		if fetchErr != nil && pageCtx.Err() == nil && !dataLoss {
 			return domain.BrowsePage{}, mapErr(fmt.Errorf("fetch %s-%d: %w", req.Topic, partition, fetchErr))
 		}
-		records = append(records, fetches.Records()...)
+		records = append(records, fetched...)
+		if len(fetched) == 0 {
+			// Nothing buffered this round. On a dataLoss re-poll keep
+			// polling until the page deadline delivers the surviving
+			// records; otherwise this round IS the boundary.
+			if dataLoss && pageCtx.Err() == nil && len(records) == 0 {
+				continue
+			}
+			break
+		}
+	}
+	if len(records) == 0 && fetchErr == nil && dataLoss && pageCtx.Err() != nil {
+		return domain.BrowsePage{Exhausted: true, Messages: []domain.Message{}}, nil
 	}
 
 	page := domain.BrowsePage{Messages: []domain.Message{}}

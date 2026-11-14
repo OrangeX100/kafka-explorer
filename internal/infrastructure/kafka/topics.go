@@ -342,9 +342,12 @@ func (c *Client) DeleteRecordsBefore(ctx context.Context, topic string, offset i
 			selected = append(selected, p)
 		}
 	}
-	offsets := kadm.Offsets{}
+	// ONE inner map for the whole loop — rebuilding it per partition (the
+	// old `offsets[topic] = map…{}` inside the loop) submitted ONLY the last
+	// partition to DeleteRecords: a multi-partition truncation silently
+	// truncated one partition and reported success.
+	offsets := kadm.Offsets{topic: map[int32]kadm.Offset{}}
 	for _, p := range selected {
-		offsets[topic] = map[int32]kadm.Offset{}
 		offsets[topic][p] = kadm.Offset{Topic: topic, Partition: p, At: offset}
 	}
 	resps, err := c.adm.DeleteRecords(ctx, offsets)

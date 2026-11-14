@@ -14,7 +14,6 @@ import (
 
 	"github.com/hamba/avro/v2"
 	"google.golang.org/protobuf/reflect/protodesc"
-	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 // ValidateSchema parses one schema and reports the first problem in a
@@ -59,22 +58,14 @@ func DecodeLocalSchema(schemaType, schema string, payload []byte) Result {
 func validateProtobufSchema(schema string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	var fds descriptorpb.FileDescriptorSet
-	var entry string
-	if isProtoText(schema) {
-		built, err := compileProtoText(ctx, schema)
-		if err != nil {
-			return fmt.Errorf("解析 .proto 文本失败: %v", err)
-		}
-		fds = *built
-		entry = compiledEntry
-	} else {
-		if _, err := decodeFDSet(schema, &fds); err != nil {
-			return err
-		}
-		entry = entryFile(&fds)
+	// The shared resolver returns a POINTER: copying the FileDescriptorSet
+	// value (`fds = *built`) carried its internal sync.Mutex along, which
+	// go vet flags as a copylocks error.
+	fds, entry, err := resolveProtobufSchema(ctx, schema)
+	if err != nil {
+		return err
 	}
-	files, err := protodesc.NewFiles(&fds)
+	files, err := protodesc.NewFiles(fds)
 	if err != nil {
 		return fmt.Errorf("构建描述符失败: %v", err)
 	}

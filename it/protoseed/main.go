@@ -107,9 +107,15 @@ func main() {
 		setDouble(msg, "score", float64(i)*0.5)
 		payload, err := proto.Marshal(msg)
 		must(err)
-		value := make([]byte, 0, 5+len(payload))
+		// STANDARD Confluent SerDes frame: magic + schema id + message
+		// indexes ([0] top-level = single 0x00) + message bytes. The old
+		// frame here omitted the indexes — it was a non-standard shape the
+		// decoder happened to accept, which masked the missing-indexes bug
+		// until the 044 review round.
+		value := make([]byte, 0, 6+len(payload))
 		value = append(value, 0x00)
 		value = binary.BigEndian.AppendUint32(value, uint32(schemaID))
+		value = append(value, 0x00) // message indexes: [0] top-level
 		value = append(value, payload...)
 		rec := &kgo.Record{Topic: *topic, Key: []byte(fmt.Sprintf("pk-%03d", i)), Value: value}
 		if err := cl.ProduceSync(ctx, rec).FirstErr(); err != nil {

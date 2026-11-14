@@ -158,13 +158,42 @@ func TestWaiterScriptBodyPinsTheTwoTraps(t *testing.T) {
 	if !strings.Contains(body, "(Get-Date).AddMinutes(10)") {
 		t.Fatal("REGRESSION: wait loop lost the PID-reuse deadline — a recycled PID would hang the waiter forever")
 	}
-	if !strings.Contains(body, "Remove-Item -FilePath $env:KE_UPDATE_SETUP") {
+	if !strings.Contains(body, "Remove-Item -Path $env:KE_UPDATE_SETUP") {
 		t.Fatal("REGRESSION: staged installer is no longer removed after install — updates dir grows forever")
 	}
-	if !strings.Contains(body, "Remove-Item -FilePath $PSCommandPath") {
+	if strings.Contains(body, "Remove-Item -FilePath") {
+		t.Fatal("REGRESSION: Remove-Item has no -FilePath parameter (only -Path/-LiteralPath) — the cleanup would throw into catch and remove nothing (045 live-test find)")
+	}
+	if !strings.Contains(body, "Remove-Item -Path $PSCommandPath") {
 		t.Fatal("REGRESSION: waiter script no longer self-deletes after install")
 	}
-	if strings.Count(body, `o''brien`) != 2 {
-		t.Fatalf("REGRESSION: the log path is embedded %d times; BOTH (timeout note + catch) must be quote-escaped", strings.Count(body, `o''brien`))
+	// THREE log writes since the 045 exit-code gate: timeout note, exit-code
+	// note, catch — ALL of them must be quote-escaped.
+	if strings.Count(body, `o''brien`) != 3 {
+		t.Fatalf("REGRESSION: the log path is embedded %d times; all three (timeout + exit-code + catch) must be quote-escaped", strings.Count(body, `o''brien`))
+	}
+	// 045 round: the installer's exit code is checked explicitly —
+	// Start-Process -Wait does NOT throw on a non-zero exit, so without
+	// -PassThru + the ExitCode gate a failed silent install deleted the
+	// staged setup and relaunched as if it had succeeded (no err.log).
+	if !strings.Contains(body, "-Wait -PassThru") {
+		t.Fatal("REGRESSION: installer exit code is not captured (missing -PassThru)")
+	}
+	if !strings.Contains(body, "$p.ExitCode -ne 0") {
+		t.Fatal("REGRESSION: non-zero installer exit code is not checked")
+	}
+	if !strings.Contains(body, "exit 1\n") {
+		t.Fatal("REGRESSION: failed install must stop the waiter before removing the setup or relaunching")
+	}
+	// Every log write appends: a timeout note followed by a catch error must
+	// not erase the timeout context.
+	if got := strings.Count(body, "-Encoding utf8 -Append"); got < 3 {
+		t.Fatalf("REGRESSION: %d log writes append; timeout + exit-code + catch notes must all append", got)
+	}
+	// Failure keeps the staged setup (exit 1 runs before the removal).
+	failIdx := strings.Index(body, "exit 1")
+	removeIdx := strings.Index(body, "Remove-Item -Path $env:KE_UPDATE_SETUP")
+	if failIdx < 0 || removeIdx < 0 || failIdx > removeIdx {
+		t.Fatalf("REGRESSION: exit-1 gate (at %d) must precede the setup removal (at %d)", failIdx, removeIdx)
 	}
 }

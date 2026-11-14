@@ -52,6 +52,10 @@ func updatesDir() (string, error) {
 	return p, nil
 }
 
+// stagedSetupPrefix is the release workflow's installer asset naming; the
+// housekeeping pass and the install-path name gate both key on it.
+const stagedSetupPrefix = "KafkaExplorer_Setup_"
+
 // downloadMirrors are public read-only accelerators for GitHub release
 // downloads, tried automatically after the direct route stalls — the
 // user never configures anything. Purely additive candidates: the direct
@@ -78,6 +82,35 @@ func downloadCandidates(assetURL string) []string {
 	return out
 }
 
+// assetURLGuard gates where the staging pipeline may download from.
+// Production pins release assets to github.com: the manifest already
+// constructs release-download URLs server-side, and the mirrors in
+// downloadCandidates are prefixes ON TOP of a github URL — a compromised
+// renderer must not be able to aim download-and-install at its own server
+// (the digest gate alone is not an anchor: the renderer also supplies
+// manifestSha, so it could pair its own URL with the matching digest).
+var assetURLGuard = defaultAssetURLGuard
+
+func defaultAssetURLGuard(assetURL string) error {
+	const ghPrefix = "https://github.com/"
+	if !strings.HasPrefix(assetURL, ghPrefix) {
+		return fmt.Errorf("%w: 更新包地址不受支持（仅支持 GitHub 发布下载链接），已中止安装", domain.ErrInvalid)
+	}
+	return nil
+}
+
+// SetAssetURLGuardForTests swaps the guard — tests stage from httptest
+// fixtures. nil admits every URL. Test-only: production code never calls
+// this; the restore func must be deferred by every caller.
+func SetAssetURLGuardForTests(g func(string) error) (restore func()) {
+	if g == nil {
+		g = func(string) error { return nil }
+	}
+	old := assetURLGuard
+	assetURLGuard = g
+	return func() { assetURLGuard = old }
+}
+
 // StageUpdate downloads the setup asset into DataDir/updates with
 // progress ticks. cancelled is polled between chunks — closing it is the
 // stop button, and the .part file is removed so a later retry starts
@@ -91,6 +124,9 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 	if assetURL == "" {
 		return "", fmt.Errorf("%w: 该发布版本未附带安装包，请从发布页手动下载", domain.ErrInvalid)
 	}
+	if err := assetURLGuard(assetURL); err != nil {
+		return "", err
+	}
 	dir, err := updatesDir()
 	if err != nil {
 		return "", err
@@ -101,14 +137,22 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 
 	// Housekeeping: previous staged installers and stray .part files used to
 	// accumulate ~50 MB per released version forever — the updates dir had no
-	// cleanup anywhere. Best-effort: a file still locked by an in-flight
-	// install simply survives until the next round.
+	// cleanup anywhere. Only OUR artifacts are removed (release-asset shaped
+	// installers and .part leftovers); anything else the user parked in this
+	// directory must survive. Best-effort: a file still locked by an
+	// in-flight install simply survives until the next round.
 	if entries, err := os.ReadDir(dir); err == nil {
 		for _, e := range entries {
 			if e.IsDir() || e.Name() == name || e.Name() == name+".part" {
 				continue
 			}
-			_ = os.Remove(filepath.Join(dir, e.Name()))
+			base := e.Name()
+			isSetup := strings.HasPrefix(base, stagedSetupPrefix) && strings.HasSuffix(base, ".exe")
+			isPart := strings.HasSuffix(base, ".part")
+			if !isSetup && !isPart {
+				continue
+			}
+			_ = os.Remove(filepath.Join(dir, base))
 		}
 	}
 
@@ -392,7 +436,10 @@ func (s *UpdateService) WriteWaiter(setupPath string, relaunch bool) error {
 	}
 	return launchDetached(
 		filepath.Join(systemRoot(), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
-		`-NoProfile -ExecutionPolicy Bypass -File "`+script+`"`,
+		// MUST be split argv: one folded string makes PowerShell parse the
+		// whole "-NoProfile … -File …" as a COMMAND and exit 1 before running
+		// a single line (044 review round: this killed every in-app install).
+		waiterArgs(script),
 		map[string]string{
 			"KE_UPDATE_PID":      fmt.Sprint(os.Getpid()),
 			"KE_UPDATE_SETUP":    setupPath,
@@ -400,6 +447,12 @@ func (s *UpdateService) WriteWaiter(setupPath string, relaunch bool) error {
 			"KE_UPDATE_RELAUNCH": relaunchFlag,
 		},
 	)
+}
+
+// waiterArgs builds the waiter's argv in split form — pinned by a test that
+// actually launches PowerShell, because a folded string fails silently.
+func waiterArgs(script string) []string {
+	return []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script}
 }
 
 func systemRoot() string {
@@ -421,7 +474,13 @@ func systemRoot() string {
 // another process can take over the waited-on PID and the waiter would
 // otherwise wait forever (app closed, nothing installs, no log); (4) the
 // staged installer and the script itself are removed after a successful
-// install, so DataDir/updates stops growing by ~50 MB per released version.
+// install, so DataDir/updates stops growing by ~50 MB per released version;
+// (5) Start-Process -Wait does NOT throw on a non-zero installer exit — the
+// exit code must be checked explicitly, or a failed silent install deletes
+// the staged setup and relaunches as if it had succeeded (no err.log, no
+// trace). On failure the staged setup is KEPT for a retry and nothing
+// relaunches; the script also stays on disk (exit 1 skips the self-delete)
+// so a failed run leaves a diagnosable scene.
 func waiterScriptBody(logFile string) string {
 	psLogFile := strings.ReplaceAll(logFile, "'", "''")
 	logRef := "'" + psLogFile + "'"
@@ -436,13 +495,17 @@ func waiterScriptBody(logFile string) string {
 		"  Start-Sleep -Milliseconds 100\n" +
 		"}\n" +
 		"try {\n" +
-		"  Start-Process -FilePath $env:KE_UPDATE_SETUP -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/SP-' -Wait -ErrorAction Stop\n" +
+		"  $p = Start-Process -FilePath $env:KE_UPDATE_SETUP -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/SP-' -Wait -PassThru -ErrorAction Stop\n" +
+		"  if ($p.ExitCode -ne 0) {\n" +
+		"    \"安装器退出码 $($p.ExitCode)（安装失败）。暂存安装包已保留，可重试或手动运行。\" | Out-File -FilePath " + logRef + " -Encoding utf8 -Append\n" +
+		"    exit 1\n" +
+		"  }\n" +
 		"  if ($env:KE_UPDATE_RELAUNCH -eq '1') { Start-Process -FilePath $env:KE_UPDATE_APP }\n" +
-		"  Remove-Item -FilePath $env:KE_UPDATE_SETUP -ErrorAction SilentlyContinue\n" +
+		"  Remove-Item -Path $env:KE_UPDATE_SETUP -ErrorAction SilentlyContinue\n" +
 		"} catch {\n" +
-		"  $_ | Out-File -FilePath " + logRef + " -Encoding utf8\n" +
+		"  $_ | Out-File -FilePath " + logRef + " -Encoding utf8 -Append\n" +
 		"}\n" +
-		"Remove-Item -FilePath $PSCommandPath -ErrorAction SilentlyContinue\n"
+		"Remove-Item -Path $PSCommandPath -ErrorAction SilentlyContinue\n"
 }
 
 // checksumStatus distinguishes "EVERY route confirmed this release has no

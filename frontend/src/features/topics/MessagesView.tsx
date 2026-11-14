@@ -105,6 +105,10 @@ export function MessagesView({
   // flight must not let the stale response overwrite the newer one (the
   // "click A, see B" bug). State updates land only from the latest request.
   const requestSeq = useRef(0);
+  // Cross-partition GoTo fires its own request (goto.partition pins it) and
+  // THEN commits setPartition; the [partition] effect's duplicate tail
+  // reload wins the seq guard and erases a timestamp jump — skip it.
+  const pendingGoto = useRef(false);
 
   useEffect(() => {
     void topicsApi
@@ -155,6 +159,10 @@ export function MessagesView({
 
   useEffect(() => {
     setSelected(null);
+    if (pendingGoto.current) {
+      pendingGoto.current = false;
+      return; // onJump's request already covers this partition change
+    }
     void loadPage(cursor, undefined, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partition, pageSize, decodeOn]);
@@ -383,6 +391,7 @@ export function MessagesView({
           partitions={detail?.partitionList ?? []}
           defaultPartition={partition}
           onJump={(target) => {
+            pendingGoto.current = target.partition !== partition;
             setPartition(target.partition);
             setCursor(target.offset !== undefined ? { offset: target.offset } : "tail");
             void loadPage(target.offset !== undefined ? { offset: target.offset } : "tail", target);
