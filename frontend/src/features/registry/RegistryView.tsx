@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FileCode, PlugZap, Plus, Trash2, Copy, Pencil, RefreshCw } from "lucide-react";
 import { connectionsApi, registryApi } from "../../shared/api.js";
 import { friendlyError } from "../../shared/api.js";
@@ -80,15 +80,21 @@ export function RegistryView() {
     void load();
   }, [load]);
 
+  // Stale-response guard: A's list with B's activeId would let the user act
+  // on a subject from the WRONG registry (045 batch-3 round).
+  const subjectSeq = useRef(0);
   const loadSubjects = useCallback(async (id: string): Promise<SchemaSubject[]> => {
+    const seq = ++subjectSeq.current;
     setSubjects(null);
     setSelected(null);
     setSubjectsError(null);
     try {
       const list = (await registryApi.subjects(id)) ?? [];
+      if (seq !== subjectSeq.current) return list; // a newer registry won
       setSubjects(list);
       return list;
     } catch (err) {
+      if (seq !== subjectSeq.current) return [];
       setSubjectsError(err);
       setSubjects([]);
       return [];
@@ -114,7 +120,12 @@ export function RegistryView() {
 
   const removeRegistry = async (r: SchemaRegistry) => {
     if (!(await confirmDialog({ message: t("reg.deleteConfirm", r.name), danger: true }))) return;
-    await registryApi.remove(r.id);
+    try {
+      await registryApi.remove(r.id);
+    } catch (err) {
+      toast.show(friendlyError(err), "error");
+      return;
+    }
     setActiveId(null);
     await load();
   };

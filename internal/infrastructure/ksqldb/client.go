@@ -254,11 +254,21 @@ func (c *Client) QueryStream(ctx context.Context, sql string, onRow RowHandler) 
 		// {"finalMessage":…}.
 		if strings.HasPrefix(line, "{") {
 			var obj struct {
-				ColumnNames []string `json:"columnNames"`
-				FinalMessage string  `json:"finalMessage"`
+				ColumnNames  []string `json:"columnNames"`
+				FinalMessage string   `json:"finalMessage"`
+				ErrorCode    *int     `json:"errorCode"`
+				Message      string   `json:"message"`
 			}
 			if err := json.Unmarshal([]byte(line), &obj); err != nil {
 				return fmt.Errorf("decode meta line: %w", err)
+			}
+			// Mid-stream failure events: the server terminates the query with
+			// {"errorCode":…,"message":…} (deserialization failure, task
+			// restart, server-side TERMINATE). The old parse only knew
+			// columnNames/finalMessage and dropped these lines — a dead
+			// stream was presented to the user as a normal end (045 round).
+			if obj.ErrorCode != nil {
+				return &APIError{Code: *obj.ErrorCode, Message: obj.Message}
 			}
 			if !headerSent {
 				headerSent = true

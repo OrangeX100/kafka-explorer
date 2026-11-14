@@ -128,7 +128,13 @@ export function ExportDialog({
 
   const save = async () => {
     const ext = format === "csv" ? "csv" : "jsonl";
-    const path = await systemApi.pickSaveFile(t("msg.exportSaveTitle"), `${topic}.${ext}`, `*.${ext}`);
+    let path: string;
+    try {
+      path = await systemApi.pickSaveFile(t("msg.exportSaveTitle"), `${topic}.${ext}`, `*.${ext}`);
+    } catch (err) {
+      toast.show(friendlyError(err), "error");
+      return;
+    }
     if (!path) return; // cancelled
     setBusy(true);
     try {
@@ -244,7 +250,13 @@ export function ImportDialog({
   };
 
   const runFile = async () => {
-    const path = await systemApi.pickOpenFile(t("msg.importPickFile"), "*.jsonl;*.txt;*.json");
+    let path: string;
+    try {
+      path = await systemApi.pickOpenFile(t("msg.importPickFile"), "*.jsonl;*.txt;*.json");
+    } catch (err) {
+      toast.show(friendlyError(err), "error");
+      return;
+    }
     if (!path) return; // cancelled
     setBusy(true);
     setResult(null);

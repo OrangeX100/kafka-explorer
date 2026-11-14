@@ -2,7 +2,7 @@
 // Visualization tab). Data comes from a bounded timestamp scan
 // (TopicRateHistogram); the chart is dependency-free SVG — an area line
 // with a hover crosshair reading.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { topicApi, friendlyError } from "../../shared/api.js";
 import { t } from "../../shared/i18n.js";
 import { Select } from "../common/controls.js";
@@ -54,7 +54,13 @@ export function RateChart({
   // timestamp/offset start never mislabels itself with the 24h chip text
   const [fromMs, setFromMs] = useState(Date.now() - 24 * 3600_000);
 
+  // Stale-response guard: a slow 7d scan superseded by a fast 1h one used
+  // to overwrite the chart with the OLD range while the chips showed the
+  // new one (045 batch-3 round).
+  const loadSeq = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     // timestamp anchor: newest = last rangeMs window; oldest = whole log;
@@ -72,12 +78,13 @@ export function RateChart({
     try {
       // wails multi-return bindings resolve to a tuple [buckets, scanned]
       const [buckets, scannedOut] = await topicApi.rateHistogram(connectionId, topic, win, 60, partition);
+      if (seq !== loadSeq.current) return; // a newer scan won
       setData(buckets ?? []);
       setScanned(scannedOut ?? 0);
     } catch (err) {
-      setError(friendlyError(err));
+      if (seq === loadSeq.current) setError(friendlyError(err));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [connectionId, topic, rangeMs, partition, startMode, appliedCustom]);
 

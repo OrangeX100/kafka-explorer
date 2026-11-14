@@ -267,7 +267,9 @@ function ConnectClusterDialog({ onClose, onSaved }: { onClose: () => void; onSav
       const version = await connectApi.test(url, username, password);
       setResult(t("reg.testOk", version));
     } catch (err) {
-      setResult(String(err));
+      // friendlyError like the save path: a raw "RuntimeError: …" blob in
+      // the result pane told the user nothing actionable (045 batch-3).
+      setResult(friendlyError(err));
     } finally {
       setTesting(false);
     }

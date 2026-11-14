@@ -186,6 +186,15 @@ func (s *MessageIOService) ExportToFile(ctx context.Context, in domain.ExportMes
 		return 0, fmt.Errorf("创建导出文件失败: %w", err)
 	}
 	defer f.Close()
+	// A failed export must not leave a HALF-WRITTEN file on disk looking like
+	// a complete export — the walk streams, so the file is already growing
+	// when a fetch error or the 1M cap hits; remove it.
+	complete := false
+	defer func() {
+		if !complete {
+			_ = os.Remove(path)
+		}
+	}()
 	w := bufio.NewWriter(f)
 	if in.Format == "csv" {
 		if _, err := w.WriteString(csvHeader + "\n"); err != nil {
@@ -199,7 +208,11 @@ func (s *MessageIOService) ExportToFile(ctx context.Context, in domain.ExportMes
 	if ferr := w.Flush(); err == nil {
 		err = ferr
 	}
-	return int64(count), err
+	if err != nil {
+		return int64(count), err
+	}
+	complete = true
+	return int64(count), nil
 }
 
 func exportRow(ctx context.Context, m domain.Message, format string, registry decode.RegistryClient) string {

@@ -60,7 +60,7 @@ export function QueryEditor({ serverId }: { serverId: string }) {
       setRowCount(data.rowCount);
       setElapsed(data.elapsedMs);
       if (data.error) setRunError(data.error);
-      setHistory((h) => [{ sql: sqlRef.current, rowCount: data.rowCount, elapsedMs: data.elapsedMs, error: data.error, at: Date.now() }, ...h].slice(0, 30));
+      setHistory((h) => [{ sql: runSqlRef.current, rowCount: data.rowCount, elapsedMs: data.elapsedMs, error: data.error, at: Date.now() }, ...h].slice(0, 30));
     });
     return () => {
       offCols();
@@ -70,14 +70,16 @@ export function QueryEditor({ serverId }: { serverId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Latest SQL for the done handler without re-subscribing.
-  const sqlRef = useRef(sql);
-  sqlRef.current = sql;
+  // The SQL AT RUN START: a long push query keeps streaming while the user
+  // edits the textarea — the done handler must record the statement that
+  // RAN, not whatever the editor holds by then (045 batch-3 round).
+  const runSqlRef = useRef(sql);
 
   const run = async () => {
     if (!sql.trim() || running) return;
     const id = reqID();
     idRef.current = id;
+    runSqlRef.current = sql;
     setRunning(true);
     setRunError(null);
     setRowCount(null);
@@ -96,7 +98,7 @@ export function QueryEditor({ serverId }: { serverId: string }) {
         await ksqlDbApi.query(serverId, sql.trim(), id);
       } catch (err) {
         setRunning(false);
-        setRunError(String(err));
+        setRunError(friendlyError(err));
       }
       return;
     }
@@ -130,9 +132,10 @@ export function QueryEditor({ serverId }: { serverId: string }) {
       setElapsed(Date.now() - t0);
       setHistory((h) => [{ sql: sql.trim(), rowCount: count, elapsedMs: Date.now() - t0, at: Date.now() }, ...h].slice(0, 30));
     } catch (err) {
+      const msg = friendlyError(err);
       setRunning(false);
-      setRunError(String(err));
-      setHistory((h) => [{ sql: sql.trim(), rowCount: 0, elapsedMs: Date.now() - t0, error: String(err), at: Date.now() }, ...h].slice(0, 30));
+      setRunError(msg);
+      setHistory((h) => [{ sql: sql.trim(), rowCount: 0, elapsedMs: Date.now() - t0, error: msg, at: Date.now() }, ...h].slice(0, 30));
     }
   };
 

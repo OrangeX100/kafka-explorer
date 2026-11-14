@@ -122,6 +122,16 @@ func (c *Client) TestConnection(ctx context.Context) (string, error) {
 		Version string `json:"version"`
 	}
 	if err := c.raw(ctx, http.MethodGet, "/", nil, &out); err != nil {
+		// CP 8.0 (or a reverse proxy with a path prefix) may error the root
+		// GET entirely — the /mode probe still proves the registry is live,
+		// so try it as a recovery instead of failing the whole test (045
+		// round: a healthy registry behind a 404-ing root read as dead).
+		var m struct {
+			Mode string `json:"mode"`
+		}
+		if merr := c.raw(ctx, http.MethodGet, "/mode", nil, &m); merr == nil && m.Mode != "" {
+			return "模式 " + m.Mode, nil
+		}
 		return "", err
 	}
 	if out.Version != "" {

@@ -53,7 +53,10 @@ func (c *Client) DescribeQuorum(ctx context.Context) (domain.QuorumInfo, error) 
 					Role:          "voter",
 					LogEndOffset:  vt.LogEndOffset,
 					LastFetchMs:   vt.LastFetchTimestamp,
-					Synced:        vt.LogEndOffset < 0 || vt.LogEndOffset == part.HighWatermark,
+					// LogEndOffset -1 = the voter has not reported (unreachable or
+					// lagging reporter): unknown is NOT synced — the old
+					// `LogEndOffset < 0 ||` branch painted dead voters green.
+					Synced:        vt.LogEndOffset >= 0 && vt.LogEndOffset == part.HighWatermark,
 					IsLeader:      vt.ReplicaID == part.LeaderID,
 				})
 			}

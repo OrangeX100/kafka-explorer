@@ -141,7 +141,12 @@ func (s *UpdateService) checkViaManifest(ctx context.Context, repo string) (Upda
 		}
 		out, err := parseManifest(s.current, repo, body)
 		if err != nil {
-			return UpdateCheck{}, err // a real manifest but bad content — no route will fix that
+			// 200 but unparsable: a broken mirror can serve an error page
+			// with a 200 — keep trying the remaining routes; the API path
+			// stays the final fallback (045 round: the old early-return
+			// abandoned the whole mirror chain on the FIRST bad route).
+			lastErr = err
+			continue
 		}
 		return out, nil
 	}
@@ -170,10 +175,7 @@ func parseManifest(currentVersion, repo string, body []byte) (UpdateCheck, error
 	if latest == "" {
 		return UpdateCheck{}, fmt.Errorf("%w: latest.json 缺少 tagName", domain.ErrUnavailable)
 	}
-	notes := strings.TrimSpace(m.Notes)
-	if len(notes) > 2000 {
-		notes = notes[:2000] + "…"
-	}
+	notes := truncateNotes(strings.TrimSpace(m.Notes))
 	out := UpdateCheck{
 		HasUpdate: versionLess(currentVersion, latest),
 		Current:   currentVersion,
@@ -273,10 +275,7 @@ func parseRelease(currentVersion string, body []byte) (UpdateCheck, error) {
 	}
 
 	latest := strings.TrimPrefix(strings.TrimSpace(release.TagName), "v")
-	notes := strings.TrimSpace(release.Body)
-	if len(notes) > 2000 {
-		notes = notes[:2000] + "…"
-	}
+	notes := truncateNotes(strings.TrimSpace(release.Body))
 	out := UpdateCheck{
 		HasUpdate: versionLess(currentVersion, latest),
 		Current:   currentVersion,
@@ -298,6 +297,19 @@ func parseRelease(currentVersion string, body []byte) (UpdateCheck, error) {
 		}
 	}
 	return out, nil
+}
+
+// truncateNotes caps release notes at 2000 RUNES — a byte cut could split a
+// UTF-8 character mid-sequence and render a mangled replacement glyph.
+func truncateNotes(s string) string {
+	if len(s) <= 2000 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= 2000 {
+		return s
+	}
+	return string(r[:2000]) + "…"
 }
 
 // versionLess reports whether a < b by full semver precedence:

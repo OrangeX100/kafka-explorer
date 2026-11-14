@@ -24,11 +24,23 @@ type KsqlDbHandler struct {
 	emit    func(topic string, data ...any)
 
 	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
+	// cancels keys a live query by requestID. Same-id re-entry MUST supersede
+	// (cancel old, register new) with generation-gated cleanup: func values
+	// can't be compared, so the old goroutine's blind delete erased the NEW
+	// query's cancel and broke its 停止 button until the 30-min TTL.
+	cancels map[string]queryReg
+	queryGen int64
+}
+
+// queryReg pairs a live query's cancel with the generation it was
+// registered under — cleanup only removes its own registration.
+type queryReg struct {
+	cancel context.CancelFunc
+	gen    int64
 }
 
 func NewKsqlDbHandler(svc *application.KsqlDbService, secrets domain.SecretStore, log *zap.Logger) *KsqlDbHandler {
-	return &KsqlDbHandler{svc: svc, secrets: secrets, log: log, cancels: map[string]context.CancelFunc{}}
+	return &KsqlDbHandler{svc: svc, secrets: secrets, log: log, cancels: map[string]queryReg{}}
 }
 
 // SetEmitter wires the wails event emitter (bootstrap owns the app).
@@ -92,14 +104,21 @@ func (h *KsqlDbHandler) Query(serverID, sql, requestID string) error {
 	// until process exit.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	h.mu.Lock()
-	h.cancels[requestID] = cancel
+	if old, ok := h.cancels[requestID]; ok {
+		old.cancel() // supersede: the old stream with this id must stop
+	}
+	h.queryGen++
+	reg := queryReg{cancel: cancel, gen: h.queryGen}
+	h.cancels[requestID] = reg
 	h.mu.Unlock()
 
 	go func() {
 		defer func() {
 			cancel()
 			h.mu.Lock()
-			delete(h.cancels, requestID)
+			if cur, ok := h.cancels[requestID]; ok && cur.gen == reg.gen {
+				delete(h.cancels, requestID)
+			}
 			h.mu.Unlock()
 		}()
 
@@ -151,9 +170,9 @@ func (h *KsqlDbHandler) Query(serverID, sql, requestID string) error {
 // no-op.
 func (h *KsqlDbHandler) Cancel(requestID string) {
 	h.mu.Lock()
-	cancel, ok := h.cancels[requestID]
+	reg, ok := h.cancels[requestID]
 	h.mu.Unlock()
 	if ok {
-		cancel()
+		reg.cancel()
 	}
 }

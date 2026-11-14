@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import { topicsApi, friendlyError } from "../../shared/api.js";
 import { useToast } from "../../state/stores.js";
@@ -83,6 +83,21 @@ export function TopicsView({ connectionId }: { connectionId: string }) {
   };
 
   const filtered = (topics ?? []).filter((tp) => tp.name.includes(filter));
+
+  // Page clamp: deletions/refreshes shrink the list while the user sits on
+  // a page that no longer exists — slice() then renders an EMPTY list with
+  // the pager hidden, a dead-end only escapable by re-filtering (045 round).
+  useEffect(() => {
+    const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+    if (page >= pageCount) setPage(pageCount - 1);
+  }, [filtered.length, pageSize, page]);
+
+  // Ladder timers survive unmounts without a handle: navigating away within
+  // 9s fired load() against a switched-away connection (045 batch-3 round).
+  const refreshTimers = useRef<number[]>([]);
+  useEffect(() => () => {
+    refreshTimers.current.forEach((id) => window.clearTimeout(id));
+  }, []);
 
   return (
     <div className="flex h-full">
@@ -246,9 +261,10 @@ export function TopicsView({ connectionId }: { connectionId: string }) {
             void load();
             // Broker metadata propagation lags; the backend serves up-to-
             // 10s-old cached metadata, so a single refresh can miss the new
-            // topic. Retry on a short ladder until one lands.
+            // topic. Retry on a short ladder until one lands — handles kept
+            // so unmount clears them (see refreshTimers above).
             for (const delay of [2000, 5000, 9000]) {
-              window.setTimeout(() => void load(), delay);
+              refreshTimers.current.push(window.setTimeout(() => void load(), delay));
             }
           }}
         />

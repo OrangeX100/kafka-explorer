@@ -23,6 +23,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/bufbuild/protocompile"
@@ -172,8 +173,9 @@ func stripConfluentIndexes(payload []byte) ([]int, []byte, bool) {
 	if len(payload) == 0 {
 		return nil, payload, false
 	}
+	const maxIndex = math.MaxInt32 // real indexes are tiny; bound for 32-bit safety
 	count, n, ok := readZigzagVarint(payload)
-	if !ok || count < 0 {
+	if !ok || count < 0 || count > maxIndex {
 		return nil, payload, false
 	}
 	if count == 0 {
@@ -183,7 +185,7 @@ func stripConfluentIndexes(payload []byte) ([]int, []byte, bool) {
 	consumed := n
 	for i := int64(0); i < count; i++ {
 		v, k, ok := readZigzagVarint(payload[consumed:])
-		if !ok {
+		if !ok || v < 0 || v > maxIndex {
 			return nil, payload, false
 		}
 		indexes = append(indexes, int(v))

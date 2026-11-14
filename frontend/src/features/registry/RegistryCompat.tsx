@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { Select } from "../common/controls.js";
 import { registryApi, friendlyError } from "../../shared/api.js";
@@ -94,6 +94,12 @@ export function CompatTab({
   // so the failure branch's "rollback" (`prev = level` = the NEW value)
   // actually wrote the FAILED value into state — the select showed a level
   // the registry never accepted (045 round).
+  // levelRef mirrors the state for the rollback: the async closure would
+  // otherwise capture a STALE level (apply A→B ok, apply C fails → the old
+  // closure restored A while the registry holds B). Sequential failures on
+  // different levels stay bounded by the select's re-render anyway.
+  const levelRef = useRef(level);
+  levelRef.current = level;
   const applyLevel = async (next: string) => {
     try {
       await registryApi.setSubjectConfig(registryId, subject.name, next);
@@ -101,7 +107,7 @@ export function CompatTab({
       toast.show(t("reg.configSaved"), "ok");
       onCompatChanged?.(); // refresh the parent's subject snapshot (badges)
     } catch (err) {
-      setLevelState(level); // keep the registry's last known value
+      setLevelState(levelRef.current); // keep the registry's last known value
       toast.show(friendlyError(err), "error");
     }
   };

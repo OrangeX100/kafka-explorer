@@ -200,7 +200,15 @@ export function ConnectionDialog({ connectionId, onClose }: Props) {
   const remove = async () => {
     if (!existing) return;
     if (!(await confirmDialog({ message: t("conn.deleteConfirm", existing.name), danger: true }))) return;
-    await connectionsApi.remove(existing.id);
+    try {
+      await connectionsApi.remove(existing.id);
+    } catch (err) {
+      // Same shape as the sidebar delete: a failed removal (backend error)
+      // must surface, not die as an unhandled rejection with the dialog
+      // frozen (045 batch-3 round).
+      toast.show(friendlyError(err), "error");
+      return;
+    }
     await refresh();
     // The connection is gone: its tab (if any) must go with it.
     useWorkspace.getState().pruneTabs(useConnections.getState().list.map((c) => c.id));

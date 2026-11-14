@@ -1,7 +1,18 @@
 // Byte/bytes formatting helpers shared by the message views.
 
+// decodeBase64 tolerates ANY input: the backend always emits valid
+// StdEncoding, but a dirty payload (old row, future contract change) must
+// not throw inside an event handler and kill a copy action — the callers
+// that care about strictness validate before calling (045 round).
 export function decodeBase64(b64: string): Uint8Array {
-  const bin = atob(b64);
+  let bin = "";
+  try {
+    bin = atob(b64);
+  } catch {
+    // Not valid base64: degrade to the raw bytes of the input text so the
+    // caller still renders something sane instead of throwing.
+    return new TextEncoder().encode(b64);
+  }
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;

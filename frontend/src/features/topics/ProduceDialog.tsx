@@ -37,7 +37,12 @@ export function ProduceDialog({ connectionId, topic, partitions, onClose }: Prop
           : { key: line.slice(0, eq), value: line.slice(eq + 1) };
       });
 
+  // Busy gate: a double-click on a slow remote round-trip produced the SAME
+  // record twice (two toasts, two offsets) — send must be one-shot.
+  const [sending, setSending] = useState(false);
   const send = async () => {
+    if (sending) return;
+    setSending(true);
     try {
       const headers = parseHeaders().map((h) => ({
         key: h.key,
@@ -55,6 +60,8 @@ export function ProduceDialog({ connectionId, topic, partitions, onClose }: Prop
       closeRef.current();
     } catch (err) {
       toast.show(friendlyError(err), "error");
+    } finally {
+      setSending(false);
     }
   };
 
@@ -106,7 +113,7 @@ export function ProduceDialog({ connectionId, topic, partitions, onClose }: Prop
               <button className="btn" onClick={close}>
                 {t("common.close")}
               </button>
-              <button className="btn btn-accent" onClick={() => void send()}>
+              <button className="btn btn-accent" disabled={sending} onClick={() => void send()}>
                 <span className="font-medium">{t("msg.produce")}</span>
               </button>
             </div>

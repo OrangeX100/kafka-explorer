@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { adminApi, friendlyError } from "../../shared/api.js";
 import type { LogDir } from "../../shared/contracts-admin.js";
 import { useToast } from "../../state/stores.js";
@@ -26,6 +26,9 @@ export function BrokersView({ connectionId }: { connectionId: string }) {
   const [brokers, setBrokers] = useState<BrokerSummary[] | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  // Stale-response guard: rapid selection switches must not let an older
+  // detail response overwrite the newer one (045 batch-3 round).
+  const requestSeq = useRef(0);
   const [detail, setDetail] = useState<BrokerDetail | null>(null);
   const [editing, setEditing] = useState<ConfigEntry | null>(null);
   const [adding, setAdding] = useState(false);
@@ -75,10 +78,13 @@ export function BrokersView({ connectionId }: { connectionId: string }) {
 
   const loadDetail = useCallback(
     async (brokerId: number) => {
+      const seq = ++requestSeq.current;
       try {
-        setDetail(await adminApi.brokerDetail(connectionId, brokerId));
+        const d = await adminApi.brokerDetail(connectionId, brokerId);
+        if (seq !== requestSeq.current) return; // a newer selection won
+        setDetail(d);
       } catch (err) {
-        toast.show(friendlyError(err), "error");
+        if (seq === requestSeq.current) toast.show(friendlyError(err), "error");
       }
     },
     [connectionId, toast],

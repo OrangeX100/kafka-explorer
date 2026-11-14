@@ -48,6 +48,7 @@ func (s *ConnectionService) Save(ctx context.Context, in SaveInput) (domain.Conn
 	}
 	now := time.Now()
 	existing, err := s.repo.Get(ctx, c.ID)
+	hadExisting := err == nil
 	if err == nil {
 		c.CreatedAt = existing.CreatedAt
 		c.SecretRef = existing.SecretRef
@@ -105,6 +106,15 @@ func (s *ConnectionService) Save(ctx context.Context, in SaveInput) (domain.Conn
 			return domain.Connection{}, fmt.Errorf("store tunnel password: %w", err)
 		}
 	} else if !c.Tunnel.Enabled && c.Tunnel.SecretRef != "" {
+		_ = s.secrets.Delete(secretService, c.Tunnel.SecretRef)
+		c.Tunnel.SecretRef = ""
+	} else if c.Tunnel.Enabled && hadExisting && existing.Tunnel.Auth != c.Tunnel.Auth &&
+		in.TunnelPassword == "" && c.Tunnel.SecretRef != "" {
+		// AUTH TYPE SWITCH without a fresh secret: a key passphrase must not
+		// silently serve as an SSH password and vice versa — drop the old
+		// entry so validation demands a fresh one (045 round; the old code
+		// let a stale key passphrase satisfy password auth, and a stale
+		// password linger when switching to key auth).
 		_ = s.secrets.Delete(secretService, c.Tunnel.SecretRef)
 		c.Tunnel.SecretRef = ""
 	}

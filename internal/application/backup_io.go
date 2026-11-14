@@ -209,6 +209,16 @@ func (s *BackupService) ImportAll(ctx context.Context, path string) (BackupCount
 			}
 			r.ID = newID()
 			r.Name = name
+			// The exported file may still carry the ORIGINAL machine's
+			// connection binding (stripRegistries keeps it for same-machine
+			// round-trips) — the connection rows got fresh IDs above, so the
+			// old pointer can never match again. Clear it (the registry
+			// lands unbound; pickRegistryFor falls back to the first unbound
+			// one) instead of silently pointing at a nonexistent row.
+			r.ConnectionID = ""
+			// Defensive: a hand-edited/legacy file could carry a SecretRef
+			// that points at a keyring entry that does not exist here.
+			r.SecretRef = ""
 			r.CreatedAt = domain.FlexTime{}
 			r.UpdatedAt = domain.FlexTime{}
 			needPw := r.Username != ""

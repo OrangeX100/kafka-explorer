@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pencil, RefreshCw, Trash2, Users } from "lucide-react";
 import { groupsApi, adminApi, classifyError } from "../../shared/api.js";
 import { useToast } from "../../state/stores.js";
@@ -21,6 +21,9 @@ export function ShareGroupsView({ connectionId }: { connectionId: string }) {
   const [groups, setGroups] = useState<ShareGroupSummary[] | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // Stale-response guard: rapid selection switches must not let an older
+  // detail response overwrite the newer one (045 batch-3 round).
+  const requestSeq = useRef(0);
   const [detail, setDetail] = useState<ShareGroupDetail | null>(null);
   const [detailTab, setDetailTab] = useState<"offsets" | "members">("offsets");
   const [editingOffset, setEditingOffset] = useState<{ topic: string; partition: number; startOffset: number } | null>(null);
@@ -48,10 +51,13 @@ export function ShareGroupsView({ connectionId }: { connectionId: string }) {
 
   const loadDetail = useCallback(
     async (group: string) => {
+      const seq = ++requestSeq.current;
       try {
-        setDetail(await groupsApi.shareGroupDetail(connectionId, group));
+        const d = await groupsApi.shareGroupDetail(connectionId, group);
+        if (seq !== requestSeq.current) return; // a newer selection won
+        setDetail(d);
       } catch (err) {
-        toast.show(friendlyError(err), "error");
+        if (seq === requestSeq.current) toast.show(friendlyError(err), "error");
       }
     },
     [connectionId, toast]

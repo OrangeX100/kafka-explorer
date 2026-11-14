@@ -147,8 +147,16 @@ export function MessagesView({
         setExhausted(result.exhausted);
         setSelected((cur) => migrateSelected(msgs, cur));
       } catch (err) {
-        if (seq === requestSeq.current) toast.show(friendlyError(err), "error");
+        if (seq === requestSeq.current) {
+          toast.show(friendlyError(err), "error");
+          // A failed jump leaves the table on the OLD partition's rows while
+          // the selector already shows the new partition — reload the tail
+          // so the two agree again (the pendingGoto skip removed the
+          // accidental fallback the old duplicate request provided).
+          if (goto) void loadPage("tail", undefined, true);
+        }
       } finally {
+        if (goto) pendingGoto.current = false; // flight over: toggles work again
         if (seq === requestSeq.current) setLoading(false);
       }
     },
@@ -159,9 +167,11 @@ export function MessagesView({
 
   useEffect(() => {
     setSelected(null);
+    // pendingGoto clears when the jump REQUEST completes (loadPage finally),
+    // so every effect re-fire DURING the flight — partition, pageSize or
+    // decodeOn — skips its duplicate tail reload, not just the partition one.
     if (pendingGoto.current) {
-      pendingGoto.current = false;
-      return; // onJump's request already covers this partition change
+      return;
     }
     void loadPage(cursor, undefined, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -391,7 +401,11 @@ export function MessagesView({
           partitions={detail?.partitionList ?? []}
           defaultPartition={partition}
           onJump={(target) => {
-            pendingGoto.current = target.partition !== partition;
+            // In-flight until the jump request completes (loadPage finally):
+            // every effect re-fire in that window — partition, pageSize,
+            // decodeOn — would send a duplicate tail reload that wins the
+            // seq guard and erases the target window.
+            pendingGoto.current = true;
             setPartition(target.partition);
             setCursor(target.offset !== undefined ? { offset: target.offset } : "tail");
             void loadPage(target.offset !== undefined ? { offset: target.offset } : "tail", target);

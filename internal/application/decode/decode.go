@@ -30,10 +30,13 @@ type Result = domain.DecodeResult
 // DecodeValue decodes record value bytes according to the chosen strategy.
 // auto: decompress safe containers, then try Confluent framing (needs
 // registry; routes by the registered schema type), then JSON pretty, then
-// fall back to UTF-8 text.
+// fall back to UTF-8 text. "" is the pre-decode-era wire default and is
+// pinned to text-only by the domain contract — the old fallthrough ran a
+// nil-registry auto pass that attached a "no schema registry" error to
+// every framed message instead of showing plain text.
 func DecodeValue(ctx context.Context, raw []byte, mode string, registry RegistryClient) Result {
 	switch mode {
-	case "text":
+	case "text", "":
 		return Result{Format: "text", Text: string(raw)}
 	case "json":
 		return prettyJSON(raw)
@@ -108,9 +111,31 @@ func decodeConfluent(ctx context.Context, raw []byte, registry RegistryClient) R
 // trailing reads hit EOF, so on EOF we retry once with default-carrying
 // fields pruned, which is exactly the older schema shape.
 func DecodeWithSchema(raw []byte, schemaStr string) Result {
+	// Framed first (the 0x00 magic is how standard SerDes writers ship Avro
+	// through a registry) — a bare retry only fires when the framed decode
+	// FAILS, covering local payloads that merely LOOK framed because their
+	// first Avro byte is 0x00 (an int/long 0 or a union's first branch).
+	// The reverse order does not work for Avro: unlike protobuf, 0x00 is a
+	// VALID leading Avro byte, so a bare attempt can "succeed" wrongly.
 	if len(raw) > 5 && raw[0] == 0x00 {
-		raw = raw[5:] // strip Confluent framing; payload follows
+		if r := decodeAvroWithEvolution(raw[5:], schemaStr); r.Error == "" {
+			return r
+		}
 	}
+	if r := decodeAvroWithEvolution(raw, schemaStr); r.Error == "" {
+		return r
+	}
+	// Surface the stripped attempt's error when the header looked framed,
+	// else the bare one.
+	if len(raw) > 5 && raw[0] == 0x00 {
+		return decodeAvroWithEvolution(raw[5:], schemaStr)
+	}
+	return decodeAvroWithEvolution(raw, schemaStr)
+}
+
+// decodeAvroWithEvolution decodes bare Avro bytes, retrying once with
+// default-carrying fields pruned when the payload predates the schema.
+func decodeAvroWithEvolution(raw []byte, schemaStr string) Result {
 	parsed, err := avro.Parse(schemaStr)
 	if err != nil {
 		return Result{Format: "avro", Error: fmt.Sprintf("parse schema: %v", err)}
@@ -133,22 +158,24 @@ func DecodeWithSchema(raw []byte, schemaStr string) Result {
 		}
 		value = value2
 	}
-	// Normalize through JSON so any Go type renders readably.
-	asJSON, err := json.Marshal(value)
+	// MarshalIndent DIRECTLY: the old Marshal→Unmarshal-into-any round-trip
+	// pushed every number through float64, silently corrupting integers past
+	// 2^53 (nanosecond timestamps, snowflake IDs) on the way to the display.
+	pretty, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return Result{Format: "avro", Text: fmt.Sprintf("%v", value)}
 	}
-	var indented map[string]any
-	if json.Unmarshal(asJSON, &indented) == nil {
-		pretty, _ := json.MarshalIndent(indented, "", "  ")
-		return Result{Format: "avro", Text: string(pretty)}
-	}
-	return Result{Format: "avro", Text: string(asJSON)}
+	return Result{Format: "avro", Text: string(pretty)}
 }
 
 func prettyJSON(raw []byte) Result {
+	// UseNumber keeps every number as its literal: decoding into any makes
+	// all numbers float64, which rounds >2^53 integers (19-digit IDs) and
+	// wrecks the pretty print the user copies out.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
 	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
+	if err := dec.Decode(&v); err != nil {
 		return Result{Format: "text", Text: string(raw)}
 	}
 	pretty, err := json.MarshalIndent(v, "", "  ")

@@ -45,25 +45,38 @@ func (c *Client) Find(ctx context.Context, req domain.FindRequest) (domain.Brows
 		return domain.BrowsePage{}, 0, err
 	}
 
+	// Bounds come from one partitionBounds round-trip: the end offset bounds
+	// the scan (without it a no-match search keeps polling past the log end
+	// until the timeout, which reads as "search is slow"), and the start map
+	// feeds the throwaway client below.
+	_, endsMap, berr := c.partitionBounds(ctx, req.Topic)
+	if berr != nil {
+		return domain.BrowsePage{}, 0, berr
+	}
+	var endOffset int64 = -1
+	if e, ok := endsMap[partition]; ok {
+		endOffset = e
+	}
+
+	// Dedicated one-shot client: the pooled browse client pins browseMu for
+	// its whole lifetime, and Find may run the full 15s budget — the old
+	// wiring blocked every other page flip on this connection for up to 15s
+	// while a slow search ran. Same shape as browseAllPartitions.
 	pageCtx, cancel := context.WithTimeout(ctx, findTimeout)
 	defer cancel()
-	pc, unlock, err := c.BrowseClientFor(req.Topic, partition, anchor)
+	consume := map[string]map[int32]kgo.Offset{
+		req.Topic: {partition: kgo.NewOffset().At(anchor)},
+	}
+	pageOpts := copyOpts(c.opts, kgo.ConsumePartitions(consume), kgo.DisableFetchSessions())
+	pc, err := kgo.NewClient(pageOpts...)
 	if err != nil {
-		return domain.BrowsePage{}, 0, err
+		return domain.BrowsePage{}, 0, mapErr(fmt.Errorf("create find client: %w", err))
 	}
-	defer unlock()
+	defer pc.Close()
 
-	// Bound the scan by the partition's end offset. Without it a no-match
-	// search keeps polling past the log end until the timeout, which reads
-	// as "search is slow" — with it, the scan stops exactly at the log end.
-	var endOffset int64 = -1
-	if _, endsMap, berr := c.partitionBounds(ctx, req.Topic); berr == nil {
-		if e, ok := endsMap[partition]; ok {
-			endOffset = e
-		}
-	}
-
-	page := domain.BrowsePage{}
+	// Messages must be non-nil even on zero matches: null breaks the page
+	// consumers (.length) — the project's non-null array contract.
+	page := domain.BrowsePage{Messages: []domain.Message{}}
 	scanned := 0
 	var last *kgo.Record
 	for scanned < maxScan && len(page.Messages) < limit {
@@ -88,8 +101,11 @@ func (c *Client) Find(ctx context.Context, req domain.FindRequest) (domain.Brows
 			break
 		}
 	}
-	if last != nil && !page.Exhausted && len(page.Messages) < limit && scanned < maxScan {
-		// more data ahead; continue from here next round
+	// Cursor semantics: exhausted = no cursor; otherwise ANY early stop
+	// (page full of matches OR the scan budget spent) must hand back where
+	// to continue — the old code dropped the cursor when the page filled,
+	// severing the result chain at the MOST common stopping point.
+	if last != nil && !page.Exhausted {
 		next := last.Offset + 1
 		page.NextAnchor = &next
 	}
