@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -98,22 +99,46 @@ func downloadCandidates(assetURL string) []string {
 var assetURLGuard = defaultAssetURLGuard
 
 func defaultAssetURLGuard(assetURL string) error {
-	const ghPrefix = "https://github.com/"
-	if !strings.HasPrefix(assetURL, ghPrefix) {
+	// Parse-then-compare, NOT strings.HasPrefix: dot-segment paths
+	// ("/releases/download/../../../../attacker/…") pass any prefix check
+	// while GitHub's edge resolves them server-side to the ATTACKER's asset
+	// (verified: 302 to the real file). url.Parse does not normalize, so the
+	// segments must be validated by hand.
+	u, err := url.Parse(assetURL)
+	if err != nil || u.Scheme != "https" || u.Hostname() != "github.com" {
 		return fmt.Errorf("%w: 更新包地址不受支持（仅支持 GitHub 发布下载链接），已中止安装", domain.ErrInvalid)
 	}
-	// Only the release-download shape is ever consumed; a bare github prefix
-	// stages a file named "download" and dies at the install name gate —
-	// refuse it here so the error lands at the responsible boundary.
-	if !strings.Contains(assetURL, "/releases/download/") {
+	segs := strings.Split(u.Path, "/")
+	for _, s := range segs[1:] {
+		if s == "." || s == ".." {
+			return fmt.Errorf("%w: 更新包地址包含非法路径段，已中止安装", domain.ErrInvalid)
+		}
+	}
+	// Only the release-download shape is ever consumed; anything else would
+	// stage a junk file and die at the install name gate — refuse here so
+	// the error lands at the responsible boundary.
+	if len(segs) < 6 || segs[3] != "releases" || segs[4] != "download" {
 		return fmt.Errorf("%w: 更新包地址不是发布下载链接，已中止安装", domain.ErrInvalid)
 	}
+	// Release builds pin the REPO (stamped at build time, unreachable from
+	// the renderer): the host prefix alone would let a compromised webview
+	// aim the pipeline at ANY github repo with its own digest. Dev builds
+	// stamp "" and keep host-only pinning.
 	if repo := buildinfo.UpdateRepo; repo != "" {
-		if !strings.HasPrefix(assetURL, ghPrefix+repo+"/releases/download/") {
+		if segs[1] != pathSegment(repo, 0) || segs[2] != pathSegment(repo, 1) {
 			return fmt.Errorf("%w: 更新包地址与本应用的发布仓库（%s）不一致，已中止安装", domain.ErrInvalid, repo)
 		}
 	}
 	return nil
+}
+
+// pathSegment extracts segment i of "owner/repo" (missing → impossible value).
+func pathSegment(repo string, i int) string {
+	parts := strings.Split(repo, "/")
+	if i >= len(parts) {
+		return "\x00none"
+	}
+	return parts[i]
 }
 
 // SetAssetURLGuardForTests swaps the guard — tests stage from httptest

@@ -175,7 +175,11 @@ func stripConfluentIndexes(payload []byte) ([]int, []byte, bool) {
 	}
 	const maxIndex = math.MaxInt32 // real indexes are tiny; bound for 32-bit safety
 	count, n, ok := readZigzagVarint(payload)
-	if !ok || count < 0 || count > maxIndex {
+	// The count bounds the ALLOCATION: an attacker-controlled varint must
+	// never drive make() — each index costs ≥1 byte on the wire, so a count
+	// larger than the remaining payload is malformed by definition (045
+	// security round: count=MaxInt32 → make([]int,0,MaxInt32) → 17GB OOM).
+	if !ok || count < 0 || count > maxIndex || count > int64(len(payload)-n) {
 		return nil, payload, false
 	}
 	if count == 0 {

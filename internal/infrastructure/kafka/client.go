@@ -92,11 +92,17 @@ func (c *Client) Close() {
 	if c == nil {
 		return
 	}
+	// browseMu FIRST: BrowseClientFor writes browsePool/browseOrder under it,
+	// and Evict (per-id pool lock) does NOT serialize against a page mid-poll
+	// — Close iterating the map while a page inserts its client is a
+	// concurrent map iteration/write fatal (045 concurrency round).
+	c.browseMu.Lock()
 	for _, pc := range c.browsePool {
 		pc.Close()
 	}
 	c.browsePool = nil
 	c.browseOrder = nil
+	c.browseMu.Unlock()
 	if c.kgo != nil {
 		c.kgo.Close()
 	}

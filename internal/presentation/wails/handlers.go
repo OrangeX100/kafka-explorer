@@ -5,6 +5,7 @@ package wails
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 	wailsapp "github.com/wailsapp/wails/v3/pkg/application"
@@ -20,13 +21,17 @@ type kafkaProduceResult = kafka.ProduceResult
 
 // ConnectionHandler exposes connection management to the UI.
 type ConnectionHandler struct {
-	svc  *application.ConnectionService
-	log  *zap.Logger
+	svc   *application.ConnectionService
+	log   *zap.Logger
+	paths *pathBroker
 }
 
 func NewConnectionHandler(svc *application.ConnectionService, log *zap.Logger) *ConnectionHandler {
 	return &ConnectionHandler{svc: svc, log: log}
 }
+
+// SetPathBroker wires the shared pick-path authorization for ImportConnections.
+func (h *ConnectionHandler) SetPathBroker(b *pathBroker) { h.paths = b }
 
 func (h *ConnectionHandler) List(ctx context.Context) ([]domain.Connection, error) {
 	return h.svc.List(ctx)
@@ -98,6 +103,10 @@ func (h *ConnectionHandler) ExportConnections(ctx context.Context) (string, erro
 // ImportConnections reads a previously exported file; the frontend picks the
 // path with the open dialog first.
 func (h *ConnectionHandler) ImportConnections(ctx context.Context, path string) (application.ImportResult, error) {
+	// Only paths the app's own open dialog issued (045 security round).
+	if h.paths == nil || !h.paths.Authorized(path) {
+		return application.ImportResult{}, fmt.Errorf("导入路径未经过应用的文件选择对话框，已拒绝读取")
+	}
 	h.log.Info("connections import", zap.String("path", path))
 	return h.svc.ImportConnections(ctx, path)
 }

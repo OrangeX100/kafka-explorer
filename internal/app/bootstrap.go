@@ -105,7 +105,6 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 		OnShutdown: func() {},
 	})
 
-	app.RegisterService(application.NewService(wails.NewConnectionHandler(connSvc, log)))
 	app.RegisterService(application.NewService(wails.NewTopicHandler(topicSvc, log)))
 	app.RegisterService(application.NewService(wails.NewGroupHandler(groupSvc, log)))
 	app.RegisterService(application.NewService(wails.NewAdminHandler(adminSvc, log)))
@@ -119,6 +118,15 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 	systemHandler.SetQuit(func() { tray.Quit() })
 	app.RegisterService(application.NewService(systemHandler))
 
+	// Pick-path authorization: native dialogs issue paths into ONE shared
+	// broker; the import/export/read bindings verify membership, so a
+	// compromised webview cannot name arbitrary files (045 security round).
+	// Contract test: bootstrap_wiring_test.go asserts every consumer got it.
+	pathBroker := systemHandler.PathBroker()
+	connHandler := wails.NewConnectionHandler(connSvc, log)
+	connHandler.SetPathBroker(pathBroker)
+	app.RegisterService(application.NewService(connHandler))
+
 	// ksqlDB module: servers, statement exec and streaming queries.
 	ksqlSvc := appsvc.NewKsqlDbService(dbw, secrets)
 	ksqlHandler := wails.NewKsqlDbHandler(ksqlSvc, secrets, log)
@@ -130,7 +138,10 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 	// one-file backup across every persisted module (settings page); built
 	// after ksqlSvc so the service set is complete
 	backupSvc := appsvc.NewBackupService(connSvc, registrySvc, connectSvc, ksqlSvc, settingsSvc)
-	app.RegisterService(application.NewService(wails.NewSettingsHandler(settingsSvc, backupSvc, log)))
+	genHandler.SetPathBroker(pathBroker)
+	settingsHandler := wails.NewSettingsHandler(settingsSvc, backupSvc, log)
+	settingsHandler.SetPathBroker(pathBroker)
+	app.RegisterService(application.NewService(settingsHandler))
 
 	// Value decoding: message browsing resolves Confluent schema ids through
 	// the registry bound to the browsed CONNECTION (binding picked in

@@ -157,14 +157,16 @@ func TestDefaultAssetURLGuard(t *testing.T) {
 		t.Fatalf("plain github asset must pass host pinning: %v", err)
 	}
 	for _, bad := range []string{
-		"http://github.com/o/r/x.exe",             // not https
-		"https://github.com.evil.com/x.exe",       // lookalike host
-		"https://evil.com/?x=https://github.com/", // query smuggling
-		"https://github.com@evil.com/o/r/x.exe",   // userinfo trick (authority is evil.com)
-		"https://github.com/",                     // prefix without a release path
+		"http://github.com/o/r/x.exe",                          // not https
+		"https://github.com.evil.com/x.exe",                    // lookalike host
+		"https://evil.com/?x=https://github.com/",              // query smuggling
+		"https://github.com@evil.com/o/r/x.exe",                // userinfo trick (authority is evil.com)
+		"https://github.com/",                                  // bare prefix, no release path
+		"https://github.com/o/r/commits/main",                  // github but not a release download
+		"https://github.com/o/r/releases/download/../../../attacker/x/releases/download/v1/x.exe", // dot-segment traversal: the edge resolves .. server-side to the ATTACKER repo
 	} {
 		if err := defaultAssetURLGuard(bad); err == nil {
-			t.Fatalf("non-github/lookalike URL must be refused: %q", bad)
+			t.Fatalf("non-github/lookalike/traversal URL must be refused: %q", bad)
 		}
 	}
 

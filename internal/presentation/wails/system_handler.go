@@ -59,6 +59,11 @@ type SystemHandler struct {
 	// emit publishes download progress to the frontend (system:update:progress).
 	emit   func(topic string, data ...any)
 	cancel context.CancelFunc
+	// paths authorizes file paths handed back to consumers: only paths the
+	// app's OWN pick dialogs issued may flow into ReadTextFile (and the other
+	// handlers' import/export bindings via the shared broker). A compromised
+	// webview naming an arbitrary file is refused here (045 security round).
+	paths *pathBroker
 	// stageGen identifies the currently registered stage download: the
 	// goroutine's cleanup must only clear h.cancel when it is STILL the
 	// registered one (a superseding stage owns it by then).
@@ -72,8 +77,18 @@ type SystemHandler struct {
 }
 
 func NewSystemHandler(update *application.UpdateService, log *zap.Logger) *SystemHandler {
-	return &SystemHandler{update: update, log: log, startedAt: time.Now()}
+	return &SystemHandler{update: update, log: log, startedAt: time.Now(), paths: newPathBroker()}
 }
+
+// SetPathBroker shares the pick-path authorization with the other handlers
+// (imports/exports verify against the SAME broker the picks issued into).
+// Must be called during bootstrap before any binding fires.
+func (h *SystemHandler) SetPathBroker(b *pathBroker) {
+	h.paths = b
+}
+
+// PathBroker exposes the shared broker for bootstrap wiring.
+func (h *SystemHandler) PathBroker() *pathBroker { return h.paths }
 
 // SetCloseTray wires the tray close branch. Optional: without it the ✕ does
 // nothing (never the shipped shape).
@@ -116,21 +131,30 @@ func (h *SystemHandler) CheckUpdate(ctx context.Context, repo string) (applicati
 }
 
 // PickOpenFile shows a native open-file dialog. Returns "" when the user
-// cancels — not an error, callers treat it as a no-op.
+// cancels — not an error, callers treat it as a no-op. The issued path is
+// registered with the path broker; file-consuming bindings verify against it.
 func (h *SystemHandler) PickOpenFile(ctx context.Context, title, pattern string) (string, error) {
 	dlg := wailsapp.Get().Dialog.OpenFile().SetTitle(title).CanChooseFiles(true)
 	if pattern != "" {
 		dlg = dlg.AddFilter("文件", pattern)
 	}
-	return promptSingleSelection(dlg.PromptForSingleSelection())
+	path, err := promptSingleSelection(dlg.PromptForSingleSelection())
+	if err == nil && path != "" {
+		h.paths.Issue(path)
+	}
+	return path, err
 }
 
 // ReadTextFile reads a UTF-8 text file the user just picked (schema uploads,
-// import payloads). The path is user-selected via PickOpenFile, not typed —
-// this is a content reader, not an arbitrary file accessor, and oversized
-// reads are rejected before memory is committed.
+// import payloads). The path MUST have come from PickOpenFile — the broker
+// check turns this from an arbitrary-file-read primitive into a quoted
+// read (045 security round: the old comment claimed the binding was safe
+// because "the path is user-picked", but nothing enforced it).
 func (h *SystemHandler) ReadTextFile(ctx context.Context, path string) (string, error) {
 	const maxTextFile = 8 << 20 // 8 MB: any schema or import payload fits
+	if !h.paths.Authorized(path) {
+		return "", fmt.Errorf("文件路径未经过应用的文件选择对话框，已拒绝读取")
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", fmt.Errorf("读取文件失败：%v", err)
@@ -156,12 +180,17 @@ func (h *SystemHandler) CloseToTray() {
 }
 
 // PickSaveFile shows a native save-file dialog pre-filled with defaultName.
-// "" = cancelled.
+// "" = cancelled. The issued path is registered with the path broker;
+// ExportToFile verifies against it.
 func (h *SystemHandler) PickSaveFile(ctx context.Context, title, defaultName, pattern string) (string, error) {
 	// alpha2 SaveFileDialog has no SetTitle - SetMessage carries the header.
 	dlg := wailsapp.Get().Dialog.SaveFile().SetMessage(title).SetFilename(defaultName)
 	if pattern != "" {
 		dlg = dlg.AddFilter("文件", pattern)
 	}
-	return promptSingleSelection(dlg.PromptForSingleSelection())
+	path, err := promptSingleSelection(dlg.PromptForSingleSelection())
+	if err == nil && path != "" {
+		h.paths.Issue(path)
+	}
+	return path, err
 }

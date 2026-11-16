@@ -246,14 +246,20 @@ type RegistrySaveInput struct {
 
 // GenerateHandler exposes the data generator and message import/export.
 type GenerateHandler struct {
-	gen *application.GenerateService
-	io  *application.MessageIOService
-	log *zap.Logger
+	gen   *application.GenerateService
+	io    *application.MessageIOService
+	log   *zap.Logger
+	paths *pathBroker
 }
 
 func NewGenerateHandler(gen *application.GenerateService, io *application.MessageIOService, log *zap.Logger) *GenerateHandler {
 	return &GenerateHandler{gen: gen, io: io, log: log}
 }
+
+// SetPathBroker wires the shared pick-path authorization: ExportToFile /
+// ImportFromFile only accept paths the app's own dialogs issued (045
+// security round — the raw bindings were arbitrary write/parse primitives).
+func (h *GenerateHandler) SetPathBroker(b *pathBroker) { h.paths = b }
 
 func (h *GenerateHandler) Generate(ctx context.Context, in domain.GenerateInput) (domain.GenerateResult, error) {
 	h.log.Info("data generate",
@@ -278,6 +284,11 @@ func (h *GenerateHandler) Export(ctx context.Context, in domain.ExportMessagesIn
 // from PickSaveFile in the frontend. Returns the record count for the
 // success toast.
 func (h *GenerateHandler) ExportToFile(ctx context.Context, in domain.ExportMessagesInput, path string) (int64, error) {
+	// Only paths the app's own save dialog issued (045 security round: the
+	// raw binding was an arbitrary file overwrite primitive).
+	if h.paths == nil || !h.paths.Authorized(path) {
+		return 0, fmt.Errorf("导出路径未经过应用的保存对话框，已拒绝写入")
+	}
 	h.log.Info("messages export to file",
 		zap.String("connection", in.ConnectionID),
 		zap.String("topic", in.Topic),
@@ -296,6 +307,9 @@ func (h *GenerateHandler) Import(ctx context.Context, in domain.GenerateInput) (
 }
 
 func (h *GenerateHandler) ImportFromFile(ctx context.Context, in domain.ImportFileInput) (domain.ImportFileResult, error) {
+	if h.paths == nil || !h.paths.Authorized(in.Path) {
+		return domain.ImportFileResult{}, fmt.Errorf("导入路径未经过应用的文件选择对话框，已拒绝读取")
+	}
 	h.log.Info("messages import from file",
 		zap.String("connection", in.ConnectionID),
 		zap.String("topic", in.Topic),
@@ -318,11 +332,15 @@ type SettingsHandler struct {
 	svc    *application.SettingsService
 	backup *application.BackupService
 	log    *zap.Logger
+	paths  *pathBroker
 }
 
 func NewSettingsHandler(svc *application.SettingsService, backup *application.BackupService, log *zap.Logger) *SettingsHandler {
 	return &SettingsHandler{svc: svc, backup: backup, log: log}
 }
+
+// SetPathBroker wires the shared pick-path authorization for ImportBackup.
+func (h *SettingsHandler) SetPathBroker(b *pathBroker) { h.paths = b }
 
 func (h *SettingsHandler) Get(ctx context.Context) (application.Settings, error) {
 	return h.svc.Get(ctx)
@@ -344,8 +362,12 @@ func (h *SettingsHandler) ExportBackup(ctx context.Context) (string, error) {
 	})
 }
 
-// ImportBackup merges a backup file into the current configuration.
+// ImportBackup merges a backup file into the current configuration. The
+// path must have come from the app's own pick dialog (045 security round).
 func (h *SettingsHandler) ImportBackup(ctx context.Context, path string) (application.BackupCounts, error) {
+	if h.paths == nil || !h.paths.Authorized(path) {
+		return application.BackupCounts{}, fmt.Errorf("备份路径未经过应用的文件选择对话框，已拒绝读取")
+	}
 	h.log.Info("settings import backup", zap.String("path", path))
 	return h.backup.ImportAll(ctx, path)
 }
