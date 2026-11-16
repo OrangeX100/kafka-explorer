@@ -167,8 +167,18 @@ func (s *MessageIOService) exportWalk(ctx context.Context, in domain.ExportMessa
 // Text is returned to the wails layer (which owns the clipboard) for the
 // in-app copy path.
 func (s *MessageIOService) Export(ctx context.Context, in domain.ExportMessagesInput) (string, error) {
+	// Clipboard path caps the buffered bytes: every line lands in RAM and
+	// the joined result crosses the wails bridge as ONE string — a multi-GB
+	// accumulation froze/OOM'd the app (045 concurrency round). Byte cap,
+	// not just the 1M-line cap.
+	const maxExportBytes = 64 << 20
 	var lines []string
+	total := 0
 	if _, err := s.exportWalk(ctx, in, func(line string) error {
+		total += len(line) + 1
+		if total > maxExportBytes {
+			return fmt.Errorf("%w: 剪贴板导出超过 64 MB——请改用「保存到文件」（文件导出为流式，不受此限）", domain.ErrInvalid)
+		}
 		lines = append(lines, line)
 		return nil
 	}); err != nil {

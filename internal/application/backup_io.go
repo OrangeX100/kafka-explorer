@@ -35,6 +35,10 @@ type backupFile struct {
 const (
 	backupFileKind       = "kafka-explorer-backup"
 	legacyConnectionsKey = connectionFileKind // accepted on import
+	// maxImportFileBytes gates the whole-file read for BOTH the full-backup
+	// and the legacy connections import: the path is user-chosen and a
+	// mis-picked multi-GB file would otherwise be committed to memory.
+	maxImportFileBytes = 64 << 20
 )
 
 // BackupCounts summarizes one full import: per-collection landing counts,
@@ -134,6 +138,14 @@ func (s *BackupService) ExportAll(ctx context.Context, pickSave func(ctx context
 // and merges every entry: name conflicts get a numbered suffix instead of
 // failing the batch, invalid entries are skipped and counted.
 func (s *BackupService) ImportAll(ctx context.Context, path string) (BackupCounts, error) {
+	// Size gate BEFORE the read: the renderer names the path (now brokered,
+	// but still user-chosen) and os.ReadFile would otherwise commit the
+	// whole file — a mis-picked multi-GB file OOMs the app (045 round).
+	if st, statErr := os.Stat(path); statErr != nil {
+		return BackupCounts{}, fmt.Errorf("读取备份文件: %w", statErr)
+	} else if st.Size() > maxImportFileBytes {
+		return BackupCounts{}, fmt.Errorf("备份文件过大（%d MB，上限 64 MB），请确认选择的是本应用导出的备份", st.Size()/(1<<20))
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return BackupCounts{}, fmt.Errorf("读取备份文件: %w", err)

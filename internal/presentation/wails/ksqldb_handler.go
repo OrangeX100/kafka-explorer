@@ -2,6 +2,7 @@ package wails
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -124,6 +125,7 @@ func (h *KsqlDbHandler) Query(serverID, sql, requestID string) error {
 
 		start := time.Now()
 		rows := 0
+		var batchBytes int
 		batch := make([][]any, 0, 64)
 		flush := func(final bool) {
 			if len(batch) == 0 && !final {
@@ -135,6 +137,7 @@ func (h *KsqlDbHandler) Query(serverID, sql, requestID string) error {
 				h.emit("ksql:rows", map[string]any{"id": requestID, "rows": batch, "final": final})
 			}
 			batch = make([][]any, 0, 64)
+			batchBytes = 0
 		}
 		err := h.svc.Query(ctx, serverID, sql, func(header []string, row []any) error {
 			// row == nil carries the streaming column header (push queries
@@ -147,7 +150,12 @@ func (h *KsqlDbHandler) Query(serverID, sql, requestID string) error {
 			}
 			rows++
 			batch = append(batch, row)
-			if len(batch) >= 64 {
+			// Approximate payload size: a hostile server can push 8MB rows at
+			// full speed and the 64-row batch alone allows ~GB-scale event
+			// payloads — flush by bytes too, and cap the retained row count
+			// so a runaway push cannot balloon the event queue (045 round).
+			batchBytes += len(fmt.Sprintf("%v", row))
+			if len(batch) >= 64 || batchBytes >= 4<<20 {
 				flush(false)
 			}
 			return nil

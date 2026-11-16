@@ -94,10 +94,12 @@ type ImportResult struct {
 // import is a bulk restore, not a silent overwrite. SASL entries are saved
 // passwordless and listed in NeedPassword.
 func (s *ConnectionService) ImportConnections(ctx context.Context, path string) (ImportResult, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return ImportResult{}, fmt.Errorf("读取导入文件: %w", err)
+	if st, statErr := os.Stat(path); statErr != nil {
+		return ImportResult{}, fmt.Errorf("读取导入文件: %w", statErr)
+	} else if st.Size() > maxImportFileBytes {
+		return ImportResult{}, fmt.Errorf("导入文件过大（%d MB，上限 64 MB）", st.Size()/(1<<20))
 	}
+	raw, err := os.ReadFile(path)
 	var file connectionFile
 	if err := json.Unmarshal(raw, &file); err != nil {
 		return ImportResult{}, fmt.Errorf("文件不是合法的 JSON: %w", err)

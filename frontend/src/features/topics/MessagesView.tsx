@@ -146,6 +146,14 @@ export function MessagesView({
         setMessages(msgs);
         setExhausted(result.exhausted);
         setSelected((cur) => migrateSelected(msgs, cur));
+        if (goto && goto.offset === undefined && msgs.length > 0) {
+          // Timestamp jump: onJump parked the cursor at "tail", which the
+          // position badge renders as 最新一页 — a lie once the rows land on
+          // the timestamp window (045 CDP round). Sync the cursor to the
+          // REAL window so the badge reads "offset A–B"; paging from here
+          // works because {offset} carries the window anchor.
+          setCursor({ offset: msgs[0].offset });
+        }
       } catch (err) {
         if (seq === requestSeq.current) {
           toast.show(friendlyError(err), "error");

@@ -146,7 +146,14 @@ func (t *TunnelManager) ensureSSH() (*gossh.Client, error) {
 	}
 	t.mu.Lock()
 	// Another goroutine may have dialed while we were out here — keep the
-	// winner, close the loser.
+	// winner, close the loser. Close() may ALSO have run while the dial was
+	// in flight (closed=true, client=nil): hanging the fresh session on a
+	// closed manager would leak it until process exit — close it here.
+	if t.closed {
+		t.mu.Unlock()
+		client.Close()
+		return nil, fmt.Errorf("SSH 隧道已关闭")
+	}
 	if t.client != nil {
 		winner := t.client
 		t.mu.Unlock()
