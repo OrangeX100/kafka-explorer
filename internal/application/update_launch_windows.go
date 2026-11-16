@@ -5,6 +5,7 @@ package application
 import (
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 )
 
@@ -32,18 +33,28 @@ func launchDetached(program string, args []string, env map[string]string) error 
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: 0x08000000 | 0x00000200, // CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
 	}
-	cmd.Env = append(environ(), envPairs(env)...)
+	cmd.Env = mergeEnv(env)
 	return cmd.Start()
 }
 
-func envPairs(extra map[string]string) []string {
-	out := make([]string, 0, len(extra))
+// mergeEnv overlays extra onto the inherited environment BY KEY: plain
+// append creates duplicate names, and Windows' GetEnvironmentVariable
+// (PowerShell $env:) reads the FIRST occurrence — a gen-2 app still carrying
+// gen-1's KE_UPDATE_* would silently shadow the new values and the update
+// would fail after the app had already quit (045 Windows round).
+func mergeEnv(extra map[string]string) []string {
+	out := make([]string, 0, len(os.Environ())+len(extra))
+	for _, kv := range os.Environ() {
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			if _, ours := extra[kv[:i]]; ours {
+				continue // dropped: extra overrides it below
+			}
+		}
+		out = append(out, kv)
+	}
 	for k, v := range extra {
 		out = append(out, k+"="+v)
 	}
 	return out
 }
 
-func environ() []string {
-	return os.Environ()
-}

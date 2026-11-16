@@ -175,8 +175,24 @@ func (s *setupService) install(dir string, preUninstall func(string) error, run 
 	defer func() { s.mu.Lock(); s.running = false; s.mu.Unlock() }()
 
 	dir = strings.TrimSpace(dir)
+	// Strip wrapping quotes a user may paste from a file-manager copy —
+	// Inno's handling of quoted dirs is undefined and the naive wrapper
+	// below would keep them (045 Windows round).
+	if len(dir) >= 2 && (dir[0] == '"' && dir[len(dir)-1] == '"' || dir[0] == '\'' && dir[len(dir)-1] == '\'') {
+		dir = strings.TrimSpace(dir[1 : len(dir)-1])
+	}
 	if dir == "" {
 		return fmt.Errorf("请选择安装目录。")
+	}
+	// A volume-less path ("abc", "\Tools") resolves against the CURRENT
+	// working directory — which is NOT the app directory when setup was
+	// launched by a waiter/shell — so Inno would install somewhere the
+	// front-end can't find (and the %TEMP% fallback cleanup would DELETE
+	// that install). Anchor it to the setup exe's own directory instead.
+	if len(dir) >= 2 && dir[1] != ':' && dir[0] != '\\' {
+		if exe, exeErr := os.Executable(); exeErr == nil {
+			dir = filepath.Join(filepath.Dir(exe), dir)
+		}
 	}
 	// "D:Kafka Explorer" (colon, no separator) is a DRIVE-RELATIVE path:
 	// Windows resolves it to that drive's current directory, so Inno would
@@ -213,6 +229,14 @@ func runPrevUninstaller(dir string) error {
 	prevUnins := filepath.Join(dir, "unins000.exe")
 	if _, err := os.Stat(prevUnins); err != nil {
 		return nil
+	}
+	// OWNERSHIP gate: unins000.exe is every Inno product's uninstaller name.
+	// A user aiming the install dir at another Inno product's folder must
+	// not have that product silently uninstalled with /VERYSILENT — require
+	// our own binary to sit in the same directory before treating the
+	// uninstaller as ours (045 Windows round).
+	if _, err := os.Stat(filepath.Join(dir, "kafka-explorer.exe")); err != nil {
+		return fmt.Errorf("所选目录 %s 中已有其他程序的卸载器（unins000.exe），且不是 Kafka Explorer 的安装目录。请选择一个空目录或本应用现有的安装目录。", dir)
 	}
 	runOnce := func() error {
 		un := exec.Command(prevUnins, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
@@ -351,6 +375,12 @@ func (s *setupService) runEngine(dir string) (installErr error) {
 		// around blocked front-end attempts).
 		scriptPath := filepath.Join(workDir, handoffScriptName)
 		artifacts = append(artifacts, scriptPath, filepath.Join(workDir, "run-install.cmd"))
+		// Clear the failed direct attempt's log FIRST (its engine process
+		// has exited, so the file is not held): the stale copy ends with
+		// "Log closed." and shellRunScript's first poll would otherwise
+		// judge the NEW script launch dead on the OLD log — reporting a
+		// false failure while the script engine installs fine (045 round).
+		os.Remove(logPath)
 		if werr := writeHandoffScript(scriptPath, engine, engineArgs(logPath)); werr != nil {
 			problems = append(problems, "写脚本: "+werr.Error())
 		} else if serr := shellRunScript(scriptPath, logPath); serr == nil {
@@ -359,10 +389,8 @@ func (s *setupService) runEngine(dir string) (installErr error) {
 			problems = append(problems, "shellexec: "+describeRunErr(serr))
 		}
 		// Handoff wait: watch the shared log for a completed install by
-		// the user's double-click. The log from the failed direct attempt
-		// still ends with "Log closed.", so it must go before the poll.
-		// Generous window — the user has to read the hint and react.
-		os.Remove(logPath)
+		// the user's double-click. Generous window — the user has to read
+		// the hint and react.
 		err = waitForEngineLog(logPath, time.Now().Add(10*time.Minute), 15*time.Minute)
 		if err != nil {
 			if errors.Is(err, errTimeout) {
@@ -538,10 +566,11 @@ func runEngineViaExplorerCmd(engine string, args []string, workDir string, logPa
 		return fmt.Errorf("写启动脚本失败: %w", err)
 	}
 	defer os.Remove(cmdPath) // best effort
-	// explorer returns immediately; the log poll does the waiting
-	if err := exec.Command("explorer.exe", cmdPath).Run(); err != nil {
-		return fmt.Errorf("唤起 explorer 失败: %w", err)
-	}
+	// explorer.exe delegates to the resident shell and ALWAYS reports exit
+	// code 1 (documented Windows behavior) regardless of whether the target
+	// actually launched — treating that as failure made this level a
+	// guaranteed no-op. The log poll below is the only honest judge.
+	_ = exec.Command("explorer.exe", cmdPath).Run()
 	return waitForEngineLog(logPath, time.Now().Add(20*time.Second), 8*time.Minute)
 }
 

@@ -7,6 +7,7 @@ import (
 	"embed"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 
 	"go.uber.org/zap"
@@ -25,6 +26,14 @@ import (
 // Bootstrap wires every service and creates the wails application.
 // assets is the embedded frontend dist.
 func Bootstrap(assets embed.FS) (*application.App, func(), error) {
+	// A gen-2 app (installed by the in-app update's waiter) inherits the
+	// waiter's KE_UPDATE_* variables; stale values would shadow the next
+	// update's fresh ones (Windows reads the FIRST duplicate) and that
+	// update would die after this app quit (045 Windows round). Drop them
+	// at the root; launchDetached's mergeEnv is the second layer.
+	for _, k := range []string{"KE_UPDATE_PID", "KE_UPDATE_SETUP", "KE_UPDATE_APP", "KE_UPDATE_RELAUNCH"} {
+		_ = os.Unsetenv(k)
+	}
 	log, err := newLogger()
 	if err != nil {
 		return nil, nil, fmt.Errorf("init logger: %w", err)
