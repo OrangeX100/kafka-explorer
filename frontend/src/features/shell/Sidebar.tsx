@@ -297,6 +297,7 @@ export function Sidebar({ onAddConnection, onEditConnection, topView, setTopView
               return (
                 <div
                   key={conn.id}
+                  data-testid="conn-row"
                   className={`group relative flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs transition-colors ${
                     active
                       ? "bg-accent-muted text-ink-100"

@@ -165,11 +165,17 @@ tasks:
     cmds:
       # DebugFeatures stamps the ONLY build gate that lets KE_DEBUG_CDP open
       # the CDP port; release builds never set it (internal/buildinfo).
-      - go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version={{.VERSION}} -X kafkaexplorer/internal/buildinfo.Commit={{.COMMIT}} -X kafkaexplorer/internal/buildinfo.DebugFeatures=cdp" -o bin/kafka-explorer-cdp.exe .
+      # UpdateRepo matches the release stamp so the in-app update UI works
+      # in the debug build too (settings.Get falls back to it) — the
+      # update-flow probe drives the REAL production feed. Override
+      # VERSION to a value below the published latest to exercise the full
+      # discover→download→cancel chain: task dev:cdp VERSION=0.4.10
+      - go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version={{.VERSION}} -X kafkaexplorer/internal/buildinfo.Commit={{.COMMIT}} -X kafkaexplorer/internal/buildinfo.UpdateRepo={{.RELEASE_REPO}} -X kafkaexplorer/internal/buildinfo.DebugFeatures=cdp" -o bin/kafka-explorer-cdp.exe .
       - cmd /c "set KE_DEBUG_CDP=1&& start "" bin\kafka-explorer-cdp.exe"
-      - echo "CDP 端口 9223 已随窗口启动；跑 UI 用例: cd frontend && npx playwright test"
+      - 'echo "CDP 端口 9223 已随窗口启动；跑 UI 用例 → cd frontend && npx playwright test"'
     vars:
       VERSION: '{{.VERSION | default "0.4.11"}}'
+      RELEASE_REPO: '{{.RELEASE_REPO | default "OrangeX100/kafka-explorer"}}'
       COMMIT:
         sh: git rev-parse --short HEAD 2>/dev/null || echo ""
 

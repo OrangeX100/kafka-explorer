@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -45,9 +46,15 @@ type Service struct {
 	// completion (a 1s-delayed cmd fires while the exe is still locked).
 	pendingSelfDelete string
 	emit              func(topic string, data ...any) // wails events, wired by main
+	busy              atomic.Bool                     // uninstall in flight (close guard)
 }
 
 func New() *Service { return &Service{} }
+
+// Busy reports whether an uninstall is running — the close guard's refuse()
+// (WM_CLOSE must not kill the process mid-uninstall, or unins000.exe turns
+// into an orphan with no one to converge its progress watcher).
+func (s *Service) Busy() bool { return s.busy.Load() }
 
 // SetEmitter wires the wails event emitter (bootstrap owns the app) so
 // the service can stream real uninstall progress to the UI.
@@ -166,6 +173,8 @@ func appRunning() bool {
 // wrapper exe's own deletion — it is locked while running, so a detached
 // cmd removes it (and the now-empty install dir) after we exit.
 func (s *Service) Uninstall(deleteData bool) error {
+	s.busy.Store(true)
+	defer s.busy.Store(false)
 	if appRunning() {
 		// race guard: the UI disables the button on a running app, but the
 		// user could launch the app between the check and this call

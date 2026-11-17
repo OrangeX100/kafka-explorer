@@ -1,0 +1,83 @@
+# Reusable UI-probe job body: builds a CDP-enabled debug binary (0.4.10
+# stamp — BELOW the published latest so the update-flow probe drives the
+# REAL production feed), launches it with the double-gated debug port, and
+# runs the Playwright suite. Cluster probes run only when the `kafka` input
+# points at a reachable broker; the rest run everywhere.
+name: e2e-probe
+description: Build debug exe + run Playwright UI probes over CDP
+inputs:
+  kafka:
+    description: "host:port of a reachable Kafka broker (empty = cluster probes skip)"
+    required: false
+    default: ""
+  update-flow:
+    description: "Set '1' to run the full discover→download→cancel update chain"
+    required: false
+    default: "1"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version: "1.27"
+      shell: bash
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+      shell: bash
+
+    - name: Install wails3 CLI
+      shell: bash
+      run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.117
+
+    - name: Build frontend + debug binary with CDP stamps
+      shell: bash
+      env:
+        GOPATH: ${{ github.workspace }}/go
+      run: |
+        export PATH="$GOPATH/bin:$PATH"
+        # bindings are a gitignored generated artifact — regenerate first
+        wails3 task generate:bindings
+        cd frontend && npm ci --no-audit --no-fund && npm run build && cd ..
+        # VERSION=0.4.10 < published latest → the update-flow probe walks the
+        # REAL discover→download→cancel chain against the production feed.
+        # UpdateRepo matches the release stamp (settings.Get falls back to it).
+        # DebugFeatures=cdp is the ONLY gate that lets KE_DEBUG_CDP open the
+        # debug port (internal/buildinfo.DebugFeatures) — release builds ship
+        # with it empty.
+        go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version=0.4.10 -X kafkaexplorer/internal/buildinfo.Commit=${GITHUB_SHA:0:7} -X kafkaexplorer/internal/buildinfo.UpdateRepo=OrangeX100/kafka-explorer -X kafkaexplorer/internal/buildinfo.DebugFeatures=cdp" -o bin/kafka-explorer-cdp.exe .
+
+    - name: Launch app with CDP port
+      shell: bash
+      run: |
+        KE_DEBUG_CDP=1 ./bin/kafka-explorer-cdp.exe &
+        ok=0
+        for i in $(seq 1 30); do
+          if curl -sf http://127.0.0.1:9223/json/version >/dev/null 2>&1; then ok=1; break; fi
+          sleep 2
+        done
+        if [ "$ok" != "1" ]; then
+          echo "::error::CDP 端口 9223 60 秒内未就绪（检查 WebView2 Runtime 与单实例锁）"
+          exit 1
+        fi
+        echo "CDP ready on 127.0.0.1:9223"
+
+    - name: Run Playwright UI probes
+      shell: bash
+      env:
+        KE_E2E_KAFKA: ${{ inputs.kafka }}
+        KE_E2E_UPDATE_FLOW: ${{ inputs.update-flow }}
+      run: cd frontend && npx playwright test --retries=1
+
+    - name: Upload probe artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: e2e-probe-results
+        path: |
+          frontend/test-results/
+          frontend/playwright-report/
+        retention-days: 7
+        if-no-files-found: ignore

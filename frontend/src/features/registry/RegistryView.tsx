@@ -262,12 +262,7 @@ export function RegistryView() {
               </button>
             </div>
             <div className="border-b border-ink-800 px-2 py-1.5">
-              <input
-                className="field"
-                placeholder={t("reg.searchPh")}
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              />
+              <input className="field" placeholder={t("reg.searchPh")} value={filter} onChange={(e) => setFilter(e.target.value)} />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {subjects === null && activeId && !subjectsError && (
@@ -289,6 +284,7 @@ export function RegistryView() {
               {visible.map((s) => (
                 <div
                   key={s.name}
+                  data-testid="subject-row"
                   onContextMenu={(e) =>
                     openCtx(e, [
                       { label: t("ctx.viewSchema"), onSelect: () => setSelected(s) },

@@ -12,6 +12,7 @@ import (
 	"embed"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"kafkaexplorer/internal/closeguard"
 )
 
 //go:embed all:assets
@@ -35,6 +36,12 @@ func main() {
 	app.RegisterService(application.NewService(svc))
 	// wails events stream real install progress to the UI (setup:progress)
 	svc.SetEmitter(func(topic string, data ...any) { app.Event.Emit(topic, data...) })
+
+	// Alt+F4 / taskbar close bypasses the frontend's disabled-✕ guard and
+	// would kill the process mid-install (cleanup goroutines die, the Inno
+	// engine turns into an orphan). The window-level filter refuses WM_CLOSE
+	// while an install is in flight — see internal/closeguard.
+	closeguard.Guard("Kafka Explorer 安装", svc.InstallInProgress)
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title: "Kafka Explorer 安装",

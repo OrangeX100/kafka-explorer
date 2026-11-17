@@ -66,6 +66,14 @@ func newSetupService(engineExe []byte) *setupService {
 	return &setupService{engineExe: engineExe}
 }
 
+// InstallInProgress reports whether an install is running — the close
+// guard's refuse() (WM_CLOSE must not kill the process mid-install).
+func (s *setupService) InstallInProgress() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.running
+}
+
 // arpVersion reads the DisplayVersion a previous install recorded ("" when
 // none).
 func (s *setupService) arpVersion() string {

@@ -12,6 +12,7 @@ import (
 	"embed"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"kafkaexplorer/internal/closeguard"
 	"kafkaexplorer/internal/uninstaller"
 )
 
@@ -33,6 +34,12 @@ func main() {
 		// redirect — this process IS the second instance by definition.
 	})
 	svc := uninstaller.New()
+
+	// Alt+F4 / taskbar close bypasses the frontend's disabled-✕ guard and
+	// would orphan the silent unins000.exe mid-run (progress watcher dead,
+	// ARP entry half-removed). The window-level filter refuses WM_CLOSE
+	// while an uninstall is in flight — see internal/closeguard.
+	closeguard.Guard("Kafka Explorer 卸载", svc.Busy)
 
 	app.RegisterService(application.NewService(svc))
 	// wails events stream real uninstall progress to the UI

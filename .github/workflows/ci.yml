@@ -2,7 +2,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   gate:
@@ -39,3 +39,17 @@ jobs:
         if: always()
         shell: bash
         run: rm -rf .gotmp || true
+
+  # UI probes on every push: build a CDP-enabled debug binary (0.4.10 stamp —
+  # below the published latest), launch it on the runner, and run the
+  # non-cluster suite (shell boot / isWindows regression / settings echo /
+  # the REAL update chain). Cluster probes run only when the repo variable
+  # KE_E2E_KAFKA points at a reachable broker (honest skips otherwise).
+  e2e:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/e2e-probe
+        with:
+          kafka: ${{ vars.KE_E2E_KAFKA }}
+          update-flow: "1"

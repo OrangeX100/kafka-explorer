@@ -153,6 +153,7 @@ export function TopicsView({ connectionId }: { connectionId: string }) {
             .map((tp) => (
             <div
               key={tp.name}
+              data-testid="topic-row"
               onClick={() => setSelected(tp.name)}
               onContextMenu={(e) =>
                 openCtx(e, [

@@ -14,5 +14,10 @@ export default defineConfig({
   retries: 1,
   timeout: 45_000,
   expect: { timeout: 10_000 },
-  reporter: [["list"], ["html", { open: "never" }]],
+  reporter: [
+    ["list"],
+    ["html", { open: "never" }],
+    // CI-readable results for the probe jobs
+    ...(process.env.CI ? [["junit", { outputFile: "test-results/junit.xml" }]] : []),
+  ],
 });

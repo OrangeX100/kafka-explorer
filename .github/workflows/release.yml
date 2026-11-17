@@ -15,7 +15,22 @@ permissions:
   contents: write
 
 jobs:
+  # UI probes gate the publish: the update chain has broken five times and
+  # every break reached users — no release ships without the probes passing.
+  e2e:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/e2e-probe
+        with:
+          # cluster probes (connect/messages/groups/registry paths) run only
+          # when the repo variable points at the test broker — set
+          # KE_E2E_KAFKA in repo Variables to enable them on releases
+          kafka: ${{ vars.KE_E2E_KAFKA }}
+          update-flow: "1"
+
   release:
+    needs: [e2e]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
