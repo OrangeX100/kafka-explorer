@@ -20,8 +20,9 @@ if len(sys.argv) != 2 or not re.fullmatch(r"\d+\.\d+\.\d+", sys.argv[1]):
 
 version = sys.argv[1]
 
-# 1. Taskfile：build 与 installer 两个任务的默认 VERSION/VERSIONINFOVERSION。
-#    用正则替换任意旧版本号，不依赖具体旧值。
+# 1. Taskfile：build/installer 两个任务的默认 VERSION/VERSIONINFOVERSION
+#    + sign 任务的 -Exe 路径内的硬编码版本。用正则替换任意旧版本号，
+#    不依赖具体旧值——新位置出现时只要 default "x.y.z" 形态就自动命中。
 s = open("Taskfile.yml", encoding="utf-8").read()
 s, n1 = re.subn(
     r"(VERSION: '\{\{\.VERSION \| default \")\d+\.\d+\.\d+(\"\}\}')",
@@ -33,8 +34,14 @@ s, n2 = re.subn(
     rf"\g<1>{version}.0\g<2>",
     s,
 )
+# sign 任务的 -Exe 路径里的硬编码版本（如 KafkaExplorer_Setup_0.4.10.exe）
+s, n3 = re.subn(
+    r"(KafkaExplorer_Setup_)\d+\.\d+\.\d+(\.exe)",
+    rf"\g<1>{version}\g<2>",
+    s,
+)
 open("Taskfile.yml", "w", encoding="utf-8", newline="").write(s)
-print(f"Taskfile: {n1} 处 VERSION + {n2} 处 VERSIONINFOVERSION")
+print(f"Taskfile: {n1} 处 VERSION + {n2} 处 VERSIONINFOVERSION + {n3} 处 -Exe 路径")
 
 # 2. frontend/package.json
 pkg_path = "frontend/package.json"

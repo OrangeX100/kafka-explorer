@@ -448,12 +448,19 @@ func downloadOneSegment(ctx context.Context, assetURL string, f *os.File, start,
 		// 可重试的服务端状态：429（8 并发更容易触发 CDN 限流）与 5xx 走
 		// 退避后重试同段；其余非 206（200=忽略 Range、404）才是"该路由
 		// 不支持分段"。旧代码把 429 也归到后者，整条路由被白白放弃——
-		// 注释"covers 429"与实现不符（外部评审指出）。
+		// 注释"covers 429"与实现不符（外部评审指出）。退避用 ctx-aware
+		// select（外部评审 round-6：裸 time.Sleep 让取消延迟最多 ~6s）。
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
 			attemptCancel()
-			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+			select {
+			case <-ctx.Done():
+				return errCancelled
+			case <-cancelled:
+				return errCancelled
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			}
 			continue
 		}
 		if resp.StatusCode != http.StatusPartialContent {
@@ -462,14 +469,22 @@ func downloadOneSegment(ctx context.Context, assetURL string, f *os.File, start,
 			attemptCancel()
 			return errSlowRoute // this route can't serve ranges after all
 		}
-		// 起点与长度校验：服务器返回的不是所请求的字节区间时（镜像错位/
-		// 边界错误），绝不能写进文件——那会覆盖相邻段或撑大预分配文件。
-		// 最终 SHA 虽能拦住，但白白下载一轮还误报失败。
-		if resp.ContentLength > 0 && offset+resp.ContentLength-1 != end {
+		// 起点与长度校验（外部评审 round-6）：Content-Range 头声明的起点
+		// 必须等于本段请求的 offset——同长度但错起点的响应此前会通过长度
+		// 校验把错位字节写进文件（覆盖相邻段窗口）。缺头或错位 → 换路由。
+		if cr := resp.Header.Get("Content-Range"); cr != "" {
+			var segStart, segEnd int64
+			if _, err := fmt.Sscanf(cr, "bytes %d-%d/", &segStart, &segEnd); err != nil || segStart != offset || segEnd != end {
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+				resp.Body.Close()
+				attemptCancel()
+				return errSlowRoute
+			}
+		} else if resp.ContentLength > 0 && offset+resp.ContentLength-1 != end {
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
 			attemptCancel()
-			return errSlowRoute // 区间错位：换路由
+			return errSlowRoute
 		}
 
 		buf := make([]byte, 64*1024)

@@ -107,11 +107,11 @@ tasks:
   # DigiCert KeyLocker）后，在 CI secrets 或本机环境设置对应变量，发布
   # 命令改为 `task installer sign` 即自动签名。
   sign:
-    desc: Authenticode-sign bin/installer/KafkaExplorer_Setup_*.exe (requires signing credentials; no-op with a hint otherwise)
+    desc: Authenticode-sign bin/installer/KafkaExplorer_Setup_<VERSION>.exe (requires SIGN_BACKEND + VERSION)
     cmds:
-      - powershell -ExecutionPolicy Bypass -File scripts/sign.ps1 -Backend "{{.SIGN_BACKEND}}" -Exe "bin/installer/KafkaExplorer_Setup_{{.VERSION | default "0.4.10"}}.exe" {{.SIGN_ARGS | default ""}}
+      - powershell -ExecutionPolicy Bypass -File scripts/sign.ps1 -Backend "{{.SIGN_BACKEND}}" -Exe "bin/installer/KafkaExplorer_Setup_{{.VERSION}}.exe" {{.SIGN_ARGS | default ""}}
     requires:
-      vars: [SIGN_BACKEND]
+      vars: [SIGN_BACKEND, VERSION]
 
   ensure:engine:
     # cmd/setup embeds the installer engine via go:embed, but that binary is
