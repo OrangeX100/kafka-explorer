@@ -69,6 +69,14 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 	// the key on every install/upgrade and no setup hook runs after that)
 	fixUninstallRegistry()
 	winOptions := application.WindowsOptions{}
+	// CDP debug port for UI automation (Playwright): requires BOTH the
+	// build-stamp DebugFeatures="cdp" (only task dev:cdp sets it) AND the
+	// runtime env var KE_DEBUG_CDP=1. A release binary has the stamp empty,
+	// so the port is unreachable regardless of the environment — see
+	// internal/buildinfo.DebugFeatures.
+	if os.Getenv("KE_DEBUG_CDP") == "1" && buildinfo.DebugFeatures == "cdp" {
+		winOptions.AdditionalBrowserArgs = []string{"--remote-debugging-port=9223"}
+	}
 
 	// Single instance: the tray lives in-process, so a second launch would
 	// show a SECOND tray icon for the same app. The wails runtime takes a

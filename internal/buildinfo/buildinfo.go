@@ -18,3 +18,11 @@ var Commit = ""
 // off). Stamped at build time via -ldflags so release builds ship with
 // their own release repo while dev builds stay quiet.
 var UpdateRepo = ""
+
+// DebugFeatures is a build-stamped switch for developer builds only
+// (task dev:cdp stamps "cdp" via -ldflags). Release builds leave it "": the
+// CDP remote-debugging port in bootstrap then cannot be enabled at all —
+// the gate checks BOTH this stamp and the KE_DEBUG_CDP env var, and env
+// vars alone are inert. The port is a full JavaScript bridge into the
+// renderer and must never ship reachable.
+var DebugFeatures = ""
