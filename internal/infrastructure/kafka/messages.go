@@ -18,7 +18,7 @@ const (
 	// an exhausted partition. The caller can lower this via context.
 	defaultPollTimeout = 4 * time.Second
 
-	maxPageLimit = 100_000 // server-side clamp on page size (desktop tool, own cluster)
+	maxPageLimit = 5_000 // server-side clamp: 10 万行的 DOM 渲染(≈150 万节点)会冻结 WebView2 数十秒乃至 OOM——更大的量请用查找/导出(045 round-5)
 )
 
 // BrowsePage fetches one window of records.
@@ -116,7 +116,10 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 				fetchErr = err
 			}
 		})
-		if fetchErr != nil && pageCtx.Err() == nil && !dataLoss {
+		// dataLoss 轮本身不含 fetchErr（假分区错误只置标志位），所以这里的
+		// fetchErr 必然是真实错误（broker 宕机/ACL 撤销）——旧条件里的
+		// !dataLoss 会让 dataLoss 置位后的真实错误被静默吞掉（045 round-5）。
+		if fetchErr != nil && pageCtx.Err() == nil {
 			return domain.BrowsePage{}, mapErr(fmt.Errorf("fetch %s-%d: %w", req.Topic, partition, fetchErr))
 		}
 		if len(fetched) == 0 {

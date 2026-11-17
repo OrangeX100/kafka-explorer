@@ -64,15 +64,22 @@ export function Sidebar({ onAddConnection, onEditConnection, topView, setTopView
   useEffect(() => {
     if (tabs.length === 0) return;
     let alive = true;
+    let probing = false; // 重入守卫：死连接链(4s×N)超过 30s 间隔时，叠轮会让探活流量滚雪球（045 round-5）
     const probe = async () => {
-      for (const t of useWorkspace.getState().tabs) {
-        if (!alive) return;
-        try {
-          await connectionsApi.ping(t.connectionId);
-          if (alive) setHealth(t.connectionId, "ok");
-        } catch {
-          if (alive) setHealth(t.connectionId, "fail");
+      if (probing) return;
+      probing = true;
+      try {
+        for (const t of useWorkspace.getState().tabs) {
+          if (!alive) return;
+          try {
+            await connectionsApi.ping(t.connectionId);
+            if (alive) setHealth(t.connectionId, "ok");
+          } catch {
+            if (alive) setHealth(t.connectionId, "fail");
+          }
         }
+      } finally {
+        probing = false;
       }
     };
     void probe();

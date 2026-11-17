@@ -141,7 +141,10 @@ func (s *SettingsService) Save(ctx context.Context, in Settings) (Settings, erro
 	if in.Density != "compact" && in.Density != "comfortable" {
 		in.Density = "compact"
 	}
-	if in.PageSize < 10 || in.PageSize > 1000000 {
+	// PageSize 上限 5000 与后端 clampLimit 一致：更大的单页会让 WebView2
+	// 渲染数十万 DOM 节点而冻结（045 round-5；历史旧行存的更大值会在读取
+	// 侧被 clampLimit 静默钳制）。
+	if in.PageSize < 10 || in.PageSize > 5000 {
 		in.PageSize = 50
 	}
 	if in.MaxScan < 1000 || in.MaxScan > 1_000_000 {

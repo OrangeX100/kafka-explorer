@@ -281,7 +281,7 @@ export function SettingsView() {
               className="field !w-28"
               type="number"
               min={10}
-              max={1000000}
+              max={5000}
               step={1000}
               value={settings.pageSize}
               onChange={(e) => set("pageSize", Number(e.target.value))}

@@ -49,7 +49,17 @@ func (s *AdminService) AlterBrokerConfig(ctx context.Context, in domain.AlterBro
 
 // IncreasePartitions grows a topic's partition count to target. The client
 // pre-validates against the live count (Kafka never shrinks partitions).
+// Protected-tier guard: partition count is part of key-hash addressing —
+// expanding _schemas/__consumer_offsets silently corrupts the owning
+// service's data lookups (045 round-5: the only destructive write path
+// missing this check while Delete/AlterConfig all have it).
 func (s *AdminService) IncreasePartitions(ctx context.Context, connectionID, topic string, target int32) error {
+	switch tier := domain.ProtectedTopicTierOf(topic); tier {
+	case domain.TopicTierKafka:
+		return fmt.Errorf("「%s」是 Kafka 系统保留主题，分区数由集群协议固定，扩容会损坏消费组寻址，已阻止", topic)
+	case domain.TopicTierEcosystem:
+		return fmt.Errorf("「%s」由外部服务托管（分区数被该服务按 key 固定寻址），扩容会导致其数据错位，已阻止。请通过该服务自身的 API 变更", topic)
+	}
 	client, err := s.pool.Acquire(ctx, connectionID)
 	if err != nil {
 		return err
@@ -74,7 +84,30 @@ func (s *AdminService) ListACLs(ctx context.Context, connectionID string) ([]dom
 }
 
 // CreateACL decision-logs in the wails handler (irreversible security change).
+// aclOpNames / aclPermNames: the exact strings infra's aclOpCode/aclPermCode
+// accept. Whitelisting at the service boundary is load-bearing: infra maps
+// unknown operations to ANY and unknown permissions to ALLOW, so a typo like
+// "deny" (lowercase) or a trailing space would silently create an
+// allow-everything ACE (045 round-5 review).
+var (
+	aclOpNames = map[string]bool{
+		"UNKNOWN": false, "ANY": true, "ALL": true, "READ": true, "WRITE": true,
+		"CREATE": true, "DELETE": true, "ALTER": true, "DESCRIBE": true,
+		"CLUSTER_ACTION": true, "DESCRIBE_CONFIGS": true, "ALTER_CONFIGS": true,
+		"IDEMPOTENT_WRITE": true,
+	}
+	aclPermNames = map[string]bool{
+		"UNKNOWN": false, "ANY": true, "DENY": true, "ALLOW": true,
+	}
+)
+
 func (s *AdminService) CreateACL(ctx context.Context, connectionID string, acl domain.ACL) error {
+	if !aclOpNames[acl.Operation] {
+		return fmt.Errorf("%w: 未知的 ACL 操作 %q（合法值：READ/WRITE/CREATE/DELETE/ALTER/DESCRIBE/CLUSTER_ACTION/DESCRIBE_CONFIGS/ALTER_CONFIGS/IDEMPOTENT_WRITE/ANY/ALL）", domain.ErrInvalid, acl.Operation)
+	}
+	if !aclPermNames[acl.PermissionType] {
+		return fmt.Errorf("%w: 未知的 ACL 权限 %q（合法值：ALLOW/DENY/ANY）——注意大小写：\"deny\" 会被 broker 视为未知并按 ALLOW 处理", domain.ErrInvalid, acl.PermissionType)
+	}
 	client, err := s.pool.Acquire(ctx, connectionID)
 	if err != nil {
 		return err

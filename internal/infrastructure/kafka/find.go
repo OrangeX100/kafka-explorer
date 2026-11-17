@@ -88,12 +88,13 @@ func (c *Client) Find(ctx context.Context, req domain.FindRequest) (domain.Brows
 		// browseAllPartitions). ErrDataLoss is tolerated — kgo repositioned
 		// automatically and the surviving records arrive on the next poll.
 		var fetchErr error
+		dataLoss := false
 		fetches.EachError(func(_ string, _ int32, err error) {
-			if fetchErr == nil {
-				var dle *kgo.ErrDataLoss
-				if !errors.As(err, &dle) {
-					fetchErr = err
-				}
+			var dle *kgo.ErrDataLoss
+			if errors.As(err, &dle) {
+				dataLoss = true // repositioned; surviving records arrive next poll
+			} else if fetchErr == nil {
+				fetchErr = err
 			}
 		})
 		if fetchErr != nil {
@@ -101,6 +102,12 @@ func (c *Client) Find(ctx context.Context, req domain.FindRequest) (domain.Brows
 		}
 		n := fetches.NumRecords()
 		if n == 0 {
+			// ErrDataLoss 0-记录轮后，幸存记录在下一次 poll 送达（kgo 假分区
+			// 语义）——这里 break 会把修剪窗口的搜索假报成"无结果"（045
+			// round-4 回归审查 P2-1）。dataLoss 轮继续 poll，页截止兜底。
+			if dataLoss && pageCtx.Err() == nil {
+				continue
+			}
 			page.Exhausted = true
 			break
 		}

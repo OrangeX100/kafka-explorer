@@ -177,12 +177,18 @@ export function MessagesView({
               setMessages(msgs);
               setExhausted(result.exhausted);
               setSelected(null);
+              // the retry lands on goto.partition's TAIL — anchor the cursor
+              // there or refresh/paging would replay the failed jump's window
+              if (msgs.length > 0) setCursor({ offset: msgs[msgs.length - 1].offset });
             } catch { /* the toast above already told the user */ }
           }
         }
       } finally {
         if (goto) pendingGoto.current = false; // flight over: toggles work again
-        if (seq === requestSeq.current) setLoading(false);
+        // UNCONDITIONAL: the catch path bumps requestSeq (invalidating seq)
+        // to run the tail-retry — a conditional release here left loading
+        // stuck true after every failed jump (045 round-4 regression).
+        setLoading(false);
       }
     },
     // pageSize/decodeOn in deps: a stale closure kept the old limit alive
