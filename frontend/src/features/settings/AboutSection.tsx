@@ -31,7 +31,12 @@ export function UpdateSection({
   // the staged result instead of silently forgetting it.
   const upd = useUpdate();
   const { phase, bytes, total, route, staged } = upd;
-  const isWindows = /^windows/i.test(navigator.userAgent);
+  // UNANCHORED: WebView2's UA always starts with "Mozilla/5.0 (Windows NT…)",
+  // so the old /^windows/i anchor was false on EVERY machine — the one-click
+  // download button never rendered anywhere (045 CDP round, the FIFTH break
+  // in the update chain, exposed only after the first four were fixed).
+  // /windows/i matches "Windows NT" in the UA; Linux/mac UAs never contain it.
+  const isWindows = /windows/i.test(navigator.userAgent);
 
   const runCheck = async () => {
     setChecking(true);
