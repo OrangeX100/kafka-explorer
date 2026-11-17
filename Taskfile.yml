@@ -101,6 +101,18 @@ tasks:
     desc: Go unit + contract tests
     deps: [ensure:engine, test:unix, test:windows]
 
+  # Authenticode 签名（045 round-5：sign.ps1 此前孤立——脚本三后端齐备但
+  # 无任何调用入口）。凭据存在才生效：SIGN_BACKEND 未设置时打印提示退出，
+  # 本地/CI 构建完全不受影响。证书采购（Azure Trusted Signing $9.99/月 或
+  # DigiCert KeyLocker）后，在 CI secrets 或本机环境设置对应变量，发布
+  # 命令改为 `task installer sign` 即自动签名。
+  sign:
+    desc: Authenticode-sign bin/installer/KafkaExplorer_Setup_*.exe (requires signing credentials; no-op with a hint otherwise)
+    cmds:
+      - powershell -ExecutionPolicy Bypass -File scripts/sign.ps1 -Backend "{{.SIGN_BACKEND}}" {{.SIGN_ARGS | default ""}}
+    requires:
+      vars: [SIGN_BACKEND]
+
   ensure:engine:
     # cmd/setup embeds the installer engine via go:embed, but that binary is
     # a task-installer ARTIFACT (gitignored). A clean checkout therefore has

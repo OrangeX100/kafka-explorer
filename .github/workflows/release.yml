@@ -58,6 +58,35 @@ jobs:
             RELEASE_REPO="${GITHUB_REPOSITORY}" \
             ISCC="$ISCC_PATH"
 
+      - name: Sign installer (skipped without credentials)
+        if: env.SIGN_BACKEND != ''
+        shell: pwsh
+        working-directory: bin/installer
+        env:
+          SIGN_BACKEND: ${{ vars.SIGN_BACKEND }}
+          AZURE_RESOURCE_GROUP: ${{ vars.SIGN_AZURE_RESOURCE_GROUP }}
+          AZURE_ACCOUNT: ${{ vars.SIGN_AZURE_ACCOUNT }}
+          AZURE_PROFILE: ${{ vars.SIGN_AZURE_PROFILE }}
+          AZURE_ENDPOINT: ${{ vars.SIGN_AZURE_ENDPOINT }}
+          CERT_NAME: ${{ vars.SIGN_CERT_NAME }}
+          CERT_THUMBPRINT: ${{ vars.SIGN_CERT_THUMBPRINT }}
+          AZURE_CLIENT_ID: ${{ secrets.SIGN_AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.SIGN_AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.SIGN_AZURE_CLIENT_SECRET }}
+        run: |
+          # 签名必须在 sidecar/latest.json 生成之前：签名改变文件字节，
+          # 三方校验（exe/manifest/sidecar）读取的都是签名后的哈希。
+          $ver = $env:GITHUB_REF_NAME -replace '^v', ''
+          $exe = "KafkaExplorer_Setup_$ver.exe"
+          pwsh -File ../../scripts/sign.ps1 -Backend "$env:SIGN_BACKEND" `
+            -Exe $exe `
+            -AzureResourceGroup "$env:SIGN_AZURE_RESOURCE_GROUP" `
+            -AzureAccount "$env:SIGN_AZURE_ACCOUNT" `
+            -AzureProfile "$env:SIGN_AZURE_PROFILE" `
+            -AzureEndpoint "$env:SIGN_AZURE_ENDPOINT" `
+            -CertName "$env:SIGN_CERT_NAME" `
+            -CertThumbprint "$env:SIGN_CERT_THUMBPRINT"
+
       - name: Versioned asset + checksum
         shell: bash
         working-directory: bin/installer
