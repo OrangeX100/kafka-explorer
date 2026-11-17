@@ -369,10 +369,14 @@ func (s *UpdateService) downloadSegments(routeCtx context.Context, assetURL, par
 		}
 	}
 	if firstErr != nil {
-		if firstErr == errCancelled || stopRequested(cancelled) {
+		// 用户取消（cancelled 通道关闭）→ 静默归零；否则即使段返回
+		// errCancelled/context.Canceled 也降级为 errSlowRoute——那是
+		// stall watchdog 的 segCancel，不是用户取消：吞掉它会让镜像
+		// 回退永不触发，进度条冻结后静默归 idle（045 round-6 P1）。
+		if stopRequested(cancelled) {
 			return errCancelled
 		}
-		if errors.Is(firstErr, errSlowRoute) || errors.Is(firstErr, context.Canceled) {
+		if firstErr == errCancelled || errors.Is(firstErr, context.Canceled) {
 			return errSlowRoute
 		}
 		return fmt.Errorf("分段下载失败: %w", firstErr)

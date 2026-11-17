@@ -59,7 +59,7 @@ jobs:
             ISCC="$ISCC_PATH"
 
       - name: Sign installer (skipped without credentials)
-        if: env.SIGN_BACKEND != ''
+        if: vars.SIGN_BACKEND != ''
         shell: pwsh
         working-directory: bin/installer
         env:
@@ -76,8 +76,8 @@ jobs:
         run: |
           # 签名必须在 sidecar/latest.json 生成之前：签名改变文件字节，
           # 三方校验（exe/manifest/sidecar）读取的都是签名后的哈希。
-          $ver = $env:GITHUB_REF_NAME -replace '^v', ''
-          $exe = "KafkaExplorer_Setup_$ver.exe"
+          # 目标 = 未版本化名（mv 尚未发生）。
+          $exe = "KafkaExplorer_Setup.exe"
           pwsh -File ../../scripts/sign.ps1 -Backend "$env:SIGN_BACKEND" `
             -Exe $exe `
             -AzureResourceGroup "$env:SIGN_AZURE_RESOURCE_GROUP" `

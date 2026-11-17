@@ -136,6 +136,10 @@ export function MessagesView({
         if (seq !== requestSeq.current) return; // a newer browse superseded us
         setPagingSuspended(false);
         const msgs = result.page.messages ?? [];
+        // 统一升序：backward/tail 页后端按 offset 降序送达，直接渲染会让
+        // goPrev/goNext 的 messages[0]/messages[last] 语义翻转（首击只移
+        // 1 条——045 round-6 存量）。sort 后 badges/paging/title 全一致。
+        msgs.sort((a, b) => a.offset - b.offset);
         if (msgs.length === 0 && result.exhausted) {
           // past-the-end forward: keep the current rows, never blank out
           setExhausted(true);

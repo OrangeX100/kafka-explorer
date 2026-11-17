@@ -109,7 +109,7 @@ tasks:
   sign:
     desc: Authenticode-sign bin/installer/KafkaExplorer_Setup_*.exe (requires signing credentials; no-op with a hint otherwise)
     cmds:
-      - powershell -ExecutionPolicy Bypass -File scripts/sign.ps1 -Backend "{{.SIGN_BACKEND}}" {{.SIGN_ARGS | default ""}}
+      - powershell -ExecutionPolicy Bypass -File scripts/sign.ps1 -Backend "{{.SIGN_BACKEND}}" -Exe "bin/installer/KafkaExplorer_Setup_{{.VERSION | default "0.4.9"}}.exe" {{.SIGN_ARGS | default ""}}
     requires:
       vars: [SIGN_BACKEND]
 
