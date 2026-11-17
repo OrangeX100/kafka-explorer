@@ -235,21 +235,29 @@ func (c *Client) browseAllPartitions(ctx context.Context, req domain.BrowseReque
 	page := domain.BrowsePage{Exhausted: true, Messages: []domain.Message{}}
 	var records []*kgo.Record
 	var fetchErr error
+	dataLoss := false
 	for len(records) < limit {
 		fetches := pc.PollRecords(pageCtx, limit-len(records))
-		// Surface fetch errors instead of reading "0 records + error" as an
-		// empty page: a no-DESCRIBE topic (or dead leaders) fails every fetch
-		// and used to show "no messages" for what is an authorization error —
-		// inconsistent with the single-partition path, which reports it.
+		// Surface fetch errors; ErrDataLoss is tolerated (kgo repositioned
+		// automatically, surviving records arrive next poll — same tolerance
+		// as the single-partition path).
 		fetches.EachError(func(_ string, _ int32, err error) {
 			if fetchErr == nil {
-				fetchErr = err
+				var dle *kgo.ErrDataLoss
+				if !errors.As(err, &dle) {
+					fetchErr = err
+				} else {
+					dataLoss = true
+				}
 			}
 		})
 		if fetchErr != nil {
 			return domain.BrowsePage{}, mapErr(fmt.Errorf("fetch %s: %w", req.Topic, fetchErr))
 		}
 		if fetches.NumRecords() == 0 {
+			if dataLoss && pageCtx.Err() == nil {
+				continue // repositioned: surviving records arrive next poll
+			}
 			break
 		}
 		records = append(records, fetches.Records()...)

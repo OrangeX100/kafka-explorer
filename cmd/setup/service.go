@@ -397,10 +397,12 @@ func (s *setupService) runEngine(dir string) (installErr error) {
 		// "Log closed." and shellRunScript's first poll would otherwise
 		// judge the NEW script launch dead on the OLD log — reporting a
 		// false failure while the script engine installs fine (045 round).
-		os.Remove(logPath)
-		if werr := writeHandoffScript(scriptPath, engine, engineArgs(logPath)); werr != nil {
-			problems = append(problems, "写脚本: "+werr.Error())
-		} else if serr := shellRunScript(scriptPath, logPath); serr == nil {
+	os.Remove(logPath)
+	scriptWritten := true
+	if werr := writeHandoffScript(scriptPath, engine, engineArgs(logPath)); werr != nil {
+		problems = append(problems, "写脚本: "+werr.Error())
+		scriptWritten = false // GBK 编码失败等：脚本不存在时超时文案不应指向它
+	} else if serr := shellRunScript(scriptPath, logPath); serr == nil {
 			return nil // the shell-launched script completed the whole install
 		} else {
 			problems = append(problems, "shellexec: "+describeRunErr(serr))
@@ -411,9 +413,16 @@ func (s *setupService) runEngine(dir string) (installErr error) {
 		err = waitForEngineLog(logPath, time.Now().Add(10*time.Minute), 15*time.Minute)
 		if err != nil {
 			if errors.Is(err, errTimeout) {
-				return fmt.Errorf("自动安装被杀毒软件拦截。请打开 %s 并双击「%s」完成安装；装完后本窗口会自动显示完成。", workDir, handoffScriptName)
+				if scriptWritten {
+					return fmt.Errorf("自动安装被杀毒软件拦截。请打开 %s 并双击「%s」完成安装；装完后本窗口会自动显示完成。", workDir, handoffScriptName)
+				}
+				return fmt.Errorf("自动安装被杀毒软件拦截，且交接脚本写入失败。请暂时退出杀毒软件实时防护后重试。")
 			}
-			return fmt.Errorf("自动安装未能完成（%s）。请暂时退出杀毒软件实时防护后重试，或双击「%s」（位于 %s）手动完成安装。", strings.Join(problems, "；"), handoffScriptName, workDir)
+			hint := handoffScriptName
+			if !scriptWritten {
+				hint = "请暂时退出杀毒软件实时防护后重试"
+			}
+			return fmt.Errorf("自动安装未能完成（%s）。%s（位于 %s）", strings.Join(problems, "；"), hint, workDir)
 		}
 		return nil
 	}
@@ -588,7 +597,7 @@ func runEngineViaExplorerCmd(engine string, args []string, workDir string, logPa
 	// actually launched — treating that as failure made this level a
 	// guaranteed no-op. The log poll below is the only honest judge.
 	_ = exec.Command("explorer.exe", cmdPath).Run()
-	return waitForEngineLog(logPath, time.Now().Add(20*time.Second), 8*time.Minute)
+	return waitForEngineLog(logPath, time.Now().Add(45*time.Second), 8*time.Minute)
 }
 
 // waitForEngineLog polls Inno's own log for completion: it always ends
@@ -626,7 +635,9 @@ func waitForEngineLog(logPath string, startedBy time.Time, budget time.Duration)
 // quoteIfSpaced wraps a token for a CreateProcess command line built as
 // one string, so tokens containing spaces stay a single argument.
 func quoteIfSpaced(s string) string {
-	if strings.ContainsAny(s, " \t") {
+	// Always quote if the path contains spaces OR cmd metacharacters
+	// (& ^ () are cmd separators; a bare D:\R&D\path would break the cmd).
+	if strings.ContainsAny(s, " \t&^()") {
 		return `"` + s + `"`
 	}
 	return s
