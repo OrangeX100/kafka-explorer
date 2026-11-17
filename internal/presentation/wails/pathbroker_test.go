@@ -71,21 +71,26 @@ func TestPathBrokerFIFOEvictionMovesReissue(t *testing.T) {
 }
 
 func TestPathBrokerExpiredSlotNotEvictingFresh(t *testing.T) {
+	// MUST reach the eviction overflow (round-4 review: the previous version
+	// of this test issued only 6 entries — far below pathBrokerMax — so the
+	// ghost-slot bug it claims to pin was never exercised).
 	b := newPathBroker()
-	b.maxLife = 40 * time.Millisecond
+	b.maxLife = time.Hour
 	b.Issue("OLD")
-	time.Sleep(80 * time.Millisecond) // OLD expires
-	b.Issue("NEW")                    // GC drops OLD; order must not keep a ghost slot
-	b.Issue("A")
-	b.Issue("B")
-	b.Issue("C")
-	b.Issue("D")
-	b.Issue("E")
-	// Overflow evictions must not delete NEW (the ghost OLD slot previously
-	// made eviction pop NEW instead).
-	for _, p := range []string{"NEW", "A", "B", "C", "D"} {
+	for i := 1; i < pathBrokerMax; i++ {
+		b.Issue(fmt.Sprintf("F%02d", i))
+	}
+	// Age out everything, then re-fill past the cap: GC on the next Issue
+	// must drop expired entries AND their order slots coherently.
+	time.Sleep(60 * time.Millisecond)
+	b.Issue("NEW")
+	for i := 1; i < pathBrokerMax; i++ {
+		b.Issue(fmt.Sprintf("N%02d", i))
+	}
+	// Overflow: the OLDEST fresh entry goes; NEW and the survivors stay.
+	for _, p := range []string{"NEW", "N01", "N02"} {
 		if !b.Authorized(p) {
-			t.Fatalf("REGRESSION: %v wrongly evicted", p)
+			t.Fatalf("REGRESSION: %v wrongly evicted by ghost slots", p)
 		}
 	}
 	if b.Authorized("OLD") {

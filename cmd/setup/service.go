@@ -162,6 +162,13 @@ func normalizeInstallDir(dir string) string {
 	if len(dir) > 2 && dir[1] == ':' && dir[2] != '\\' && dir[2] != '/' {
 		dir = dir[:2] + `\` + dir[2:]
 	}
+	// Bare drive root ("D:") nests one level here too — LaunchApp shares
+	// this normalizer, and a bare "D:" from the renderer previously resolved
+	// kafka-explorer.exe against the drive's CWD and failed (045 round-4
+	// review P3-4a). Idempotent with install()'s own nesting.
+	if isDriveRoot(dir) {
+		dir = filepath.Join(dir, appDirName)
+	}
 	return dir
 }
 

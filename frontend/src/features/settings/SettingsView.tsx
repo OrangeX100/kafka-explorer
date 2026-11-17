@@ -286,6 +286,7 @@ export function SettingsView() {
               value={settings.pageSize}
               onChange={(e) => set("pageSize", Number(e.target.value))}
             />
+            <p className="text-10 text-ink-400">单页上限 5000；更大量请用「查找」定位或「导出」到文件</p>
           </Row>
           <Row label={t("settings.maxScan")}>
             <input

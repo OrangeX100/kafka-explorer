@@ -80,9 +80,7 @@ export function RegistryView() {
     void load();
   }, [load]);
 
-  // Stale-response guard: A's list with B's activeId would let the user act
-  // on a subject from the WRONG registry (045 batch-3 round).
-  const subjectSeq = useRef(0);
+  const subjectSeq = useRef(0); // stale-response guard: wrong-registry actions
   const loadSubjects = useCallback(async (id: string): Promise<SchemaSubject[]> => {
     const seq = ++subjectSeq.current;
     setSubjects(null);
@@ -90,13 +88,10 @@ export function RegistryView() {
     setSubjectsError(null);
     try {
       const list = (await registryApi.subjects(id)) ?? [];
-      if (seq !== subjectSeq.current) return list; // a newer registry won
-      setSubjects(list);
+      if (seq === subjectSeq.current) setSubjects(list);
       return list;
     } catch (err) {
-      if (seq !== subjectSeq.current) return [];
-      setSubjectsError(err);
-      setSubjects([]);
+      if (seq === subjectSeq.current) { setSubjectsError(err); setSubjects([]); }
       return [];
     }
   }, []);
@@ -104,12 +99,14 @@ export function RegistryView() {
   // Silent refresh: updates the subject LIST without clearing the selection
   // — the compat workbench's write path (a full reload would blank the
   // detail pane for a second and yank the user out of the tab they're in).
-  const refreshSubjectsSilent = useCallback(async (id: string): Promise<SchemaSubject[]> => {
+  const refreshSubjectsSilent = useCallback(async (id: string): Promise<SchemaSubject[] | null> => {
     // Same seq guard as loadSubjects (wrong-registry actions, 045 round-4).
+    // Superseded → null so callers skip follow-up mutations.
     const seq = ++subjectSeq.current;
     try {
       const list = (await registryApi.subjects(id)) ?? [];
-      if (seq === subjectSeq.current) setSubjects(list);
+      if (seq !== subjectSeq.current) return null;
+      setSubjects(list);
       return list;
     } catch { return []; }
   }, []);
@@ -331,6 +328,10 @@ export function RegistryView() {
                 onCompatChanged={() => {
                   if (activeId) {
                     void refreshSubjectsSilent(activeId).then((fresh) => {
+                      // seq-guarded alongside the list: a superseded refresh
+                      // must not setSelected with a STALE registry's subject
+                      // (045 round-4 review P3-7). null = superseded.
+                      if (!fresh) return;
                       const found = fresh.find((s) => s.name === selected.name);
                       if (found) setSelected(found);
                     });

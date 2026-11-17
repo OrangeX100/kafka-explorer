@@ -21,13 +21,13 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"time"
 
 	gossh "golang.org/x/crypto/ssh"
 
 	"kafkaexplorer/internal/domain"
+	"kafkaexplorer/internal/fsutil"
 )
 
 // fingerprintSHA256 renders a public key the way OpenSSH's known_hosts
@@ -94,7 +94,8 @@ func (t *TunnelManager) hostKeyCallback() gossh.HostKeyCallback {
 // authMethods builds the SSH auth list for the configured auth type.
 func (t *TunnelManager) authMethods() ([]gossh.AuthMethod, error) {
 	if t.cfg.Auth == domain.TunnelAuthKey {
-		raw, err := os.ReadFile(t.cfg.KeyPath)
+		// 16MB 帽：私钥从不需要更大（045 round-5 安全回归）。
+		raw, err := fsutil.ReadFileCapped(t.cfg.KeyPath, 16<<20)
 		if err != nil {
 			return nil, fmt.Errorf("读取 SSH 私钥失败: %w", err)
 		}

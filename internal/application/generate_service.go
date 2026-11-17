@@ -14,6 +14,7 @@ import (
 
 	"kafkaexplorer/internal/application/decode"
 	"kafkaexplorer/internal/domain"
+	"kafkaexplorer/internal/fsutil"
 	"kafkaexplorer/internal/infrastructure/kafka"
 )
 
@@ -334,18 +335,12 @@ const maxImportFile = 64 << 20
 // are collected with their 1-based line number; progress fires through the
 // wired callback so the UI shows a live counter on long files.
 func (s *MessageIOService) ImportFromFile(ctx context.Context, in domain.ImportFileInput) (domain.ImportFileResult, error) {
-	info, err := os.Stat(in.Path)
+	// TOCTOU-safe bounded read (045 round-4 regression review).
+	raw, err := fsutil.ReadFileCapped(in.Path, maxImportFile)
 	if err != nil {
-		return domain.ImportFileResult{}, fmt.Errorf("读取导入文件失败: %w", err)
+		return domain.ImportFileResult{}, fmt.Errorf("读取导入文件失败：%v（上限 64 MB）", err)
 	}
-	if info.Size() > maxImportFile {
-		return domain.ImportFileResult{}, fmt.Errorf("导入文件过大（%d MB），上限 64 MB", info.Size()/(1<<20))
-	}
-	payload, err := os.ReadFile(in.Path)
-	if err != nil {
-		return domain.ImportFileResult{}, fmt.Errorf("读取导入文件失败: %w", err)
-	}
-	lines := strings.Split(strings.ReplaceAll(string(payload), "\r\n", "\n"), "\n")
+	lines := strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
 	total := 0
 	for _, line := range lines {
 		if strings.TrimSpace(line) != "" {

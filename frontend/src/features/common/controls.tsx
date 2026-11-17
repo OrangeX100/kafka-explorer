@@ -97,6 +97,13 @@ export function Select({
   const [roll, setRoll] = useState<{ from: string; to: string; dir: "up" | "down" } | null>(null);
   const [pos, setPos] = useState<{ x: number; y: number; w: number; up: boolean } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  // 唯一未清理 timer 的收口（045 round-5 全仓盘点）：卸载时清除。
+  const rollTimer = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (rollTimer.current !== null) clearTimeout(rollTimer.current);
+    };
+  }, []);
   const current = options.find((o) => o.value === value);
   const currentIdx = options.findIndex((o) => o.value === value);
 
@@ -165,7 +172,8 @@ export function Select({
     if (opt.value !== value) {
       const prev = current?.label ?? value;
       setRoll({ from: prev, to: opt.label, dir: idx > currentIdx ? "up" : "down" });
-      setTimeout(() => setRoll(null), 150);
+      if (rollTimer.current !== null) clearTimeout(rollTimer.current);
+      rollTimer.current = window.setTimeout(() => setRoll(null), 150);
       onChange(opt.value);
     }
     setOpen(false);

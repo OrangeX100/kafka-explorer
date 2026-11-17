@@ -3,7 +3,6 @@ package wails
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	wailsapp "github.com/wailsapp/wails/v3/pkg/application"
 	"kafkaexplorer/internal/appdir"
+	"kafkaexplorer/internal/fsutil"
 	"kafkaexplorer/internal/application"
 	"kafkaexplorer/internal/buildinfo"
 )
@@ -155,19 +155,12 @@ func (h *SystemHandler) ReadTextFile(ctx context.Context, path string) (string, 
 	if !h.paths.Authorized(path) {
 		return "", fmt.Errorf("文件路径未经过应用的文件选择对话框，已拒绝读取")
 	}
-	info, err := os.Stat(path)
+	// TOCTOU-safe read: one bounded call instead of stat-then-ReadFile
+	// (the file could grow between the size check and the read — 045
+	// round-4 regression review).
+	raw, err := fsutil.ReadFileCapped(path, maxTextFile)
 	if err != nil {
-		return "", fmt.Errorf("读取文件失败：%v", err)
-	}
-	if info.IsDir() {
-		return "", fmt.Errorf("%s 是目录，不是文件", filepath.Base(path))
-	}
-	if info.Size() > maxTextFile {
-		return "", fmt.Errorf("文件过大（%d MB），文本读取上限 8 MB", info.Size()/(1<<20))
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("读取文件失败：%v", err)
+		return "", fmt.Errorf("读取文件失败：%v（文本读取上限 8 MB；目录不可读）", err)
 	}
 	return string(raw), nil
 }

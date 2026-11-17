@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"kafkaexplorer/internal/domain"
+	"kafkaexplorer/internal/fsutil"
 )
 
 // Connection import/export . The wire file
@@ -99,7 +100,10 @@ func (s *ConnectionService) ImportConnections(ctx context.Context, path string) 
 	} else if st.Size() > maxImportFileBytes {
 		return ImportResult{}, fmt.Errorf("导入文件过大（%d MB，上限 64 MB）", st.Size()/(1<<20))
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := fsutil.ReadFileCapped(path, maxImportFileBytes)
+	if err != nil {
+		return ImportResult{}, fmt.Errorf("读取导入文件失败：%v（上限 64 MB）", err)
+	}
 	var file connectionFile
 	if err := json.Unmarshal(raw, &file); err != nil {
 		return ImportResult{}, fmt.Errorf("文件不是合法的 JSON: %w", err)

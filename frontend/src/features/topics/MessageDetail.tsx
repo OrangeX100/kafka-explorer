@@ -31,6 +31,7 @@ export function MessageDetail({
   onClose,
   height,
   onHeightChange,
+  onHeightCommit,
 }: {
   message: Message;
   mode: ViewMode;
@@ -43,6 +44,9 @@ export function MessageDetail({
   // Resizable height (parent persists it in localStorage).
   height?: number;
   onHeightChange?: (h: number) => void;
+  // Fired once at drag end (parent persists to localStorage there —
+  // per-move disk writes were part of the drag jank, 045 round-5).
+  onHeightCommit?: (h: number) => void;
 }) {
   const decoded = decodedOverride
     ? { format: decodedOverride.format, text: decodedOverride.text, error: "" }
@@ -125,6 +129,7 @@ export function MessageDetail({
         }}
         onPointerUp={(e) => {
           dragRef.current = null;
+          onHeightCommit?.(height ?? DETAIL_DEFAULT_HEIGHT);
           try {
             (e.currentTarget as Element).releasePointerCapture(e.pointerId);
           } catch {

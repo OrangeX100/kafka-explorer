@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"kafkaexplorer/internal/domain"
+	"kafkaexplorer/internal/fsutil"
 )
 
 // Full-config backup (connections + registries + connect + ksqlDB + local
@@ -138,17 +139,12 @@ func (s *BackupService) ExportAll(ctx context.Context, pickSave func(ctx context
 // and merges every entry: name conflicts get a numbered suffix instead of
 // failing the batch, invalid entries are skipped and counted.
 func (s *BackupService) ImportAll(ctx context.Context, path string) (BackupCounts, error) {
-	// Size gate BEFORE the read: the renderer names the path (now brokered,
-	// but still user-chosen) and os.ReadFile would otherwise commit the
-	// whole file — a mis-picked multi-GB file OOMs the app (045 round).
-	if st, statErr := os.Stat(path); statErr != nil {
-		return BackupCounts{}, fmt.Errorf("读取备份文件: %w", statErr)
-	} else if st.Size() > maxImportFileBytes {
-		return BackupCounts{}, fmt.Errorf("备份文件过大（%d MB，上限 64 MB），请确认选择的是本应用导出的备份", st.Size()/(1<<20))
-	}
-	raw, err := os.ReadFile(path)
+	// ReadFileCapped closes the stat-then-read TOCTOU (the file could grow
+	// between the size check and the read) AND the unbounded read in one
+	// bounded call (045 round-5 regression review).
+	raw, err := fsutil.ReadFileCapped(path, maxImportFileBytes)
 	if err != nil {
-		return BackupCounts{}, fmt.Errorf("读取备份文件: %w", err)
+		return BackupCounts{}, fmt.Errorf("读取备份文件失败：%v（上限 64 MB，请确认选择的是本应用导出的备份）", err)
 	}
 	var file backupFile
 	if err := json.Unmarshal(raw, &file); err != nil {

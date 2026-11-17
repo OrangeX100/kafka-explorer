@@ -26,6 +26,7 @@ import (
 	"github.com/twmb/franz-go/pkg/sasl/scram"
 
 	"kafkaexplorer/internal/domain"
+	"kafkaexplorer/internal/fsutil"
 )
 
 const clientID = "kafka-explorer"
@@ -235,7 +236,9 @@ func clientOpts(conn domain.Connection, password string, tm *TunnelManager) ([]k
 			MinVersion:         tls.VersionTLS12,
 		}
 		if conn.TLS.CACertPath != "" {
-			pem, err := os.ReadFile(conn.TLS.CACertPath)
+			// 16MB 帽：PEM 证书从不需要更大，无界读是渲染层可命名路径的
+			// OOM 原语（045 round-5 安全回归 P2-1）。
+			pem, err := fsutil.ReadFileCapped(conn.TLS.CACertPath, 16<<20)
 			if err != nil {
 				return nil, fmt.Errorf("%w: read CA cert: %v", domain.ErrInvalid, err)
 			}

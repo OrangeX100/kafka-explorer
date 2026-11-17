@@ -372,10 +372,10 @@ export function MessagesView({
                   <td className="px-2 py-1 font-mono text-ink-300">{m.partition}</td>
                   <td className="px-2 py-1 font-mono text-ink-300">{formatNumber(m.offset)}</td>
                   <td className="px-2 py-1 text-ink-300">{formatTime(m.timestamp)}</td>
-                  <td className="max-w-40 truncate px-2 py-1 font-mono text-accent" title={keyCell}>
+                  <td className="max-w-40 truncate px-2 py-1 font-mono text-accent" title={keyCell.length <= 512 ? keyCell : undefined}>
                     {keyCell || "∅"}
                   </td>
-                  <td className="max-w-96 truncate px-2 py-1 font-mono text-ink-200 selectable" title={valueCell}>
+                  <td className="max-w-96 truncate px-2 py-1 font-mono text-ink-200 selectable" title={valueCell.length <= 512 ? valueCell : undefined}>
                     {valueCell || "∅"}
                   </td>
                   <td className="px-2 py-1 text-ink-300">{formatBytes(m.valueSize)}</td>
@@ -406,6 +406,12 @@ export function MessagesView({
             onClose={() => setSelected(null)}
             height={detailHeight}
             onHeightChange={(h) => {
+              // 内存态实时更新；持久化只在拖动结束时写一次（pointermove
+              // 60-120Hz 同步写 localStorage 曾是拖拽卡顿的一部分——045
+              // round-5 UI 规模镜头）。
+              setDetailHeight(h);
+            }}
+            onHeightCommit={(h) => {
               setDetailHeight(h);
               try {
                 localStorage.setItem("ke.detailHeight", String(h));

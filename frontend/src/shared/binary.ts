@@ -199,10 +199,13 @@ export function displayFor(
   // Readable text — UTF-8/GBK/UTF-16 already applied; latin1-marked text
   // that still looks binary gets the binary note instead.
   if (encoding === "latin1") {
-    const ctrl = [...text].filter((c) => {
-      const c0 = c.charCodeAt(0);
-      return c0 < 0x20 && c0 !== 0x09 && c0 !== 0x0a && c0 !== 0x0d;
-    }).length;
+    // charCodeAt 循环而非 [...text] 展开：1MB 载荷的百万元素数组是
+    // 80MB 堆尖峰（045 round-5 UI 规模镜头）。
+    let ctrl = 0;
+    for (let i = 0; i < text.length; i++) {
+      const c0 = text.charCodeAt(i);
+      if (c0 < 0x20 && c0 !== 0x09 && c0 !== 0x0a && c0 !== 0x0d) ctrl++;
+    }
     if (ctrl > text.length * 0.1) return { text: t("fmt.binary", humanSize(b.length)), style: "binary" };
   }
   return { text, style: "text" };
