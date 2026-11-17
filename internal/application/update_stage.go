@@ -436,7 +436,13 @@ func downloadOneSegment(ctx context.Context, assetURL string, f *os.File, start,
 			if ctx.Err() != nil || stopRequested(cancelled) {
 				return errCancelled
 			}
-			time.Sleep(time.Duration(attempt) * time.Second) // 网络错误退避重试
+			// ctx-aware backoff：取消可即时唤醒（旧 time.Sleep 不可中断，
+			// 用户取消延迟最多 ~6s——045 round-6 P4）
+			select {
+			case <-ctx.Done():
+				return errCancelled
+			case <-time.After(time.Duration(attempt) * time.Second):
+			}
 			continue
 		}
 		// 可重试的服务端状态：429（8 并发更容易触发 CDN 限流）与 5xx 走

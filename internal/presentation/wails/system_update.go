@@ -99,10 +99,16 @@ func (h *SystemHandler) StageUpdate(ctx context.Context, repo string, assetURL s
 			// Record the install candidate for InstallStaged. Recording is
 			// generation-gated: a supersede that landed mid-download must
 			// not re-arm a candidate for a generation that already lost.
+			// The done event's staged path is ALSO generation-gated: a
+			// superseded gen must not emit a phantom "staged" event —
+			// the frontend would render a staged banner whose install
+			// always fails (045 round-6 P3).
 			if sha, shaErr := h.update.SHA256File(staged); shaErr == nil {
 				h.mu.Lock()
 				if h.stageGen == gen {
 					h.stagedPath, h.stagedSHA = staged, sha
+				} else {
+					stagedPath = ""
 				}
 				h.mu.Unlock()
 			} else {

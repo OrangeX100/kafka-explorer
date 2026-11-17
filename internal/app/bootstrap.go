@@ -168,6 +168,10 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 	// shared by message browsing AND schema-aware exports (same binding,
 	// same cache).
 	var schemaMu sync.Mutex
+	// Cap the cache: Confluent ids are immutable but a hostile cluster can
+	// mint unlimited distinct ids — unbounded growth was a DoS vector
+	// (045 round-5). 4096 entries is far beyond any legitimate workload.
+	const schemaCacheCap = 4096
 	schemaCache := map[string]struct {
 		schema, typ string
 	}{}
@@ -192,6 +196,13 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 			return "", "", err
 		}
 		schemaMu.Lock()
+		if len(schemaCache) >= schemaCacheCap {
+			// FIFO 逐出最早写入的 entry（不做 LRU——读多写少场景 FIFO 足够）
+			for k := range schemaCache {
+				delete(schemaCache, k)
+				break
+			}
+		}
 		schemaCache[cacheKey] = struct{ schema, typ string }{schema, typ}
 		schemaMu.Unlock()
 		return schema, typ, nil

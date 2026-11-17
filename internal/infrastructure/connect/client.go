@@ -77,7 +77,12 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	// rune-safe：按字节切可能切断多字节 UTF-8 字符产生乱码尾巴（045 round-5）
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // Test verifies the Connect cluster answers and returns its version.
@@ -226,6 +231,18 @@ func (c *Client) ListPlugins(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
+// errBody reads up to 4KB of an error response body for inclusion in
+// error messages — bare status codes like "restart conn: 409" told the
+// user nothing about the real cause (045 round-5 P3-6).
+func errBody(resp *http.Response) string {
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	msg := strings.TrimSpace(string(data))
+	if msg == "" {
+		return fmt.Sprintf("HTTP %d", resp.StatusCode)
+	}
+	return fmt.Sprintf("HTTP %d: %s", resp.StatusCode, msg)
+}
+
 // RestartConnector restarts the connector AND its tasks (KIP-745
 // includeTasks=true — a plain restart only restarts the connector instance
 // and leaves a failed task failed, which is not what 重启 means to a user).
@@ -243,7 +260,7 @@ func (c *Client) RestartConnector(ctx context.Context, name string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("restart %s: %d", name, resp.StatusCode)
+		return fmt.Errorf("restart %s: %s", name, errBody(resp))
 	}
 	return nil
 }
@@ -261,7 +278,7 @@ func (c *Client) PauseConnector(ctx context.Context, name string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("pause %s: %d", name, resp.StatusCode)
+		return fmt.Errorf("pause %s: %s", name, errBody(resp))
 	}
 	return nil
 }
@@ -279,7 +296,7 @@ func (c *Client) ResumeConnector(ctx context.Context, name string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("resume %s: %d", name, resp.StatusCode)
+		return fmt.Errorf("resume %s: %s", name, errBody(resp))
 	}
 	return nil
 }

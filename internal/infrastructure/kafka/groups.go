@@ -194,6 +194,18 @@ func (c *Client) ResetOffset(ctx context.Context, t domain.OffsetResetTarget) ([
 		if !ok || target.Err != nil {
 			return plan, fmt.Errorf("resolve target offset for %s-%d: %w", t.Topic, p, domain.ErrNotFound)
 		}
+		// timestamp 模式下 ListOffsetsAfterMilli 对无匹配记录的分区返回
+		// Offset=-1（045 round-5 P4：此前会提交 -1 等于删除该分区的
+		// commit）——跳过该分区并在计划中标注，不提交。
+		if t.Mode == "timestamp" && target.Offset < 0 {
+			plan = append(plan, domain.OffsetResetPlan{
+				Partition: p,
+				Committed: -1,
+				NewOffset: -1,
+				LogEnd:    -1,
+			})
+			continue
+		}
 		if t.Mode == "absolute" {
 			target.Offset = *t.Absolute
 		}

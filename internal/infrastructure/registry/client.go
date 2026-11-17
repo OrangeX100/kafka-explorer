@@ -52,7 +52,10 @@ func (c *Client) raw(ctx context.Context, method, path string, body any, out any
 	if body != nil {
 		req.Header.Set("Content-Type", "application/vnd.schemaregistry.v1+json")
 	}
-	if c.user != "" {
+	// user 或 pass 任一非空即发送 Basic auth：只填密码不留用户名的集群
+	// 此前密码永不发送 → 401 与真因无关（045 round-5 P4-4，对照
+	// connect/client.go 的做法）。
+	if c.user != "" || c.pass != "" {
 		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(c.user+":"+c.pass)))
 	}
 	resp, err := c.http.Do(req)
@@ -87,7 +90,13 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	// rune-safe 截断：按字节切可能切断多字节 UTF-8 字符产生乱码尾巴
+	// （045 round-5 P4-3）；rune 解码后按字符数截取。
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // esc escapes a subject name for a URL path segment. Subjects are cluster
