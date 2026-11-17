@@ -432,7 +432,18 @@ func downloadOneSegment(ctx context.Context, assetURL string, f *os.File, start,
 			if ctx.Err() != nil || stopRequested(cancelled) {
 				return errCancelled
 			}
-			time.Sleep(time.Duration(attempt) * time.Second) // backoff (covers 429)
+			time.Sleep(time.Duration(attempt) * time.Second) // 网络错误退避重试
+			continue
+		}
+		// 可重试的服务端状态：429（8 并发更容易触发 CDN 限流）与 5xx 走
+		// 退避后重试同段；其余非 206（200=忽略 Range、404）才是"该路由
+		// 不支持分段"。旧代码把 429 也归到后者，整条路由被白白放弃——
+		// 注释"covers 429"与实现不符（外部评审指出）。
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			attemptCancel()
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
 			continue
 		}
 		if resp.StatusCode != http.StatusPartialContent {
@@ -440,6 +451,15 @@ func downloadOneSegment(ctx context.Context, assetURL string, f *os.File, start,
 			resp.Body.Close()
 			attemptCancel()
 			return errSlowRoute // this route can't serve ranges after all
+		}
+		// 起点与长度校验：服务器返回的不是所请求的字节区间时（镜像错位/
+		// 边界错误），绝不能写进文件——那会覆盖相邻段或撑大预分配文件。
+		// 最终 SHA 虽能拦住，但白白下载一轮还误报失败。
+		if resp.ContentLength > 0 && offset+resp.ContentLength-1 != end {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			attemptCancel()
+			return errSlowRoute // 区间错位：换路由
 		}
 
 		buf := make([]byte, 64*1024)
@@ -689,9 +709,12 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 		case checksumMissing:
 			// legacy release without a sidecar: keep the legacy size-only
 			// downgrade — but the decision is logged, not silent ("say so in
-			// the log" promise from the checksumMissing comment).
-			s.log.Warn("安装包校验文件缺失（legacy 发布），仅按文件大小校验后放行",
-				zap.String("asset", assetURL))
+			// the log" promise from the checksumMissing comment). nil logger
+			// (bare &UpdateService{} in tests) must not panic here.
+			if s.log != nil {
+				s.log.Warn("安装包校验文件缺失（legacy 发布），仅按文件大小校验后放行",
+					zap.String("asset", assetURL))
+			}
 			return part, nil
 		default: // unreachable or malformed: hard fail
 			os.Remove(part)

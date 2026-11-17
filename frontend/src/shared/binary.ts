@@ -193,20 +193,20 @@ export function displayFor(
     if (fmt.kind === "confluent") return { text: t("fmt.confluent", fmt.schemaId ?? 0, size), style: "format" };
     return { text: t(`fmt.${fmt.kind}`, size), style: "format" };
   }
-  const { text, encoding } = smartText(b);
+  const { text } = smartText(b);
   const garbled = (text.match(/\ufffd/g) ?? []).length > text.length * 0.1;
   if (garbled) return { text: t("fmt.binary", humanSize(b.length)), style: "binary" };
-  // Readable text — UTF-8/GBK/UTF-16 already applied; latin1-marked text
-  // that still looks binary gets the binary note instead.
-  if (encoding === "latin1") {
-    // charCodeAt 循环而非 [...text] 展开：1MB 载荷的百万元素数组是
-    // 80MB 堆尖峰（045 round-5 UI 规模镜头）。
-    let ctrl = 0;
-    for (let i = 0; i < text.length; i++) {
-      const c0 = text.charCodeAt(i);
-      if (c0 < 0x20 && c0 !== 0x09 && c0 !== 0x0a && c0 !== 0x0d) ctrl++;
-    }
-    if (ctrl > text.length * 0.1) return { text: t("fmt.binary", humanSize(b.length)), style: "binary" };
+  // 控制字符占比检查对**所有**解码路径生效（不止 latin1）：0x01 填充的
+  // 记录是合法 UTF-8，若只查 latin1 分支，控制字符文本会以"text"漏出
+  // （045 round-5 测试暴露）。charCodeAt 循环而非 [...text] 展开：1MB
+  // 载荷的百万元素数组是 80MB 堆尖峰。
+  let ctrl = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c0 = text.charCodeAt(i);
+    if (c0 < 0x20 && c0 !== 0x09 && c0 !== 0x0a && c0 !== 0x0d) ctrl++;
+  }
+  if (text.length > 0 && ctrl > text.length * 0.1) {
+    return { text: t("fmt.binary", humanSize(b.length)), style: "binary" };
   }
   return { text, style: "text" };
 }

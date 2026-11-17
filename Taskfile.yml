@@ -22,9 +22,9 @@ tasks:
       - cd frontend && npm run audit:all
 
   build:frontend:
-    desc: Type-check and build the frontend into frontend/dist
+    desc: Type-check, unit-test and build the frontend into frontend/dist
     cmds:
-      - cd frontend && npm ci --no-audit --no-fund && npm run build
+      - cd frontend && npm ci --no-audit --no-fund && npm run test && npm run build
 
   build:
     desc: Build the desktop binary (frontend/dist is refreshed first — a stale
