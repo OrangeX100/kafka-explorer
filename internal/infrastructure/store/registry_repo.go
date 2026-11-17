@@ -56,7 +56,7 @@ func (w *DBWrapper) SaveRegistry(ctx context.Context, r domain.SchemaRegistry) (
 		VALUES (?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name, url=excluded.url,
-			username=COALESCE(excluded.username, schema_registries.username),
+			username=excluded.username, -- 表单永远携带；清空=改回免认证（045 round-5）
 			secret_ref=COALESCE(excluded.secret_ref, schema_registries.secret_ref),
 			-- binding clears when the user empties it, unlike the COALESCEd
 			-- secret fields (clearing those is not a form action)
@@ -121,7 +121,7 @@ func (w *DBWrapper) SaveConnectCluster(ctx context.Context, c domain.ConnectClus
 	_, err := w.sqlDB.ExecContext(ctx, `
 		INSERT INTO connect_clusters (id, name, url, username, secret_ref) VALUES (?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET name=excluded.name, url=excluded.url,
-			username=COALESCE(excluded.username, connect_clusters.username),
+			username=excluded.username, -- 表单永远携带；清空=改回免认证（045 round-5）
 			secret_ref=COALESCE(excluded.secret_ref, connect_clusters.secret_ref)`,
 		c.ID, c.Name, c.URL, nullIfEmpty(c.Username), nullIfEmpty(c.SecretRef))
 	return c, err

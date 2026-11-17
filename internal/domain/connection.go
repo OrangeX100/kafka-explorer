@@ -105,11 +105,16 @@ func (c Connection) Validate() error {
 	if strings.TrimSpace(c.Name) == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalid)
 	}
+	// Bootstrap must carry at least one non-empty address segment: the old
+	// skip-empty-continue let "", "," and ", ," save fine and the failure
+	// only surfaced in English at dial time (045 round-5 P3-1).
+	hasAddr := false
 	for _, addr := range strings.Split(c.Bootstrap, ",") {
 		addr = strings.TrimSpace(addr)
 		if addr == "" {
 			continue
 		}
+		hasAddr = true
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return fmt.Errorf("%w: bootstrap entry %q is not host:port", ErrInvalid, addr)
@@ -120,6 +125,17 @@ func (c Connection) Validate() error {
 		if p, err := strconv.Atoi(port); err != nil || p <= 0 || p > 65535 {
 			return fmt.Errorf("%w: bootstrap entry %q has invalid port", ErrInvalid, addr)
 		}
+	}
+	if !hasAddr {
+		return fmt.Errorf("%w: bootstrap 需要至少一个 broker 地址（host:port，多个用英文逗号分隔）", ErrInvalid)
+	}
+	// mTLS 证书/私钥必须成对出现：client.go 只在两者都非空时加载，单边
+	// 填写会被静默丢弃，连接以"无客户端证书"发起，真因不可见（045 round-5）。
+	if c.TLS.Enabled && c.TLS.ClientCertPath != "" && c.TLS.ClientKeyPath == "" {
+		return fmt.Errorf("%w: 已填写客户端证书但缺少私钥路径（两者必须成对提供）", ErrInvalid)
+	}
+	if c.TLS.Enabled && c.TLS.ClientCertPath == "" && c.TLS.ClientKeyPath != "" {
+		return fmt.Errorf("%w: 已填写私钥但缺少客户端证书路径（两者必须成对提供）", ErrInvalid)
 	}
 	if c.NeedsPassword() && strings.TrimSpace(c.SecretRef) == "" {
 		return fmt.Errorf("%w: password required for mechanism %s", ErrInvalid, c.Security)

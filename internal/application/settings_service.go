@@ -150,7 +150,7 @@ func (s *SettingsService) Save(ctx context.Context, in Settings) (Settings, erro
 	if in.MaxScan < 1000 || in.MaxScan > 1_000_000 {
 		in.MaxScan = 100_000
 	}
-	// UpdateRepo: either empty (update check disabled) or a GitHub
+	// UpdateRepo: empty = fall back to the built-in release repo (关闭更新检查请用 AutoCheckUpdate=false)——Get 会回填 buildinfo.UpdateRepo,注释此前错误宣称 empty=禁用检查（045 round-5）
 	// "owner/repo" pair — anything else would produce a malformed API URL.
 	if in.UpdateRepo != "" && !updateRepoRe.MatchString(in.UpdateRepo) {
 		in.UpdateRepo = ""

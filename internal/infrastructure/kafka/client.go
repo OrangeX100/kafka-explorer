@@ -298,6 +298,19 @@ func mapErr(err error) error {
 			return fmt.Errorf("%w: %s", domain.ErrNotFound, ke.Message)
 		case kerr.TopicAuthorizationFailed.Code, kerr.GroupAuthorizationFailed.Code, kerr.ClusterAuthorizationFailed.Code:
 			return fmt.Errorf("%w: %s", domain.ErrUnauthorized, ke.Message)
+		// 常见用户可触发错误的中文化（045 round-5：这些此前裸英文直达 UI）
+		case kerr.InvalidTopicException.Code:
+			return fmt.Errorf("%w: 非法的主题名（不能为空、\".\" 或 \"..\"）：%s", domain.ErrInvalid, ke.Message)
+		case kerr.InvalidPartitions.Code:
+			return fmt.Errorf("%w: 分区数不合法：%s", domain.ErrInvalid, ke.Message)
+		case kerr.InvalidReplicationFactor.Code:
+			return fmt.Errorf("%w: 副本因子超过集群 broker 数量或不合法：%s", domain.ErrInvalid, ke.Message)
+		case kerr.TopicAlreadyExists.Code:
+			return fmt.Errorf("%w: %s", domain.ErrConflict, ke.Message)
+		case kerr.GroupIDNotFound.Code:
+			return fmt.Errorf("%w: 消费组不存在：%s", domain.ErrNotFound, ke.Message)
+		case kerr.NonEmptyGroup.Code:
+			return fmt.Errorf("%w: 消费组仍有活跃成员，无法执行该操作：%s", domain.ErrConflict, ke.Message)
 		}
 	}
 	var de *net.DNSError

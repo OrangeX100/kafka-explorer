@@ -33,7 +33,7 @@ func (w *DBWrapper) SaveKsqlDbServer(ctx context.Context, s domain.KsqlDbServer)
 	_, err := w.sqlDB.ExecContext(ctx, `
 		INSERT INTO ksql_db_servers (id, name, url, username, secret_ref) VALUES (?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET name=excluded.name, url=excluded.url,
-			username=COALESCE(excluded.username, ksql_db_servers.username),
+			username=excluded.username, -- 表单永远携带；清空=改回免认证（045 round-5）
 			secret_ref=COALESCE(excluded.secret_ref, ksql_db_servers.secret_ref)`,
 		s.ID, s.Name, s.URL, nullIfEmpty(s.Username), nullIfEmpty(s.SecretRef))
 	return s, err

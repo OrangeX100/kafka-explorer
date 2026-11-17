@@ -175,7 +175,15 @@ func (s *ConnectionService) CloneConnection(ctx context.Context, id, newName str
 	if clone.NeedsPassword() {
 		clone.SecretRef = "conn-" + clone.ID
 		if src.SecretRef != "" {
-			if pw, err := s.secrets.Get(secretService, src.SecretRef); err == nil && pw != "" {
+			// Keyring read failure is an ERROR, not a silent skip: swallowing
+			// it produced a clone whose password pointer exists but whose
+			// secret doesn't — SASL auth failure at connect time with no
+			// hint of the real cause (045 round-5, aligned with storedPassword).
+			pw, err := s.secrets.Get(secretService, src.SecretRef)
+			if err != nil {
+				return domain.Connection{}, fmt.Errorf("读取源连接密码失败（克隆未创建）：%v（可在系统凭据管理器手动核查）", err)
+			}
+			if pw != "" {
 				if err := s.secrets.Set(secretService, clone.SecretRef, pw); err != nil {
 					return domain.Connection{}, fmt.Errorf("copy password: %w", err)
 				}
@@ -189,7 +197,11 @@ func (s *ConnectionService) CloneConnection(ctx context.Context, id, newName str
 	if clone.Tunnel.Enabled {
 		clone.Tunnel.SecretRef = "conn-tunnel-" + clone.ID
 		if src.Tunnel.SecretRef != "" {
-			if sec, err := s.secrets.Get(secretService, src.Tunnel.SecretRef); err == nil && sec != "" {
+			sec, err := s.secrets.Get(secretService, src.Tunnel.SecretRef)
+			if err != nil {
+				return domain.Connection{}, fmt.Errorf("读取源连接隧道密钥失败（克隆未创建）：%v", err)
+			}
+			if sec != "" {
 				if err := s.secrets.Set(secretService, clone.Tunnel.SecretRef, sec); err != nil {
 					return domain.Connection{}, fmt.Errorf("copy tunnel password: %w", err)
 				}
