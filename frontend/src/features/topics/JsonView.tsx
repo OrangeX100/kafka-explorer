@@ -49,15 +49,15 @@ function Node({ label, value, depth }: { label: string; value: unknown; depth: n
     );
   }
 
-  const entries: [string, unknown][] = Array.isArray(value)
-    ? (value as unknown[]).map((v, i) => [String(i), v])
-    : Object.entries(value as Record<string, unknown>);
   const isArray = Array.isArray(value);
   const openBrace = isArray ? "[" : "{";
   const closeBrace = isArray ? "]" : "}";
+  const size = isArray
+    ? (value as unknown[]).length
+    : Object.keys(value as Record<string, unknown>).length;
 
   // Empty containers render inline — nothing to fold.
-  if (entries.length === 0) {
+  if (size === 0) {
     return (
       <div>
         {keyEl}
@@ -80,20 +80,30 @@ function Node({ label, value, depth }: { label: string; value: unknown; depth: n
           openBrace
         ) : (
           <span className="text-ink-400">
-            {openBrace} … {entries.length} {t(isArray ? "json.items" : "json.keys")} {closeBrace}
+            {openBrace} … {size} {t(isArray ? "json.items" : "json.keys")} {closeBrace}
           </span>
         )}
       </button>
-      {open && (
-        <>
-          <div className="pl-4">
-            {entries.map(([k, v]) => (
-              <Node key={k} label={isArray ? "" : k} value={v} depth={depth + 1} />
-            ))}
-          </div>
-          <div>{closeBrace}{depth > 0 ? "," : ""}</div>
-        </>
-      )}
+      {open && <Entries value={value} isArray={isArray} depth={depth + 1} />}
     </div>
+  );
+}
+
+// Entries is its own component so a COLLAPSED container never builds the
+// child entries array (a folded 100k-element array used to allocate its
+// full [k,v] tuple list on every render — 045 round-5 P2-7).
+function Entries({ value, isArray, depth }: { value: unknown; isArray: boolean; depth: number }) {
+  const entries: [string, unknown][] = isArray
+    ? (value as unknown[]).map((v, i) => [String(i), v])
+    : Object.entries(value as Record<string, unknown>);
+  return (
+    <>
+      <div className="pl-4">
+        {entries.map(([k, v]) => (
+          <Node key={k} label={isArray ? "" : k} value={v} depth={depth} />
+        ))}
+      </div>
+      <div>{isArray ? "]" : "}"}{depth > 0 ? "," : ""}</div>
+    </>
   );
 }

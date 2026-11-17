@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -235,6 +236,263 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 	return "", fmt.Errorf("%w: 所有下载通道均失败，请检查网络后重试，或到发布页手动下载", domain.ErrUnavailable)
 }
 
+// probeRangeSupport asks the route for HTTP Range support with a 1-byte
+// probe (10s bound). Returns the full Content-Length when the answer is a
+// 206 Partial Content carrying a parseable Content-Range. 200 means the
+// server ignored the Range header — caller falls back to single-stream.
+func probeRangeSupport(ctx context.Context, assetURL string) (int64, bool) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
+	if err != nil {
+		return 0, false
+	}
+	req.Header.Set("User-Agent", "kafka-explorer-updater")
+	req.Header.Set("Range", "bytes=0-0")
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return 0, false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != http.StatusPartialContent {
+		return 0, false // 200: server ignored the Range header
+	}
+	// Content-Range: bytes 0-0/TOTAL
+	cr := resp.Header.Get("Content-Range")
+	i := strings.LastIndexByte(cr, '/')
+	if i < 0 || i == len(cr)-1 {
+		return 0, false
+	}
+	total, err := strconv.ParseInt(cr[i+1:], 10, 64)
+	if err != nil || total <= 0 {
+		return 0, false
+	}
+	return total, true
+}
+
+// Segment download tuning: 8 connections, at least 1MB per segment (fewer
+// segments for small files). 429 handling: segment attempts back off with a
+// short sleep before the retry, and the route loop already falls through to
+// the next route when this one exhausts its attempts.
+const (
+	segConnections = 8
+	segMinSize     = 1 << 20
+	segAttempts    = 3
+)
+
+// downloadSegments fetches the asset as segN parallel ranged segments
+// written into the preallocated file at their offsets (WriteAt is safe for
+// concurrent non-overlapping ranges). Each segment retries up to
+// segAttempts times from its own progress offset; a segment watchdog
+// cancels an attempt that stops delivering for stallTimeout. The caller's
+// size + SHA gates still run on the merged file.
+func (s *UpdateService) downloadSegments(routeCtx context.Context, assetURL, part string, total int64, routeLabel string, progress func(Progress), cancelled <-chan struct{}) error {
+	segN := total / segMinSize
+	if segN > segConnections {
+		segN = segConnections
+	}
+	if segN < 1 {
+		segN = 1
+	}
+	partFile, err := os.OpenFile(part, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("创建临时文件失败: %w", err)
+	}
+	defer partFile.Close()
+	if err := partFile.Truncate(total); err != nil {
+		return fmt.Errorf("预分配临时文件失败: %w", err)
+	}
+
+	var got atomic.Int64
+	segCtx, segCancel := context.WithCancel(routeCtx)
+	defer segCancel()
+
+	done := make(chan error, segN)
+	segLen := (total + segN - 1) / segN
+	for i := int64(0); i < segN; i++ {
+		start := i * segLen
+		end := start + segLen - 1
+		if end > total-1 {
+			end = total - 1
+		}
+		go func() {
+			done <- downloadOneSegment(segCtx, assetURL, partFile, start, end, &got, cancelled)
+		}()
+	}
+	// progress ticker: aggregate the segments' shared counter
+	go func() {
+		ticker := time.NewTicker(150 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-segCtx.Done():
+				return
+			case <-cancelled:
+				return
+			case <-ticker.C:
+				progress(Progress{Bytes: got.Load(), Total: total, Route: routeLabel})
+			}
+		}
+	}()
+	// stall watchdog: no aggregate progress for stallTimeout while
+	// incomplete → cancel everything, the route fails (next route tries)
+	go func() {
+		last, lastT := int64(0), time.Now()
+		t := time.NewTicker(time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-segCtx.Done():
+				return
+			case <-cancelled:
+				return
+			case <-t.C:
+				g := got.Load()
+				if g != last {
+					last = g
+					lastT = time.Now()
+					continue
+				}
+				if g < total && time.Since(lastT) > stallTimeout {
+					segCancel()
+					return
+				}
+			}
+		}
+	}()
+
+	var firstErr error
+	for i := int64(0); i < segN; i++ {
+		if err := <-done; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr != nil {
+		if firstErr == errCancelled || stopRequested(cancelled) {
+			return errCancelled
+		}
+		if errors.Is(firstErr, errSlowRoute) || errors.Is(firstErr, context.Canceled) {
+			return errSlowRoute
+		}
+		return fmt.Errorf("分段下载失败: %w", firstErr)
+	}
+	return nil
+}
+
+// downloadOneSegment streams one Range window into partFile at absolute
+// offsets, retrying from its own progress up to segAttempts times. A
+// per-attempt watchdog cancels an attempt that stops delivering for
+// stallTimeout; when the attempts are exhausted the segment reports
+// errSlowRoute (the route loop falls through to the next route).
+func downloadOneSegment(ctx context.Context, assetURL string, f *os.File, start, end int64, got *atomic.Int64, cancelled <-chan struct{}) error {
+	offset := start
+	for attempt := 1; attempt <= segAttempts; attempt++ {
+		if offset > end {
+			return nil // segment complete
+		}
+		attemptCtx, attemptCancel := context.WithCancel(ctx)
+		// per-attempt stall watchdog: no segment-local progress for
+		// stallTimeout → cancel this attempt (retried from offset)
+		var aGot atomic.Int64
+		go func() {
+			t := time.NewTicker(time.Second)
+			defer t.Stop()
+			last, lastT := int64(0), time.Now()
+			for {
+				select {
+				case <-attemptCtx.Done():
+					return
+				case <-cancelled:
+					return
+				case <-t.C:
+					g := aGot.Load()
+					if g != last {
+						last, lastT = g, time.Now()
+						continue
+					}
+					if time.Since(lastT) > stallTimeout {
+						attemptCancel()
+						return
+					}
+				}
+			}
+		}()
+
+		req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, assetURL, nil)
+		if err != nil {
+			attemptCancel()
+			return err
+		}
+		req.Header.Set("User-Agent", "kafka-explorer-updater")
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, end))
+		resp, err := (&http.Client{}).Do(req)
+		if err != nil {
+			attemptCancel()
+			if ctx.Err() != nil || stopRequested(cancelled) {
+				return errCancelled
+			}
+			time.Sleep(time.Duration(attempt) * time.Second) // backoff (covers 429)
+			continue
+		}
+		if resp.StatusCode != http.StatusPartialContent {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			attemptCancel()
+			return errSlowRoute // this route can't serve ranges after all
+		}
+
+		buf := make([]byte, 64*1024)
+		var segErr error
+	readLoop:
+		for segErr == nil {
+			select {
+			case <-cancelled:
+				segErr = errCancelled
+			case <-attemptCtx.Done():
+				segErr = errSlowRoute // stalled: retried from offset below
+			default:
+			}
+			if segErr != nil {
+				break readLoop
+			}
+			n, rerr := resp.Body.Read(buf)
+			if n > 0 {
+				if _, werr := f.WriteAt(buf[:n], offset); werr != nil {
+					segErr = werr
+				} else {
+					offset += int64(n)
+					got.Add(int64(n))
+				}
+			}
+			if segErr == nil && rerr == io.EOF {
+				resp.Body.Close()
+				attemptCancel()
+				return nil // segment complete
+			}
+			if segErr == nil && rerr != nil {
+				segErr = rerr
+			}
+		}
+		resp.Body.Close()
+		attemptCancel()
+		if segErr == errCancelled || ctx.Err() != nil || stopRequested(cancelled) {
+			return errCancelled
+		}
+		if segErr == errSlowRoute {
+			continue // stalled attempt: retry from offset (attempts left)
+		}
+		if segErr != nil {
+			return segErr // write error etc. — real failure
+		}
+		if offset > end {
+			return nil
+		}
+		// EOF before end without error: truncated — retry from offset
+	}
+	return errSlowRoute
+}
+
 // slowStart is how long a route gets to prove itself: below this rate
 // after slowStartWindow the route is abandoned for the next one.
 var (
@@ -262,111 +520,141 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 		routeLabel = assetURL[:i] // the mirror prefix, e.g. https://ghfast.top/
 	}
 
-	var got atomic.Int64
-	lastNano := atomic.Int64{}
-	started := time.Now()
-
-	watchdogTick := func() { progress(Progress{Bytes: got.Load(), Total: assetSize, Route: routeLabel}) }
-	ticker := time.NewTicker(150 * time.Millisecond)
-	defer ticker.Stop()
-	watchdogDone := make(chan struct{})
-	go func() {
-		defer close(watchdogDone)
-		for {
-			select {
-			case <-routeCtx.Done():
-				return
-			case <-cancelled:
-				return
-			case <-ticker.C:
-				watchdogTick()
-				g := got.Load()
-				sinceStart := time.Since(started)
-				switch {
-				case g == 0 && sinceStart > slowStartWindow:
-					routeCancel() // never produced a byte: dead route
-					return
-				case g > 0 && g < slowStartBytes && sinceStart > slowStartWindow:
-					routeCancel() // crawling: under 64KB in the whole window
-					return
-				case g > 0 && g >= slowStartBytes && time.Since(time.Unix(0, lastNano.Load())) > stallTimeout:
-					routeCancel() // bytes stopped moving mid-download
-					return
-				}
-			}
+	// Multi-connection segmented download (045 round-5 F1): probe Range
+	// support first; a supported route downloads as 8 parallel ranged
+	// segments (server-side aria2 measured 50MB/45s vs single-stream
+	// ~30KB/s on the same link). Unsupported Range falls back to the
+	// legacy single-stream path below, unchanged.
+	segTotal, rangeOK := probeRangeSupport(routeCtx, assetURL)
+	if rangeOK {
+		if assetSize <= 0 {
+			assetSize = segTotal
 		}
-	}()
-
-	req, err := http.NewRequestWithContext(routeCtx, http.MethodGet, assetURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", "kafka-explorer-updater")
-	resp, err := (&http.Client{}).Do(req)
-	if err != nil {
-		if ctx.Err() != nil || stopRequested(cancelled) {
-			return "", errCancelled // cancellation is NEVER a nil-error success
+		if segTotal != assetSize {
+			os.Remove(part)
+			return "", fmt.Errorf("下载通道返回的大小与发布信息不一致（%d ≠ %d）", segTotal, assetSize)
 		}
-		return "", errSlowRoute // this route is unreachable: try the next
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("下载通道返回异常状态 %d", resp.StatusCode)
-	}
-	if assetSize <= 0 && resp.ContentLength > 0 {
-		assetSize = resp.ContentLength
-	}
-
-	partFile, err := os.Create(part)
-	if err != nil {
-		return "", fmt.Errorf("创建临时文件失败: %w", err)
-	}
-	done := make(chan error, 1)
-
-	go func() {
-		buf := make([]byte, 64*1024)
-		for {
-			select {
-			case <-cancelled:
-				done <- errCancelled
-				return
-			case <-routeCtx.Done():
-				done <- routeCtx.Err()
-				return
+		if err := s.downloadSegments(routeCtx, assetURL, part, assetSize, routeLabel, progress, cancelled); err != nil {
+			os.Remove(part)
+			switch {
+			case err == errCancelled || ctx.Err() != nil || stopRequested(cancelled):
+				return "", errCancelled
+			case errors.Is(err, errSlowRoute):
+				return "", errSlowRoute
 			default:
+				return "", fmt.Errorf("%w: 下载中断，请检查网络后重试", domain.ErrUnavailable)
 			}
-			n, rerr := resp.Body.Read(buf)
-			if n > 0 {
-				if _, werr := partFile.Write(buf[:n]); werr != nil {
-					done <- werr
+		}
+		// fall through to the shared gates below (single-stream tail)
+	} else {
+
+		var got atomic.Int64
+		lastNano := atomic.Int64{}
+		started := time.Now()
+
+		watchdogTick := func() { progress(Progress{Bytes: got.Load(), Total: assetSize, Route: routeLabel}) }
+		ticker := time.NewTicker(150 * time.Millisecond)
+		defer ticker.Stop()
+		watchdogDone := make(chan struct{})
+		go func() {
+			defer close(watchdogDone)
+			for {
+				select {
+				case <-routeCtx.Done():
+					return
+				case <-cancelled:
+					return
+				case <-ticker.C:
+					watchdogTick()
+					g := got.Load()
+					sinceStart := time.Since(started)
+					switch {
+					case g == 0 && sinceStart > slowStartWindow:
+						routeCancel() // never produced a byte: dead route
+						return
+					case g > 0 && g < slowStartBytes && sinceStart > slowStartWindow:
+						routeCancel() // crawling: under 64KB in the whole window
+						return
+					case g > 0 && g >= slowStartBytes && time.Since(time.Unix(0, lastNano.Load())) > stallTimeout:
+						routeCancel() // bytes stopped moving mid-download
+						return
+					}
+				}
+			}
+		}()
+
+		req, err := http.NewRequestWithContext(routeCtx, http.MethodGet, assetURL, nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("User-Agent", "kafka-explorer-updater")
+		resp, err := (&http.Client{}).Do(req)
+		if err != nil {
+			if ctx.Err() != nil || stopRequested(cancelled) {
+				return "", errCancelled // cancellation is NEVER a nil-error success
+			}
+			return "", errSlowRoute // this route is unreachable: try the next
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return "", fmt.Errorf("下载通道返回异常状态 %d", resp.StatusCode)
+		}
+		if assetSize <= 0 && resp.ContentLength > 0 {
+			assetSize = resp.ContentLength
+		}
+
+		partFile, err := os.Create(part)
+		if err != nil {
+			return "", fmt.Errorf("创建临时文件失败: %w", err)
+		}
+		done := make(chan error, 1)
+
+		go func() {
+			buf := make([]byte, 64*1024)
+			for {
+				select {
+				case <-cancelled:
+					done <- errCancelled
+					return
+				case <-routeCtx.Done():
+					done <- routeCtx.Err()
+					return
+				default:
+				}
+				n, rerr := resp.Body.Read(buf)
+				if n > 0 {
+					if _, werr := partFile.Write(buf[:n]); werr != nil {
+						done <- werr
+						return
+					}
+					got.Add(int64(n))
+					lastNano.Store(time.Now().UnixNano())
+				}
+				if rerr == io.EOF {
+					done <- nil
 					return
 				}
-				got.Add(int64(n))
-				lastNano.Store(time.Now().UnixNano())
+				if rerr != nil {
+					done <- rerr
+					return
+				}
 			}
-			if rerr == io.EOF {
-				done <- nil
-				return
-			}
-			if rerr != nil {
-				done <- rerr
-				return
-			}
-		}
-	}()
+		}()
 
-	werr := <-done
-	partFile.Close()
-	if werr != nil {
-		os.Remove(part)
-		if werr == errCancelled || ctx.Err() != nil || stopRequested(cancelled) {
-			return "", errCancelled // stop button: the CALLER maps this to a silent no-op
+		werr := <-done
+		partFile.Close()
+		if werr != nil {
+			os.Remove(part)
+			if werr == errCancelled || ctx.Err() != nil || stopRequested(cancelled) {
+				return "", errCancelled // stop button: the CALLER maps this to a silent no-op
+			}
+			if werr == errSlowRoute || errors.Is(werr, context.Canceled) {
+				return "", errSlowRoute // watchdog/parent cancelled: next route
+			}
+			return "", fmt.Errorf("%w: 下载中断，请检查网络后重试", domain.ErrUnavailable)
 		}
-		if werr == errSlowRoute || errors.Is(werr, context.Canceled) {
-			return "", errSlowRoute // watchdog/parent cancelled: next route
-		}
-		return "", fmt.Errorf("%w: 下载中断，请检查网络后重试", domain.ErrUnavailable)
-	}
+	} // legacy single-stream path (no Range support)
+
 	// Cancellation race: the body hit EOF at the same moment the user pressed
 	// stop. The staged file is discarded all the same — a "download finished"
 	// racing a "stop" resolves to stopped.

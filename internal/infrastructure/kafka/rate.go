@@ -144,8 +144,11 @@ func (c *Client) TopicRateHistogram(ctx context.Context, topic string, win domai
 		return
 	}
 
-	// Timestamp mode (unchanged historical behavior): scan from the log
-	// start, records older than win.FromMs clamp to bucket 0.
+	// Timestamp mode: TRUE WINDOW — each partition starts at its first
+	// record at/after FromMs (ListOffsetsAfterMilli), so "1h" reads ~1h of
+	// data instead of crawling the whole log and clamping everything into
+	// bucket 0 (045 round-5 F2). Partitions with no records after FromMs
+	// contribute nothing. Span is still [FromMs, now] for bucket geometry.
 	span := now - win.FromMs
 	if span <= 0 {
 		span = 1
@@ -159,26 +162,31 @@ func (c *Client) TopicRateHistogram(ctx context.Context, topic string, win domai
 		buckets[i].StartMs = win.FromMs + (span*int64(i))/int64(bucketCount)
 	}
 
+	// ONE ListOffsetsAfterMilli resolves every partition's window start.
+	listed, lerr := c.adm.ListOffsetsAfterMilli(ctx, win.FromMs, topic)
+	if lerr != nil {
+		outErr = fmt.Errorf("解析时间窗口起点失败: %w", lerr)
+		return
+	}
+
 	var scanned int64
 	for _, pd := range td.Partitions {
 		if partitionID >= 0 && pd.Partition != partitionID {
 			continue // user filtered to a single partition
 		}
 		partition := pd.Partition
-		// Same anchor-advance contract as the offset mode: the first page
-		// starts at the log start (no explicit anchor), every following page
-		// continues from the previous page's NextAnchor — without this the
-		// scan re-read page one until the record cap.
-		var anchor *int64
+		lo, lok := listed.Lookup(topic, partition)
+		if !lok || lo.Err != nil || lo.Offset < 0 {
+			continue // no records at/after FromMs on this partition
+		}
+		anchor := lo.Offset
 		for {
 			req := domain.BrowseRequest{
-				Topic:     topic,
-				Partition: &partition,
-				Direction: "forward",
-				Limit:     pageSize,
-			}
-			if anchor != nil {
-				req.StartOffset = anchor
+				Topic:       topic,
+				Partition:   &partition,
+				Direction:   "forward",
+				Limit:       pageSize,
+				StartOffset: &anchor,
 			}
 			page, err := c.BrowsePage(ctx, req)
 			if err != nil {
@@ -205,7 +213,7 @@ func (c *Client) TopicRateHistogram(ctx context.Context, topic string, win domai
 				outBuckets, outScanned = buckets, scanned
 				return
 			}
-			anchor = page.NextAnchor
+			anchor = *page.NextAnchor
 		}
 	}
 	outBuckets, outScanned = buckets, scanned

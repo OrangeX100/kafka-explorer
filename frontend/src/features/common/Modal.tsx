@@ -14,16 +14,20 @@ interface ModalProps {
   danger?: boolean;
   width?: number;
   onClose: () => void; // fired after the exit animation finished
+  // lockClose: ignore every dismissal (✕/Escape/backdrop) while true —
+  // used by dialogs with a long-running operation whose backend call has
+  // no cancellation (e.g. export): closing would orphan the walk (045 round-5).
+  lockClose?: boolean;
   children: (close: () => void) => ReactNode;
 }
 
-export function Modal({ title, danger, width = 440, onClose, children }: ModalProps) {
+export function Modal({ title, danger, width = 440, onClose, lockClose, children }: ModalProps) {
   const [phase, setPhase] = useState<"open" | "closing">("open");
   const panelRef = useRef<HTMLDivElement>(null);
   const closedRef = useRef(false);
 
   const close = () => {
-    if (closedRef.current) return;
+    if (closedRef.current || lockClose) return;
     closedRef.current = true;
     setPhase("closing");
   };
@@ -33,6 +37,7 @@ export function Modal({ title, danger, width = 440, onClose, children }: ModalPr
       if (phase !== "open") return;
       if (e.key === "Escape") {
         e.stopPropagation();
+        if (lockClose) return;
         close();
         return;
       }
@@ -79,6 +84,7 @@ export function Modal({ title, danger, width = 440, onClose, children }: ModalPr
         }
         onClick={close}
         aria-hidden="true"
+        data-locked={lockClose ? "true" : undefined}
       />
       <div
         ref={panelRef}

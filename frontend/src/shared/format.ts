@@ -40,15 +40,26 @@ export function prettyJson(text: string): string {
   }
 }
 
+// Hex view cap: 10MB of payload once produced a 650k-line <pre> that hung
+// layout for 10s+ (045 round-5). Beyond the cap show the first slice with
+// an explicit truncation marker — the raw bytes are still copyable via the
+// base64 actions.
+const HEX_MAX_BYTES = 1 << 20;
+
 export function toHex(b64?: string): string {
   if (!b64) return "";
   const bytes = decodeBase64(b64);
+  const capped = bytes.length > HEX_MAX_BYTES;
+  const view = capped ? bytes.slice(0, HEX_MAX_BYTES) : bytes;
   const lines: string[] = [];
-  for (let i = 0; i < bytes.length; i += 16) {
-    const slice = bytes.slice(i, i + 16);
+  for (let i = 0; i < view.length; i += 16) {
+    const slice = view.slice(i, i + 16);
     const hex = Array.from(slice, (b) => b.toString(16).padStart(2, "0")).join(" ");
     const ascii = Array.from(slice, (b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : ".")).join("");
     lines.push(`${i.toString(16).padStart(8, "0")}  ${hex.padEnd(47)}  ${ascii}`);
+  }
+  if (capped) {
+    lines.push(`…已截断：共 ${bytes.length} 字节，仅显示前 ${HEX_MAX_BYTES} 字节的十六进制视图`);
   }
   return lines.join("\n");
 }

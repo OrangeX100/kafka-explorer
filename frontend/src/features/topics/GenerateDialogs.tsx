@@ -149,7 +149,7 @@ export function ExportDialog({
   };
 
   return (
-    <Modal title={`${t("msg.export")} — ${topic}`} width={460} onClose={onClose}>
+    <Modal title={`${t("msg.export")} — ${topic}`} width={460} onClose={onClose} lockClose={busy}>
       {(close) => {
         closeRef.current = close;
         return (
@@ -278,7 +278,7 @@ export function ImportDialog({
   };
 
   return (
-    <Modal title={`${t("msg.import")} — ${topic}`} width={560} onClose={onClose}>
+    <Modal title={`${t("msg.import")} — ${topic}`} width={560} onClose={onClose} lockClose={busy}>
       {(close) => {
         closeRef.current = close;
         return (
