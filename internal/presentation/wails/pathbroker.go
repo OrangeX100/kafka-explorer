@@ -35,7 +35,10 @@ func newPathBroker() *pathBroker {
 	return &pathBroker{issued: map[string]time.Time{}, maxLife: pathBrokerTTL}
 }
 
-// Issue records a path returned by a native pick dialog.
+// Issue records a path returned by a native pick dialog. Re-issuing an
+// already-tracked path refreshes its timestamp AND moves it to the back of
+// the eviction order — the old code left a stale order slot that could
+// evict the freshly refreshed entry (045 round-4 regression review).
 func (b *pathBroker) Issue(path string) {
 	if path == "" {
 		return
@@ -44,21 +47,33 @@ func (b *pathBroker) Issue(path string) {
 	now := time.Now()
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	// GC expired entries.
-	for k, ts := range b.issued {
-		if now.Sub(ts) > b.maxLife {
+	// GC expired entries; keep order slots consistent with the map.
+	kept := b.order[:0]
+	for _, k := range b.order {
+		ts, ok := b.issued[k]
+		if ok && now.Sub(ts) <= b.maxLife {
+			kept = append(kept, k)
+			continue
+		}
+		if ok {
 			delete(b.issued, k)
 		}
 	}
-	if _, ok := b.issued[key]; !ok && len(b.order) >= pathBrokerMax {
-		// drop the oldest
+	b.order = kept
+	// Drop any duplicate slot for this key, then move it to the back.
+	fresh := b.order[:0]
+	for _, k := range b.order {
+		if k != key {
+			fresh = append(fresh, k)
+		}
+	}
+	b.order = fresh
+	if len(b.order) >= pathBrokerMax {
 		oldest := b.order[0]
 		b.order = b.order[1:]
 		delete(b.issued, oldest)
 	}
-	if _, ok := b.issued[key]; !ok {
-		b.order = append(b.order, key)
-	}
+	b.order = append(b.order, key)
 	b.issued[key] = now
 }
 

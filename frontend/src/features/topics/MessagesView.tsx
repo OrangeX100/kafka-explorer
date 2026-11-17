@@ -150,18 +150,35 @@ export function MessagesView({
           // Timestamp jump: onJump parked the cursor at "tail", which the
           // position badge renders as 最新一页 — a lie once the rows land on
           // the timestamp window (045 CDP round). Sync the cursor to the
-          // REAL window so the badge reads "offset A–B"; paging from here
-          // works because {offset} carries the window anchor.
-          setCursor({ offset: msgs[0].offset });
+          // window's LOWEST offset (the sort is DESCENDING on a tail-shaped
+          // request, so msgs[0] is the newest and msgs[last] is the anchor);
+          // paging and refresh then resolve to exactly this window.
+          setCursor({ offset: msgs[msgs.length - 1].offset });
         }
       } catch (err) {
         if (seq === requestSeq.current) {
           toast.show(friendlyError(err), "error");
           // A failed jump leaves the table on the OLD partition's rows while
-          // the selector already shows the new partition — reload the tail
-          // so the two agree again (the pendingGoto skip removed the
-          // accidental fallback the old duplicate request provided).
-          if (goto) void loadPage("tail", undefined, true);
+          // the selector already shows the new partition. Reload the new
+          // partition's tail explicitly — the memoized loadPage closure is
+          // bound to the OLD partition, so a bare "tail" here would reload
+          // the wrong partition and keep the inconsistency alive.
+          if (goto) {
+            requestSeq.current++; // invalidate the failed request
+            const req = buildBrowseReq({
+              connectionId, topic, partition: goto.partition, pageSize, decodeOn, cursor: "tail",
+            });
+            const retrySeq = requestSeq.current;
+            try {
+              const result = await messagesApi.browse(req as never);
+              if (retrySeq !== requestSeq.current) return;
+              setPagingSuspended(false);
+              const msgs = result.page.messages ?? [];
+              setMessages(msgs);
+              setExhausted(result.exhausted);
+              setSelected(null);
+            } catch { /* the toast above already told the user */ }
+          }
         }
       } finally {
         if (goto) pendingGoto.current = false; // flight over: toggles work again

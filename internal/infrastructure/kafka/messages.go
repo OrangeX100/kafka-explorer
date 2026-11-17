@@ -120,12 +120,19 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 			return domain.BrowsePage{}, mapErr(fmt.Errorf("fetch %s-%d: %w", req.Topic, partition, fetchErr))
 		}
 		if len(fetched) == 0 {
-			// Nothing buffered this round: the poller only wakes on records
-			// or errors, so a zero round here means the deadline expired (or
-			// an error above). The dataLoss reposition case is handled by the
-			// next poll — if it delivers nothing either, the short-page exit
-			// below reports an exhausted page.
-			break
+			// Nothing buffered this round. An ErrDataLoss reposition arrives
+			// as a RECORD-LESS fake partition on the NEXT poll, with the
+			// surviving records one poll after that — breaking here (the
+			// 045 first cut) turned every trimmed-window visit into an
+			// empty "no messages" page. On dataLoss keep polling; the page
+			// deadline is the backstop (045 round-4 regression review).
+			if !dataLoss {
+				break
+			}
+			if pageCtx.Err() != nil {
+				break
+			}
+			continue
 		}
 		records = append(records, fetched...)
 		if len(records) < limit {

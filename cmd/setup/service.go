@@ -134,6 +134,37 @@ func (s *setupService) PickDir(title string) (string, error) {
 // CreateMutex returns a valid handle even when the mutex already exists —
 // close it in EVERY branch or the leaked handle pins the mutex alive
 // (same bug family as the uninstaller's polling fix).
+// normalizeInstallDir repairs the user-typed install directory into an
+// absolute path Inno can consume. Shared by install() AND LaunchApp so the
+// launcher resolves to exactly where the installer landed even when the
+// renderer hands back the raw, un-normalized input (045 round-4).
+func normalizeInstallDir(dir string) string {
+	// Strip wrapping quotes a user may paste from a file-manager copy —
+	// Inno's handling of quoted dirs is undefined and the naive wrapper
+	// below would keep them (045 Windows round).
+	dir = strings.TrimSpace(dir)
+	if len(dir) >= 2 && (dir[0] == '"' && dir[len(dir)-1] == '"' || dir[0] == '\'' && dir[len(dir)-1] == '\'') {
+		dir = strings.TrimSpace(dir[1 : len(dir)-1])
+	}
+	// A volume-less path ("abc", "\Tools") resolves against the CURRENT
+	// working directory — which is NOT the app directory when setup was
+	// launched by a waiter/shell — so Inno would install somewhere the
+	// front-end can't find (and the %TEMP% fallback cleanup would DELETE
+	// that install). Anchor it to the setup exe's own directory instead.
+	if len(dir) >= 2 && dir[1] != ':' && dir[0] != '\\' {
+		if exe, exeErr := os.Executable(); exeErr == nil {
+			dir = filepath.Join(filepath.Dir(exe), dir)
+		}
+	}
+	// "D:Kafka Explorer" (colon, no separator) is a DRIVE-RELATIVE path:
+	// Windows resolves it to that drive's current directory, so Inno would
+	// install somewhere arbitrary. Repair it to the obvious intent.
+	if len(dir) > 2 && dir[1] == ':' && dir[2] != '\\' && dir[2] != '/' {
+		dir = dir[:2] + `\` + dir[2:]
+	}
+	return dir
+}
+
 func appRunning() bool {
 	for _, name := range runningMutexes {
 		h, err := windows.CreateMutex(nil, false, windows.StringToUTF16Ptr(name))
@@ -175,30 +206,9 @@ func (s *setupService) install(dir string, preUninstall func(string) error, run 
 	defer func() { s.mu.Lock(); s.running = false; s.mu.Unlock() }()
 
 	dir = strings.TrimSpace(dir)
-	// Strip wrapping quotes a user may paste from a file-manager copy —
-	// Inno's handling of quoted dirs is undefined and the naive wrapper
-	// below would keep them (045 Windows round).
-	if len(dir) >= 2 && (dir[0] == '"' && dir[len(dir)-1] == '"' || dir[0] == '\'' && dir[len(dir)-1] == '\'') {
-		dir = strings.TrimSpace(dir[1 : len(dir)-1])
-	}
+	dir = normalizeInstallDir(dir)
 	if dir == "" {
 		return fmt.Errorf("请选择安装目录。")
-	}
-	// A volume-less path ("abc", "\Tools") resolves against the CURRENT
-	// working directory — which is NOT the app directory when setup was
-	// launched by a waiter/shell — so Inno would install somewhere the
-	// front-end can't find (and the %TEMP% fallback cleanup would DELETE
-	// that install). Anchor it to the setup exe's own directory instead.
-	if len(dir) >= 2 && dir[1] != ':' && dir[0] != '\\' {
-		if exe, exeErr := os.Executable(); exeErr == nil {
-			dir = filepath.Join(filepath.Dir(exe), dir)
-		}
-	}
-	// "D:Kafka Explorer" (colon, no separator) is a DRIVE-RELATIVE path:
-	// Windows resolves it to that drive's current directory, so Inno would
-	// install somewhere arbitrary. Repair it to the obvious intent.
-	if len(dir) > 2 && dir[1] == ':' && dir[2] != '\\' && dir[2] != '/' {
-		dir = dir[:2] + `\` + dir[2:]
 	}
 	// A bare drive root ("D:" / "D:\") would splatter the app across the
 	// root — always nest one level of appDirName.
@@ -634,6 +644,12 @@ func isDriveRoot(dir string) bool {
 // window hidden — only the tray shows. The app has its own
 // single-instance + tray logic, so a plain spawn shows the window.
 func (s *setupService) LaunchApp(dir string) error {
+	// The renderer may hand back the RAW input (its hidden copy predates the
+	// Install-time normalization): apply the SAME normalization so quoted /
+	// volume-less / drive-relative spellings resolve to where Install
+	// actually landed (045 round-4: LaunchApp failed invisibly right after a
+	// successful install).
+	dir = normalizeInstallDir(strings.TrimSpace(dir))
 	exe := filepath.Join(dir, "kafka-explorer.exe")
 	if _, err := os.Stat(exe); err != nil {
 		return fmt.Errorf("未找到 kafka-explorer.exe，安装可能未完成。")

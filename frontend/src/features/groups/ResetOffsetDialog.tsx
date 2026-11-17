@@ -89,7 +89,11 @@ export function ResetOffsetDialog({
     } catch (err) {
       if (seq === previewSeq.current) toast.show(friendlyError(err), "error");
     } finally {
-      if (seq === previewSeq.current) setBusy(false);
+      // UNCONDITIONAL: a superseded preview must still release busy, or the
+      // buttons stay disabled forever (round-4: the early return above
+      // skipped the guarded setBusy and bricked the dialog while its own
+      // documented scenario — edit during a multi-second dry-run — ran).
+      setBusy(false);
     }
   };
 

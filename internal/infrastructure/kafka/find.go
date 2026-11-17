@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -81,6 +82,23 @@ func (c *Client) Find(ctx context.Context, req domain.FindRequest) (domain.Brows
 	var last *kgo.Record
 	for scanned < maxScan && len(page.Messages) < limit {
 		fetches := pc.PollRecords(pageCtx, 2000)
+		// Surface fetch errors instead of reading "0 records + error" as a
+		// normal end: an unreadable topic (ACL/missing partition) used to
+		// present as "搜索无结果" (045 round-4, same family as
+		// browseAllPartitions). ErrDataLoss is tolerated — kgo repositioned
+		// automatically and the surviving records arrive on the next poll.
+		var fetchErr error
+		fetches.EachError(func(_ string, _ int32, err error) {
+			if fetchErr == nil {
+				var dle *kgo.ErrDataLoss
+				if !errors.As(err, &dle) {
+					fetchErr = err
+				}
+			}
+		})
+		if fetchErr != nil {
+			return domain.BrowsePage{}, 0, mapErr(fmt.Errorf("search %s-%d: %w", req.Topic, partition, fetchErr))
+		}
 		n := fetches.NumRecords()
 		if n == 0 {
 			page.Exhausted = true

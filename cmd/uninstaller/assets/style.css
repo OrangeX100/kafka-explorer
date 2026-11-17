@@ -38,6 +38,8 @@ body {
   cursor: pointer;
 }
 .close:hover { background: #e81123; color: #fff; }
+.close:disabled { opacity: 0.4; cursor: default; }
+.close:disabled:hover { background: transparent; color: #555; }
 
 /* ---------- layout ---------- */
 .content {

@@ -105,13 +105,13 @@ export function RegistryView() {
   // — the compat workbench's write path (a full reload would blank the
   // detail pane for a second and yank the user out of the tab they're in).
   const refreshSubjectsSilent = useCallback(async (id: string): Promise<SchemaSubject[]> => {
+    // Same seq guard as loadSubjects (wrong-registry actions, 045 round-4).
+    const seq = ++subjectSeq.current;
     try {
       const list = (await registryApi.subjects(id)) ?? [];
-      setSubjects(list);
+      if (seq === subjectSeq.current) setSubjects(list);
       return list;
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   }, []);
 
   useEffect(() => {

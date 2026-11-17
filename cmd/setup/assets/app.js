@@ -91,6 +91,10 @@ function setWorking(on) {
   browseBtn.disabled = on;
   pathInput.disabled = on;
   closeBtn.disabled = on;
+  // 关闭 = 安装进行中不可用(与 ✕ 的守卫一致):关窗会让清理协程随进程
+  // 消亡、Inno 引擎变成无人善后的孤儿,快捷方式稍后"自己"出现而残留
+  // 文件无人清理(045 round-4)。
+  cancelBtn.style.display = on ? "none" : "";
   if (!on) {
     progressEl.style.display = "none";
     barEl.style.width = "0%";
@@ -226,7 +230,7 @@ browseBtn.addEventListener("click", async () => {
   try {
     let picked = await Call.ByID(ID_PICK_DIR, "选择安装目录");
     if (picked) {
-      if (/^[a-zA-Z]:\\?$/.test(picked.replace(/\\/g, "\\"))) {
+      if (/^[a-zA-Z]:\\?$/.test(picked)) {
         picked = picked.replace(/\\+$/, "") + "\\Kafka Explorer";
       }
       pathInput.value = picked;

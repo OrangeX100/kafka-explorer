@@ -130,12 +130,18 @@ function startRunningPoll() {
 
 async function uninstall() {
   if (phase !== "ready") return;
+  // Snapshot the checkbox BEFORE the run: the done-state message must
+  // report what was submitted, not whatever the checkbox shows after —
+  // the checkbox stays interactive during the run and a toggle mid-run
+  // made the completion line lie both ways (045 round-4).
+  const deleteDataSubmitted = deleteDataEl.checked;
   setWorking(true);
   setNote("");
   barStart();
   okBtn.textContent = "正在卸载…";
+  deleteDataEl.disabled = true; // mid-run toggles would contradict the message
   try {
-    await Call.ByID(ID_UNINSTALL, deleteDataEl.checked);
+    await Call.ByID(ID_UNINSTALL, deleteDataSubmitted);
     bar.target = 100;
     await bar.done; // sweep finishes before the done state appears
     // done: hide the now-meaningless options group (delete-data checkbox
@@ -145,8 +151,9 @@ async function uninstall() {
     phase = "done";
     okBtn.textContent = "关闭";
     okBtn.disabled = false;
+    closeBtn.disabled = false; // re-enable ✕: the run is over (was left disabled)
     setNote(
-      deleteDataEl.checked
+      deleteDataSubmitted
         ? "卸载完成：程序与用户数据已删除。"
         : "卸载完成：用户数据已保留，下次安装后可继续使用。",
     );
@@ -154,6 +161,7 @@ async function uninstall() {
     // back to a retryable ready state with the friendly message from Go
     barAbort();
     setWorking(false);
+    deleteDataEl.disabled = false; // retry needs the checkbox back
     okBtn.textContent = "卸载";
     setNote(String(err).replace(/^(?:Runtime)?Error:\s*/, ""), true);
   }

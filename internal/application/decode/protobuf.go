@@ -132,14 +132,18 @@ func decodeProtobufJSON(ctx context.Context, payload []byte, schema string) Resu
 		return Result{Format: "protobuf", Error: err.Error()}
 	}
 	bare := decodeProtobufFDSetJSON(payload, fds, entry, nil)
-	if bare.Error == "" {
-		return bare
-	}
 	indexes, body, ok := stripConfluentIndexes(payload)
-	if !ok {
-		return bare // not an indexes frame: the bare error is the real one
+	if ok {
+		framed := decodeProtobufFDSetJSON(body, fds, entry, indexes)
+		// Standard SerDes frames WIN when both interpretations parse (the
+		// count>=4 masquerade above); when BOTH fail, the framed attempt's
+		// error is the informative one — the bare try just drowns in
+		// field-0 noise.
+		if framed.Error == "" || bare.Error != "" {
+			return framed
+		}
 	}
-	return decodeProtobufFDSetJSON(body, fds, entry, indexes)
+	return bare
 }
 
 // resolveProtobufSchema compiles/decodes the registry's schema (either

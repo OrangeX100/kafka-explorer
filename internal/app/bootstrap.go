@@ -130,7 +130,9 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 	// Pick-path authorization: native dialogs issue paths into ONE shared
 	// broker; the import/export/read bindings verify membership, so a
 	// compromised webview cannot name arbitrary files (045 security round).
-	// Contract test: bootstrap_wiring_test.go asserts every consumer got it.
+	// Mechanism contract: pathbroker_test.go; wiring is verified visually
+	// here (every consumer's SetPathBroker sits within this function —
+	// a new consumer must be wired or it fail-closes all file verbs).
 	pathBroker := systemHandler.PathBroker()
 	connHandler := wails.NewConnectionHandler(connSvc, log)
 	connHandler.SetPathBroker(pathBroker)
