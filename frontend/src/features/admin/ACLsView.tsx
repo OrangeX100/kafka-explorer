@@ -102,6 +102,7 @@ export function ACLsView({ connectionId }: { connectionId: string }) {
         {(acls ?? []).map((a, i) => (
           <div
             key={`${a.principal}-${a.resourceType}-${a.resourceName}-${a.operation}-${i}`}
+            data-testid="acl-row"
             className="group flex items-center gap-3 border-b border-ink-800 px-3 py-1.5 text-xs hover:bg-ink-850"
             onContextMenu={(e) =>
               openCtx(e, [

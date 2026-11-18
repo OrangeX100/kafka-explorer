@@ -116,6 +116,7 @@ export function ShareGroupsView({ connectionId }: { connectionId: string }) {
           {(groups ?? []).map((g) => (
             <div
               key={g.group}
+              data-testid="share-row"
               onClick={() => {
                 // Re-click refreshes: membership and start offsets are live
                 // data that move under you (heartbeats, acks).

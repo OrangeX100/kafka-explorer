@@ -1,4 +1,6 @@
 import { chromium, expect, type Browser, type Page, type Locator } from "@playwright/test";
+import { execSync } from "node:child_process";
+import { join as joinPath, dirname } from "node:path";
 
 // Shared UI-automation infrastructure. Everything here encodes a real
 // CDP-probe lesson from the 0.4.x review rounds — keep the comments when
@@ -22,7 +24,12 @@ let currentPage: Page | null = null;
  *  the /json/version handshake. close() later only disconnects — the app
  *  keeps running for manual inspection after a failure. */
 export async function connectApp(): Promise<Page> {
-  browser = await chromium.connectOverCDP(CDP_URL);
+  // A wedged WebView2 can leave 9223 LISTENING while /json/version never
+  // answers — connectOverCDP would hang forever. Race a hard timeout.
+  const connectTimeout = new Promise<never>((_, rej) =>
+    setTimeout(() => rej(new Error("connectOverCDP 15 秒未完成（CDP 端口垂死）")), 15_000),
+  );
+  browser = await Promise.race([chromium.connectOverCDP(CDP_URL), connectTimeout]);
   const ctx = browser.contexts()[0];
   if (!ctx) throw new Error("CDP 已连通但没有浏览器上下文（应用窗口可能尚未启动）");
   // /json/list can list MORE than one page target (DevTools windows included
@@ -33,10 +40,26 @@ export async function connectApp(): Promise<Page> {
   currentPage = page;
   // ke.locale persists across CDP sessions — a previous crashed run can
   // leave the UI in English and every zh-CN text assertion would lie.
-  // Set the locale, then reload so the app re-reads it at boot.
-  await page.evaluate(() => localStorage.setItem("ke.locale", "zh-CN"));
-  await page.reload();
-  await page.waitForLoadState("domcontentloaded");
+  // Set the locale, then reload so the app re-reads it at boot. A wedged
+  // target hangs evaluate()/reload() FOREVER — race a watchdog so callers
+  // can fall through to restartApp().
+  const withWatchdog = async <T>(p: Promise<T>, ms: number): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = new Promise<never>((_, rej) => {
+      timer = setTimeout(() => rej(new Error("connectApp phase timed out (wedged target?)")), ms);
+    });
+    try {
+      return await Promise.race([p, tick]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+  await ensureForeground();
+  // locale persists (set by every earlier run) — NO reload here: reload
+  // destroys and recreates the CDP target, and any command racing that
+  // window reports the target as closed. The rail visibility assert below
+  // is the boot-complete signal instead.
+  await withWatchdog(page.evaluate(() => localStorage.setItem("ke.locale", "zh-CN")), 10_000);
   // Sidebar rail [data-tip] buttons render = React mounted + bindings up.
   await expect(page.locator("[data-tip]").first()).toBeVisible({ timeout: 20_000 });
   return page;
@@ -58,6 +81,76 @@ export async function disconnectApp() {
 export function isTargetLost(err: unknown): boolean {
   const s = String(err);
   return s.includes("has been closed") || s.includes("Target crashed");
+}
+
+const APP_DIR = "D:\\视途智能\\kafka-explorer\\bin";
+
+/** Ping the CDP port; when the app is dead, launch it (detached spawn) and
+ *  wait for readiness. beforeAll step one in every spec — WHOEVER killed
+ *  the previous instance (job-object trees, AV, wedged renderer), the next
+ *  probe run self-heals to a known-good state instead of ECONNREFUSED. */
+export async function ensureAppRunning(waitMs = 45_000) {
+  const alive = async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:9223/json/version", { signal: AbortSignal.timeout(2000) });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  };
+  if (await alive()) return;
+  const { spawn } = await import("node:child_process");
+  // spawn resolves the exe against PATH, NOT cwd — a relative name here
+  // throws ENOENT (and the restart silently never happened)
+  spawn(joinPath(APP_DIR, "kafka-explorer-cdp.exe"), [], {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, KE_DEBUG_CDP: "1" },
+  }).unref();
+  const t0 = Date.now();
+  while (Date.now() - t0 < waitMs) {
+    if (await alive()) return;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error("ensureAppRunning: CDP 端口 45 秒内未就绪");
+}
+
+/** Full app process restart: the recovery of last resort when the renderer
+ *  target is wedged (evaluate() hangs forever on a dying target — a bare
+ *  CDP reconnect is NOT enough). taskkill + relaunch + port readiness.
+ *  cmd `start /D` + relative exe name: NO path escaping through PowerShell
+ *  (double-backslash mangling silently failed Start-Process before). The
+ *  KE_DEBUG_CDP env travels through execSync's env, not the shell line. */
+export async function restartApp() {
+  try {
+    execSync("taskkill /IM kafka-explorer-cdp.exe /F", { shell: "cmd", stdio: "ignore", timeout: 15_000 });
+  } catch {
+    /* already gone */
+  }
+  await new Promise((r) => setTimeout(r, 2000));
+  // Node detached spawn: the child joins NO job object tied to this test
+  // runner, so it survives the runner's exit (execSync→powershell chains
+  // died with the job tree right after the runner finished — the app was
+  // alive through afterAll, then vanished).
+  const { spawn } = await import("node:child_process");
+  const child = spawn("kafka-explorer-cdp.exe", [], {
+    cwd: APP_DIR,
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, KE_DEBUG_CDP: "1" },
+  });
+  child.unref();
+  const t0 = Date.now();
+  while (Date.now() - t0 < 60_000) {
+    try {
+      const res = await fetch("http://127.0.0.1:9223/json/version");
+      if (res.ok) return;
+    } catch {
+      /* not up yet */
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error("restartApp: CDP 端口 60 秒内未就绪");
 }
 
 /* ---------------- navigation ---------------- */
@@ -148,9 +241,7 @@ export async function confirmDialogBox(page: Page) {
 
 /** Assert a toast containing text appeared (success toasts auto-dismiss). */
 export async function expectToast(page: Page, text: string | RegExp) {
-  await expect(
-    page.locator("body").getByText(text).last(),
-  ).toBeVisible({ timeout: 8_000 });
+  await expect(page.locator("body").getByText(text).last()).toBeVisible({ timeout: 8_000 });
 }
 
 /* ---------------- connections ---------------- */
@@ -164,8 +255,13 @@ export async function connListOpen(page: Page): Promise<boolean> {
   return page.evaluate(() => {
     const el = document.querySelector('[data-testid="conn-row"]');
     if (!el) return false;
+    // scroll it into view FIRST: with many rows the checked row can sit
+    // below the fold — its rect.y exceeds the viewport and elementFromPoint
+    // returns null, which a naive hit-test misreads as "collapsed"
+    el.scrollIntoView({ block: "center" });
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return false;
+    if (r.bottom <= 0 || r.top >= window.innerHeight) return false; // truly off-screen
     const hit = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 12));
     return !!hit && (hit === el || el.contains(hit) || el.contains(hit.parentElement));
   });
@@ -187,19 +283,25 @@ export async function ensureConnListOpen(page: Page) {
   throw new Error("连接列表无法展开（rail 开关被探活收起循环干扰）");
 }
 
-/** Wait out the list collapse. The collapse fires when the connection's
- *  FIRST health ping lands — a public-network Kafka handshake takes 3-8s,
- *  so a time-window poll returns too early and later clicks fight the
- *  animation until the whole test times out. DETERMINISTIC settle signals:
- *  the connection's own row flips to 已连接 (ping done), or the row is
- *  already hidden (collapse done). 25s covers a slow handshake. */
-export async function stabilizeConnList(page: Page, name?: string, waitMs = 25_000) {
-  const row = (name ? page.locator('[data-testid="conn-row"]').filter({ hasText: name }) : page.locator('[data-testid="conn-row"]')).first();
+/** Wait out the post-open churn: the health ping lands (public handshake
+ *  3-8s), the list collapses, the exit animation plays. The row-text
+ *  signal (已连接) proved unreliable via textContent on this machine —
+ *  the STRONG signal is structural: workspace section rail visible, no
+ *  dialog open, and a short settle window for the collapse animation.
+ *  Any collapse Playwright misses is healed later by clickListEl. */
+export async function stabilizeConnList(page: Page, _name?: string, waitMs = 10_000) {
   const t0 = Date.now();
   while (Date.now() - t0 < waitMs) {
-    if (!(await row.isVisible().catch(() => false))) return; // collapsed
-    const txt = (await row.textContent().catch(() => "")) ?? "";
-    if (txt.includes("已连接")) return; // ping landed; collapse (if any) next frame
+    const dlg = await page.locator('[role="dialog"]').count();
+    const rail = await page
+      .getByRole("button", { name: "主题", exact: true })
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (rail && dlg === 0) {
+      await page.waitForTimeout(600); // collapse animation settle
+      return;
+    }
     await page.waitForTimeout(300);
   }
 }
@@ -249,6 +351,7 @@ export async function ensureConnection(page: Page, name: string, bootstrap: stri
   await dlg.locator("input").nth(1).fill(bootstrap);
   await dlg.getByRole("button", { name: "保存" }).click();
   await expectToast(page, "连接已保存");
+  await expect(page.locator('[role="dialog"]')).toHaveCount(0, { timeout: 8_000 }); // exit anim done
   await expect(page.locator('[data-testid="conn-row"]').filter({ hasText: name }).first()).toBeVisible({
     timeout: 10_000,
   });
@@ -280,8 +383,11 @@ export async function deleteConnection(page: Page, name: string) {
 
 /* ---------------- topics ---------------- */
 
-/** Create a topic through the real dialog (创建 button). */
+/** Create a topic through the real dialog (创建 button). Idempotent:
+ *  returns immediately when a row with the name is already visible. */
 export async function createTopic(page: Page, name: string, partitions: number) {
+  const existing = page.locator('[data-testid="topic-row"]').filter({ hasText: name }).first();
+  if ((await existing.count()) > 0 && (await existing.isVisible())) return;
   await page.locator('button[title="新建主题"]').click();
   const dlg = dialog(page);
   await dlg.waitFor({ state: "visible" });
@@ -337,24 +443,69 @@ export async function positionBadge(page: Page): Promise<string> {
       (s) =>
         typeof s.checkVisibility === "function" &&
         s.checkVisibility() &&
-        /^(最新一页|最早一页|offset [\d,]+–[\d,]+|offset \d+)$/.test(s.textContent?.trim() ?? ""),
+        /^(最新一页|最早一页|搜索结果 · 翻页已停用|offset [\d,]+–[\d,]+|offset \d+)$/.test(s.textContent?.trim() ?? ""),
     );
     return spans[0]?.textContent?.trim() ?? "";
   });
+}
+
+/** Open a message row's detail panel (single click on the visible row). */
+export async function openFirstMessageDetail(page: Page) {
+  await page.evaluate(() => {
+    const trs = [...document.querySelectorAll("table tbody tr")];
+    const tr = trs.find((t) => typeof t.checkVisibility === "function" && t.checkVisibility());
+    (tr as HTMLElement)?.click();
+  });
+}
+
+/** Click the LAST visible message row (the freshest produce). */
+export async function openLastMessageDetail(page: Page) {
+  await page.evaluate(() => {
+    const trs = [...document.querySelectorAll("table tbody tr")].filter(
+      (t) => typeof t.checkVisibility === "function" && t.checkVisibility(),
+    );
+    (trs[trs.length - 1] as HTMLElement)?.click();
+  });
+}
+
+/** Click a view-mode tab (文本/JSON/Hex/已解码) in the open detail panel. */
+export async function detailTabClick(page: Page, label: string) {
+  await page.getByRole("button", { name: label }).last().click();
+}
+
+/** Which detail view-mode tab is ACTIVE (btn-accent highlight). */
+export async function detailActiveTab(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const btns = [...document.querySelectorAll("button.btn-accent")].filter(
+      (b) =>
+        typeof b.checkVisibility === "function" &&
+        b.checkVisibility() &&
+        /^(文本|JSON|Hex|已解码)/.test(b.textContent?.trim() ?? ""),
+    );
+    return btns[0]?.textContent?.trim() ?? "";
+  });
+}
+
+export interface ProduceOpts {
+  key?: string;
+  headers?: string; // raw headers textarea lines: "k1:v1" + LF + "k2:v2"
+  partition?: string;
 }
 
 /** Produce one message through the real dialog; returns the acked
  *  {partition, offset} parsed from a FRESH 已发送到 toast. A plain
  *  toast-exists check is a false positive machine: the previous
  *  produce's toast is still on screen (~3s lifetime), so a silently
- *  cancelled send would pass. Instead: snapshot the toasts already on
- *  screen, click, then wait for a toast TEXT that was not in the
- *  snapshot (topic-partition-offset makes every toast unique). */
+ *  cancelled send would pass. Capture with an IN-PAGE MutationObserver:
+ *  a short-lived toast can mount and unmount between two CDP polls
+ *  (latency spikes), which both false-positives the stale-toast check
+ *  and loses real acks. */
 export async function produceMessage(
   page: Page,
   value: string,
   partition = "",
   key = "",
+  headers = "",
 ): Promise<{ partition: number; offset: number }> {
   // the previous produce's dialog DOM lingers through its exit animation —
   // wait for FULL unmount before opening the next one
@@ -370,10 +521,8 @@ export async function produceMessage(
   // fields wrap in <label> — scope by the label text, never input indexes
   if (key !== "") await dlg.locator("label", { hasText: "Key" }).locator("input").fill(key);
   await dlg.locator("textarea").first().fill(value);
-  // Capture toasts with an IN-PAGE MutationObserver: a short-lived toast
-  // can mount and unmount between two CDP polls (latency spikes), which
-  // both false-positives the stale-toast check and loses real acks. The
-  // observer records every toast text the instant it renders.
+  if (headers !== "") await dlg.locator("textarea").nth(1).fill(headers);
+
   const before = new Set(await page.getByText(/已发送到/).allInnerTexts());
   await page.evaluate(() => {
     const w = window as unknown as { __toastLog: string[]; __toastObs?: MutationObserver };
@@ -398,4 +547,35 @@ export async function produceMessage(
   const m = /已发送到 .+-(\d+) offset (\d+)/.exec(fresh.replace(/\s+/g, " "));
   if (!m) throw new Error(`toast 文本无法解析: ${fresh}`);
   return { partition: Number(m[1]), offset: Number(m[2]) };
+}
+/** THE root cause of every "random" probe hang on this machine: when the
+ *  app window is NOT in the foreground, WebView2 throttles its render
+ *  pipeline — requestAnimationFrame stops ticking — and Playwright's
+ *  actionability check (stable = same bbox across two rAF frames) waits
+ *  forever. evaluate() keeps working, so the failure looks like a
+ *  mysterious click timeout while fills still succeed. Bring the window
+ *  to the foreground (Win32 SetForegroundWindow, restore if minimized)
+ *  before touching any click. */
+export async function ensureForeground() {
+  const { execSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  // resolve the .ps1 relative to this module (e2e/tests/ → e2e/tools/)
+  const here = fileURLToPath(import.meta.url);
+  const ps1 = joinPath(dirname(here), "..", "tools", "foreground.ps1");
+  execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1}"`, {
+    shell: "cmd",
+    stdio: "ignore",
+    timeout: 15_000,
+  });
+  await new Promise((r) => setTimeout(r, 800)); // let the render pipeline wake
+}
+/** Keep the app window foreground for the WHOLE probe run: every time this
+ *  test runner's own terminal (or any other window) covers the app,
+ *  WebView2 throttles its render pipeline — rAF stops — and Playwright's
+ *  actionability check hangs on the next click. A 15s heartbeat pins the
+ *  window in front. Call ONCE in beforeAll; the timer never blocks exit. */
+export function keepForeground() {
+  void ensureForeground();
+  const t = setInterval(() => void ensureForeground(), 15_000);
+  if (typeof t.unref === "function") t.unref();
 }

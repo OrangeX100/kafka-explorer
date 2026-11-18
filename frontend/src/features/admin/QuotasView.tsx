@@ -299,7 +299,7 @@ function QuotaKeyRow({
   };
 
   return (
-    <tr className="group border-b border-ink-800 hover:bg-ink-850" onContextMenu={rowMenu}>
+    <tr data-testid="quota-row" className="group border-b border-ink-800 hover:bg-ink-850" onContextMenu={rowMenu}>
       <td className="px-3 py-1.5 font-mono text-accent" rowSpan={first ? rowCount : undefined}>
         <span className="block truncate" title={entityLabel}>
           {entityLabel}

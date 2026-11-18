@@ -79,6 +79,7 @@ export function LocalSchemas() {
         {(schemas ?? []).map((s) => (
           <div
             key={s.id}
+            data-testid="local-schema-row"
             onClick={() => setSelected(s)}
             onContextMenu={(e) =>
               openCtx(e, [
