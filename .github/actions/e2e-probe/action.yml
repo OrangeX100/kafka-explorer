@@ -1,4 +1,4 @@
-# Reusable UI-probe job body: builds a CDP-enabled debug binary (0.4.10
+# Reusable UI-probe job body: builds a CDP-enabled debug binary (0.4.11
 # stamp — BELOW the published latest so the update-flow probe drives the
 # REAL production feed), launches it with the double-gated debug port, and
 # runs the Playwright suite. Cluster probes run only when the `kafka` input
@@ -41,13 +41,13 @@ runs:
         # bindings are a gitignored generated artifact — regenerate first
         wails3 task generate:bindings
         cd frontend && npm ci --no-audit --no-fund && npm run build && cd ..
-        # VERSION=0.4.10 < published latest → the update-flow probe walks the
+        # VERSION=0.4.11 < published latest → the update-flow probe walks the
         # REAL discover→download→cancel chain against the production feed.
         # UpdateRepo matches the release stamp (settings.Get falls back to it).
         # DebugFeatures=cdp is the ONLY gate that lets KE_DEBUG_CDP open the
         # debug port (internal/buildinfo.DebugFeatures) — release builds ship
         # with it empty.
-        go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version=0.4.10 -X kafkaexplorer/internal/buildinfo.Commit=${GITHUB_SHA:0:7} -X kafkaexplorer/internal/buildinfo.UpdateRepo=OrangeX100/kafka-explorer -X kafkaexplorer/internal/buildinfo.DebugFeatures=cdp" -o bin/kafka-explorer-cdp.exe .
+        go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version=0.4.11 -X kafkaexplorer/internal/buildinfo.Commit=${GITHUB_SHA:0:7} -X kafkaexplorer/internal/buildinfo.UpdateRepo=OrangeX100/kafka-explorer -X kafkaexplorer/internal/buildinfo.DebugFeatures=cdp" -o bin/kafka-explorer-cdp.exe .
 
     - name: Launch app with CDP port
       shell: bash
