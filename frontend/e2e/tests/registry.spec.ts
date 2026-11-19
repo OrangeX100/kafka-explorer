@@ -75,11 +75,14 @@ test.afterAll(async () => {
     ]);
     await toRegistry(p);
     await dismissOverlays(p);
-    const row = p.locator('[data-testid="registry-row"]').filter({ hasText: REG }).first();
-    if ((await row.count()) > 0 && (await row.isVisible())) {
-      await row.click({ button: "right" });
-      await contextMenuItem(p, "删除");
-      await confirmDialogBox(p);
+    // delete both possible ephemeral entries (CRUD test + version test)
+    for (const nm of [REG]) {
+      const row = p.locator('[data-testid="registry-row"]').filter({ hasText: nm }).first();
+      if ((await row.count()) > 0 && (await row.isVisible().catch(() => false))) {
+        await row.click({ button: "right" });
+        await contextMenuItem(p, "删除");
+        await confirmDialogBox(p);
+      }
     }
   } catch {
     /* a leftover soft-deleted registry entry is inert; the next RUN_ID
@@ -116,8 +119,18 @@ test("版本历史 + 对比 tab：真实 subject 的版本表与双版本 diff",
   run(async (p) => {
     test.setTimeout(120_000);
     await toRegistry(p);
-    const regRow = p.locator('[data-testid="registry-row"]').filter({ hasText: "腾讯云测试" }).first();
-    await expect(regRow).toBeVisible({ timeout: 10_000 });
+    // CI has a FRESH app (no user data) — ensure an ephemeral registry
+    // pointing at the real SR exists (created + deleted by this test)
+    let regRow = p.locator('[data-testid="registry-row"]').filter({ hasText: REG }).first();
+    if (!(await regRow.isVisible().catch(() => false))) {
+      await p.getByRole("button", { name: "新建 Registry" }).click();
+      const dlg = dialog(p);
+      await dlg.waitFor({ state: "visible" });
+      await dlg.locator("input").nth(0).fill(REG);
+      await dlg.locator("input").nth(1).fill(SR_URL);
+      await dlg.getByRole("button", { name: "保存" }).click();
+      await expect(regRow).toBeVisible({ timeout: 10_000 });
+    }
     await regRow.click();
     // pick any AVRO subject (live SR data — version counts shift over time,
     // so the assertion must adapt to what the registry actually has)
@@ -136,6 +149,14 @@ test("版本历史 + 对比 tab：真实 subject 的版本表与双版本 diff",
     const main = await p.locator("main").innerText();
     expect(main.length).toBeGreaterThan(50);
     void multiVersion;
+    // cleanup: remove the ephemeral registry if THIS test created it
+    const created = p.locator('[data-testid="registry-row"]').filter({ hasText: REG }).first();
+    if ((await created.count()) > 0 && (await created.isVisible().catch(() => false))) {
+      await created.click({ button: "right" });
+      await contextMenuItem(p, "删除");
+      await confirmDialogBox(p);
+      await expect(created).toHaveCount(0, { timeout: 10_000 });
+    }
   }));
 
 test("本地 Schema：新建→列表可见→编辑入口→删除", () =>
