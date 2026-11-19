@@ -29,6 +29,8 @@ import {
 // topic pre-exists (created via SSH in beforeAll, deleted via SSH in
 // afterAll); the Kafka CONNECTION row also pre-exists (created once), so
 // each test only walks: rail → section → topic → 配置 tab.
+test.skip(!KAFKA, "需 KE_E2E_KAFKA=host:port 真集群（sshKafka 种子步骤仅本机可用）");
+
 const CONN = `${RUN_ID}-conn`;
 const TOPIC = `${RUN_ID}-cfg`;
 const HOST = KAFKA.split(":")[0];

@@ -67,6 +67,7 @@ runs:
       env:
         KE_E2E_KAFKA: ${{ inputs.kafka }}
         KE_E2E_UPDATE_FLOW: ${{ inputs.update-flow }}
+        KE_APP_DIR: ${{ github.workspace }}/bin
       run: cd frontend && npx playwright test --retries=1
 
     - name: Upload probe artifacts

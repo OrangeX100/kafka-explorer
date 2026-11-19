@@ -1,5 +1,7 @@
 import { chromium, expect, type Browser, type Page, type Locator } from "@playwright/test";
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { join as joinPath, dirname } from "node:path";
 
 // Shared UI-automation infrastructure. Everything here encodes a real
@@ -83,7 +85,17 @@ export function isTargetLost(err: unknown): boolean {
   return s.includes("has been closed") || s.includes("Target crashed");
 }
 
-const APP_DIR = "D:\\视途智能\\kafka-explorer\\bin";
+/** App binary directory resolution: CI passes KE_APP_DIR (the runner's
+ *  workspace bin/); local runs fall back to the well-known local path.
+ *  spawn() needs an absolute path (it does NOT search cwd — the ENOENT
+ *  lesson). */
+function appDir(): string {
+  if (process.env.KE_APP_DIR) return process.env.KE_APP_DIR;
+  if (existsSync(resolve("bin/kafka-explorer-cdp.exe"))) return resolve("bin");
+  return "D:\\视途智能\\kafka-explorer\\bin";
+}
+
+const APP_DIR = appDir();
 
 /** Ping the CDP port; when the app is dead, launch it (detached spawn) and
  *  wait for readiness. beforeAll step one in every spec — WHOEVER killed
