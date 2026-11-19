@@ -1,15 +1,13 @@
 {
   "StringFileInfo": {
-    "040904B0": {
-      "CompanyName": "Kafka Explorer contributors",
-      "FileDescription": "Kafka Explorer 卸载程序",
-      "LegalCopyright": "Copyright (C) 2026 Kafka Explorer contributors",
-      "ProductName": "Kafka Explorer",
-      "FileVersion": "0.4.12",
-      "ProductVersion": "0.4.12",
-      "OriginalFilename": "KafkaExplorer_Uninstall.exe",
-      "InternalName": "KafkaExplorer_Uninstall"
-    }
+    "CompanyName": "Kafka Explorer contributors",
+    "FileDescription": "Kafka Explorer 卸载程序",
+    "LegalCopyright": "Copyright (C) 2026 Kafka Explorer contributors",
+    "ProductName": "Kafka Explorer",
+    "FileVersion": "0.4.12",
+    "ProductVersion": "0.4.12",
+    "OriginalFilename": "KafkaExplorer_Uninstall.exe",
+    "InternalName": "KafkaExplorer_Uninstall"
   },
   "VarFileInfo": {
     "Translation": {

@@ -12,7 +12,6 @@ OUT = "build/setup-versioninfo.json"
 
 meta = {
     "StringFileInfo": {
-        "040904B0": {
             "CompanyName": "Kafka Explorer contributors",
             "FileDescription": "Kafka Explorer 安装程序",
             "LegalCopyright": "Copyright (C) 2026 Kafka Explorer contributors",
@@ -21,7 +20,6 @@ meta = {
             "ProductVersion": VERSION,
             "OriginalFilename": "KafkaExplorer_Setup.exe",
             "InternalName": "KafkaExplorer_Setup",
-        }
     },
     "VarFileInfo": {"Translation": {"LangID": "0409", "CharsetID": "04B0"}},
     "IconPath": "build/windows/kafka_icon.ico",

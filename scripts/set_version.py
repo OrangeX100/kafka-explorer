@@ -24,6 +24,10 @@ version = sys.argv[1]
 #    + sign 任务的 -Exe 路径内的硬编码版本。用正则替换任意旧版本号，
 #    不依赖具体旧值——新位置出现时只要 default "x.y.z" 形态就自动命中。
 s = open("Taskfile.yml", encoding="utf-8").read()
+old_match = re.search(
+    r"VERSION: '\{\{\.VERSION \| default \"(\d+\.\d+\.\d+)\"\}\}'", s
+)
+old_version = old_match.group(1) if old_match else None
 s, n1 = re.subn(
     r"(VERSION: '\{\{\.VERSION \| default \")\d+\.\d+\.\d+(\"\}\}')",
     rf"\g<1>{version}\g<2>",
@@ -42,6 +46,36 @@ s, n3 = re.subn(
 )
 open("Taskfile.yml", "w", encoding="utf-8", newline="").write(s)
 print(f"Taskfile: {n1} 处 VERSION + {n2} 处 VERSIONINFOVERSION + {n3} 处 -Exe 路径")
+
+# 1b. 探针基准版本（e2e-probe CI debug 构建戳 + update-flow spec 引用）。
+# 语义：发布 Y 时，探针 debug 构建必须低于 published latest（Y）才能发现
+# 更新——基准 = 上一发布版 X（即本次被替换掉的旧版本）。漏改 = 探针
+# 静默 skip 而 CI 仍绿（probe_contract_test.go 会红，但应在源头避免）。
+if old_version and old_version != version:
+    base_old = None
+    n_base = 0
+    act_path = ".github/actions/e2e-probe/action.yml"
+    act = open(act_path, encoding="utf-8").read()
+    m_base = re.search(r"(buildinfo\.Version=)(\d+\.\d+\.\d+)", act)
+    if m_base:
+        base_old = m_base.group(2)
+        if base_old != old_version:
+            act = act.replace(
+                f"buildinfo.Version={base_old}", f"buildinfo.Version={old_version}"
+            )
+            open(act_path, "w", encoding="utf-8", newline="").write(act)
+            n_base += 1
+    spec_path = "frontend/e2e/tests/update-flow.spec.ts"
+    spec = open(spec_path, encoding="utf-8").read()
+    if base_old and base_old in spec:
+        n_base += spec.count(base_old)
+        spec = spec.replace(base_old, old_version)
+        open(spec_path, "w", encoding="utf-8", newline="").write(spec)
+    print(
+        f"探针基准: {base_old or '(未找到)'} → {old_version}（{n_base} 处）"
+        if n_base
+        else f"探针基准: 已是 {old_version}，无需改写"
+    )
 
 # 2. frontend/package.json
 pkg_path = "frontend/package.json"

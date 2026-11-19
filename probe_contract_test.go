@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"os"
-	"strconv"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -43,16 +45,53 @@ func TestNoBareTestFixmeInProbes(t *testing.T) {
 	}
 }
 
+// lastReleasedVersion returns the version of the second-newest release tag
+// (newest = the version currently being released or just released; the
+// probe base must equal the one BEFORE it). Tags carry a "v" prefix.
+func lastReleasedVersion(t *testing.T) string {
+	out, err := exec.Command("git", "tag", "--sort=-creatordate").Output()
+	if err != nil {
+		t.Fatalf("git tag: %v", err)
+	}
+	var seen []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		v := strings.TrimPrefix(strings.TrimSpace(line), "v")
+		if v == "" {
+			continue
+		}
+		dup := false
+		for _, s := range seen {
+			if s == v {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			seen = append(seen, v)
+		}
+	}
+	if len(seen) < 2 {
+		t.Skip("需要至少两个 release tag 才能确定探针基准版本")
+	}
+	return seen[1]
+}
+
 // TestProbeBaseVersionInContract: the update-flow probe builds a debug
-// binary stamped ONE VERSION BELOW the published latest, so the version
-// string lives in THREE places (action.yml, update-flow.spec.ts comments,
-// set_version.py reach). This contract pins the action.yml + spec refs so
-// the next set_version.py bump (which rewrites 0.4.N everywhere via the
-// shared regexes) cannot leave a stale base behind — a stale base makes
-// the debug build version == published latest and the update-chain probe
-// silently skips while CI stays green.
+// binary stamped with the PREVIOUS RELEASE (one below the published
+// latest), so it discovers the current latest as an update. The stamp lives
+// in TWO places that must move together on every release:
+//   - .github/actions/e2e-probe/action.yml  (CI debug-build ldflags)
+//   - frontend/e2e/tests/update-flow.spec.ts (skip-hint/annotation refs)
+//
+// set_version.py keeps them in sync at bump time (old version becomes the
+// new base). This contract pins both to the second-newest release tag so a
+// forgotten bump fails HERE instead of silently skipping the update-chain
+// probe in CI while the gate stays green.
 func TestProbeBaseVersionInContract(t *testing.T) {
-	// 1. Taskfile VERSION default is the source of truth
+	base := lastReleasedVersion(t)
+
+	// current in-development version must not be used as the probe base —
+	// the debug build would equal the published latest and discover nothing
 	taskfile, err := os.ReadFile("Taskfile.yml")
 	if err != nil {
 		t.Fatalf("read Taskfile.yml: %v", err)
@@ -62,39 +101,82 @@ func TestProbeBaseVersionInContract(t *testing.T) {
 	if m == nil {
 		t.Fatal("Taskfile.yml: no VERSION default found")
 	}
-	base := m[1]
-
-	// 2. update-flow.spec.ts: skip hint + retry annotation reference the
-	//    base version (the version BELOW base is what the debug build
-	//    must carry; assert the spec no longer mentions the PREVIOUS base)
-	spec, err := os.ReadFile("frontend/e2e/tests/update-flow.spec.ts")
-	if err != nil {
-		t.Fatalf("read update-flow.spec.ts: %v", err)
-	}
-	// parse base "0.4.11" → previous "0.4.10"
-	parts := strings.Split(base, ".")
-	minor, err := strconv.Atoi(parts[1])
-	if err != nil {
-		t.Fatalf("parse base minor: %v", err)
-	}
-	prevBase := parts[0] + "." + itoa(minor-1) + "." + parts[2]
-	if strings.Contains(string(spec), prevBase) {
-		t.Errorf("update-flow.spec.ts still references the PREVIOUS probe base %s — "+
-			"bump it to %s (set_version.py should have done this)", prevBase, prevBase)
+	if m[1] == base {
+		t.Fatalf("探针基准 == 当前版本 %s——debug 构建将发现不了任何更新。"+
+			"set_version.py 应在 bump 时把基准改为旧版本", base)
 	}
 
-	// 3. action.yml must stamp the base-1 version for the debug build
+	// action.yml: the CI debug-build stamp must be exactly the base
 	action, err := os.ReadFile(".github/actions/e2e-probe/action.yml")
 	if err != nil {
 		t.Fatalf("read action.yml: %v", err)
 	}
-	if strings.Contains(string(action), prevBase) {
-		t.Errorf("e2e-probe/action.yml still references the PREVIOUS probe base %s — "+
-			"the CI debug build would equal the published latest and the "+
-			"update-chain probe would silently skip", prevBase)
+	reStamp := regexp.MustCompile(`buildinfo\.Version=(\d+\.\d+\.\d+)`)
+	stamp := reStamp.FindStringSubmatch(string(action))
+	if stamp == nil {
+		t.Fatal("action.yml: no buildinfo.Version stamp found")
+	}
+	if stamp[1] != base {
+		t.Errorf("e2e-probe/action.yml 探针基准 = %s，应为上一发布版 %s——"+
+			"基准过期会让更新链探针静默 skip 而 CI 仍绿", stamp[1], base)
+	}
+
+	// update-flow.spec.ts: skip-hint must reference the same base
+	spec, err := os.ReadFile("frontend/e2e/tests/update-flow.spec.ts")
+	if err != nil {
+		t.Fatalf("read update-flow.spec.ts: %v", err)
+	}
+	reHint := regexp.MustCompile(`VERSION=(\d+\.\d+\.\d+)`)
+	hint := reHint.FindStringSubmatch(string(spec))
+	if hint == nil {
+		t.Fatal("update-flow.spec.ts: no VERSION= skip-hint found")
+	}
+	if hint[1] != base {
+		t.Errorf("update-flow.spec.ts 探针基准 = %s，应为上一发布版 %s", hint[1], base)
+	}
+}
+/**
+// TestSetupUninstallerSysoCarryVersion: the setup/uninstaller syso files
+carry PE VERSIONINFO metadata ONLY if their versioninfo json uses the
+FLAT StringFileInfo format goversioninfo expects. The nested
+"040904B0" table was silently skipped for years — no FileDescription,
+no version, a bare-metadata exe that scores high on AV heuristics
+(the exact problem the syso pipeline was built to prevent). This pins
+the fix: both syso must embed the current Taskfile version (UTF-16).
+*/
+func TestSetupUninstallerSysoCarryVersion(t *testing.T) {
+	taskfile, err := os.ReadFile("Taskfile.yml")
+	if err != nil {
+		t.Fatalf("read Taskfile.yml: %v", err)
+	}
+	reTask := regexp.MustCompile(`VERSION: '\{\{\.VERSION \| default "(\d+\.\d+\.\d+)"\}\}'`)
+	m := reTask.FindStringSubmatch(string(taskfile))
+	if m == nil {
+		t.Fatal("Taskfile.yml: no VERSION default found")
+	}
+	ver := m[1]
+	verUTF16 := utf16Encode(ver)
+	for _, f := range []string{
+		"cmd/setup/setup_windows.syso",
+		"cmd/uninstaller/uninstall_windows.syso",
+	} {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if !bytes.Contains(data, verUTF16) {
+			t.Errorf("%s 不含版本 %s（UTF-16）——VERSIONINFO 资源缺失或过期；"+
+				"重跑 Taskfile installer 的 goversioninfo 步骤，并确认对应 "+
+				"versioninfo json 是扁平 StringFileInfo 结构", f, ver)
+		}
 	}
 }
 
-func itoa(n int) string {
-	return strings.TrimSpace(strconv.Itoa(n))
+// utf16Encode encodes an ASCII-safe version string to UTF-16-LE bytes.
+func utf16Encode(s string) []byte {
+	var b []byte
+	for _, r := range s {
+		b = append(b, byte(r), byte(r>>8))
+	}
+	return b
 }
