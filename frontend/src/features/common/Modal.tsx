@@ -26,10 +26,23 @@ export function Modal({ title, danger, width = 440, onClose, lockClose, children
   const panelRef = useRef<HTMLDivElement>(null);
   const closedRef = useRef(false);
 
-  const close = () => {
-    if (closedRef.current || lockClose) return;
+  // Programmatic close from dialog code (children' close): NOT gated by
+  // lockClose. lockClose exists to stop USER dismissal (✕/Escape/backdrop)
+  // during a long-running operation — but a dialog that calls close() after
+  // its own operation SUCCEEDED must actually close, even while the busy
+  // state is still rendering true. The old behavior (close also gated by
+  // lockClose) deadlocked exactly that sequence: run() set busy=true, the
+  // API resolved, close() hit `lockClose=true` and returned, then the
+  // finally-block reset busy — leaving the dialog open forever with the
+  // operation already done (user re-clicks = duplicate imports).
+  const forceClose = () => {
+    if (closedRef.current) return;
     closedRef.current = true;
     setPhase("closing");
+  };
+  const close = () => {
+    if (lockClose) return;
+    forceClose();
   };
 
   useEffect(() => {
@@ -105,7 +118,7 @@ export function Modal({ title, danger, width = 440, onClose, lockClose, children
         >
           {title}
         </div>
-        <div className="px-4 py-3">{children(close)}</div>
+        <div className="px-4 py-3">{children(forceClose)}</div>
       </div>
     </div>
   );
