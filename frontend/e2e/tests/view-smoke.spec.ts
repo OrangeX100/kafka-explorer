@@ -15,6 +15,11 @@ import {
 // the GLOBAL defense for the 0.4.7 isWindows bug class — five static review
 // rounds missed a button that never rendered, only a real render check
 // scales to every view. One assertion failure here names the exact view.
+//
+// COVERAGE NOTE: without KE_E2E_KAFKA the workspace-seven-sections group
+// skips — CI (no cluster var) then covers shell + settings + top-level
+// views only, so "full render coverage" is conditional on the cluster
+// variable being set in repo Variables (KE_E2E_KAFKA).
 
 let page: Page;
 const CONN = `${RUN_ID}-smoke`;

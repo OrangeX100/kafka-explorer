@@ -239,7 +239,7 @@ test("查找：关键字命中 → 徽章「翻页已停用」→ 正则多条 �
     await expect.poll(async () => await positionBadge(p), { timeout: 15_000 }).toBe("最新一页");
   }));
 
-test.fixme("导出剪贴板 → 导入粘贴往返", () =>
+test("导出剪贴板 → 导入粘贴往返", () =>
   run(async (p) => {
     test.setTimeout(240_000);
     // EXPORT: export dialog → JSONL → 复制到剪贴板 → fresh success toast
