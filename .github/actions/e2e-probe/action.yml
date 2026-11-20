@@ -49,7 +49,7 @@ runs:
         # image update flipped Go's default to CGO_ENABLED=1 (nsis/mingw
         # now on PATH), and the CGO build created the WebView2 environment
         # but never opened its window — the CDP port never came up.
-        CGO_ENABLED=0 go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version=0.4.12 -X kafkaexplorer/internal/buildinfo.Commit=${GITHUB_SHA:0:7} -X kafkaexplorer/internal/buildinfo.UpdateRepo=OrangeX100/kafka-explorer -X kafkaexplorer/internal/buildinfo.DebugFeatures=cdp" -o bin/kafka-explorer-cdp.exe .
+        CGO_ENABLED=0 go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version=0.4.13 -X kafkaexplorer/internal/buildinfo.Commit=${GITHUB_SHA:0:7} -X kafkaexplorer/internal/buildinfo.UpdateRepo=OrangeX100/kafka-explorer -X kafkaexplorer/internal/buildinfo.DebugFeatures=cdp" -o bin/kafka-explorer-cdp.exe .
 
     - name: Launch app with CDP port
       shell: bash
