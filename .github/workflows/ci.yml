@@ -17,6 +17,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # probe_contract_test.go resolves the probe base from release
+          # tags; the default shallow checkout (fetch-depth: 1, fetch-tags:
+          # false → `git fetch --no-tags`) leaves the runner with ZERO tags
+          # and the contract silently skipped its entire first CI round.
+          fetch-tags: true
 
       - uses: actions/setup-go@v5
         with:

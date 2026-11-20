@@ -71,7 +71,13 @@ func lastReleasedVersion(t *testing.T) string {
 		}
 	}
 	if len(seen) < 2 {
-		t.Skip("需要至少两个 release tag 才能确定探针基准版本")
+		// FAIL, not skip: a tag-less checkout (CI shallow clone without
+		// fetch-tags, or a clone that pruned tags) is exactly the environment
+		// where this contract must not silently evaporate — it skipped for
+		// its entire first CI round that way (checkout defaults to
+		// fetch-depth: 1 / fetch-tags: false → ZERO tags on the runner).
+		t.Fatalf("release tag 不足两个，无法确定探针基准——契约必须红而不是静默跳过。" +
+			"CI: checkout 已配 fetch-tags: true（ci.yml gate）；本地: git fetch --tags")
 	}
 	return seen[1]
 }
@@ -121,18 +127,31 @@ func TestProbeBaseVersionInContract(t *testing.T) {
 			"基准过期会让更新链探针静默 skip 而 CI 仍绿", stamp[1], base)
 	}
 
-	// update-flow.spec.ts: skip-hint must reference the same base
+	// update-flow.spec.ts: the PROBE_BASE constant must equal the base. The
+	// discover assertion derives from this constant, so a stale constant
+	// makes the probe assert a version nobody builds (live example: the
+	// stamp moved 0.4.10→0.4.11 while a baked-in assertion still said
+	// 0.4.10 — CI e2e failed on a PERFECTLY healthy discover render).
 	spec, err := os.ReadFile("frontend/e2e/tests/update-flow.spec.ts")
 	if err != nil {
 		t.Fatalf("read update-flow.spec.ts: %v", err)
 	}
-	reHint := regexp.MustCompile(`VERSION=(\d+\.\d+\.\d+)`)
-	hint := reHint.FindStringSubmatch(string(spec))
+	reBase := regexp.MustCompile(`PROBE_BASE = "(\d+\.\d+\.\d+)"`)
+	hint := reBase.FindStringSubmatch(string(spec))
 	if hint == nil {
-		t.Fatal("update-flow.spec.ts: no VERSION= skip-hint found")
+		t.Fatal("update-flow.spec.ts: no PROBE_BASE constant found")
 	}
 	if hint[1] != base {
-		t.Errorf("update-flow.spec.ts 探针基准 = %s，应为上一发布版 %s", hint[1], base)
+		t.Errorf("update-flow.spec.ts PROBE_BASE = %s，应为上一发布版 %s（"+
+			"断言与 skip-hint 都从它派生）", hint[1], base)
+	}
+	// A version literal baked INTO the assertion itself is the drift class
+	// that broke the e2e job above — the assertion template must derive
+	// from PROBE_BASE, never restate a version. Any literal occurrence of
+	// the assertion text with a real digit reintroduces exactly that.
+	if re := regexp.MustCompile(`当前版本 0\.`); re.MatchString(string(spec)) {
+		t.Errorf("update-flow.spec.ts 断言内出现硬编码版本字面量（当前版本 0.x）——" +
+			"应从 PROBE_BASE 常量派生，禁止在断言里写死版本")
 	}
 }
 /**

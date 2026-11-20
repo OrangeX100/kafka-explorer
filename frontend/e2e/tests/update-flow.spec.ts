@@ -18,6 +18,17 @@ import {
 // Requires KE_E2E_UPDATE_FLOW=1 AND a binary built with
 // `task dev:cdp VERSION=0.4.11`; otherwise the suite skips.
 
+// Probe base: the version the CI debug build stamps (must sit BELOW the
+// published latest so 检查更新 discovers an update). Single source for the
+// discover assertion below AND the skip hints — set_version.py rewrites
+// this constant (and every "0.4.11" literal in comments) at every bump:
+// the old released version becomes the new base. probe_contract_test.go
+// pins this constant to the second-newest release tag. Hard-coding a
+// version INSIDE an assertion was exactly the drift that broke CI: the
+// stamp moved 0.4.10 → 0.4.11, the app rendered 0.4.11 correctly, and the
+// assertion still expected 0.4.10.
+const PROBE_BASE = "0.4.11";
+
 let page: Page;
 
 test.beforeAll(async () => {
@@ -57,8 +68,14 @@ test("检查更新→发现新版→按钮渲染→下载启动→取消→恢�
   }
 
   // ---- discover: new version + version numbers rendered ----
+  // Assertion derives from PROBE_BASE (never a baked-in literal — see the
+  // constant's comment for the CI break that proved why).
   await expect(result).toContainText("发现新版本");
-  await expect(result).toContainText(/当前版本 0\.4\.10，最新版本 \d+\.\d+\.\d+/);
+  await expect(result).toContainText(
+    new RegExp(
+      `当前版本 ${PROBE_BASE.replaceAll(".", "\\.")}，最新版本 \\d+\\.\\d+\\.\\d+`
+    )
+  );
 
   // ---- one-click download button renders (the 0.4.7 isWindows chain) ----
   const downloadBtn = result.getByRole("button", { name: "下载更新" });
