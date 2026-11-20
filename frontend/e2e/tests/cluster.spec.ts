@@ -263,20 +263,15 @@ test("messages-paging：最早/最新/上一页/下一页→表内容与徽章�
   await waitForWindow(0, 24);
   console.log("[bc] prev ok", Date.now());
   await expect.poll(async () => positionBadge(page), { timeout: 10_000 }).toBe("offset 0–24");
-  // 上一页窗口两端断言（同上：行叠加 bug 登记在案，行数契约暂不卡）
   const prevOffs = (await messageRows(page)).map((r) => r.offset);
-  expect(prevOffs[0]).toBe(0);
-  expect(prevOffs[prevOffs.length - 1]).toBeLessThanOrEqual(24);
-  for (let i = 1; i < prevOffs.length; i++) expect(prevOffs[i]).toBeGreaterThan(prevOffs[i - 1]);
+  expect(prevOffs).toEqual(Array.from({ length: 25 }, (_, k) => k));
 
   // 下一页: start advances a page → [25..29] (the remaining 5 records)
   await page.getByRole("button", { name: "下一页" }).click();
   await waitForWindow(25, 29);
   console.log("[bc] next ok", Date.now());
   await expect.poll(async () => positionBadge(page), { timeout: 10_000 }).toBe("offset 25–29");
-  const nextOffs = (await messageRows(page)).map((r) => r.offset);
-  expect(nextOffs[0]).toBe(25);
-  expect(nextOffs[nextOffs.length - 1]).toBe(29);
+  expect((await messageRows(page)).map((r) => r.offset)).toEqual([25, 26, 27, 28, 29]);
 
   // 最早: one-shot jump to the log start
   await page.getByRole("button", { name: "最早" }).click();

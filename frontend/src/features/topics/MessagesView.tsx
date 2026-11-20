@@ -344,10 +344,13 @@ export function MessagesView({
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full table-fixed border-collapse text-xs">
             <MessageTableHead widths={colWidths} startResize={startResize} resetCol={resetCol} />
-            <tbody
-              key={messages.length > 0 ? `${messages[0].partition}-${messages[0].offset}` : "empty"}
-              className="anim-fade"
-            >
+            {/* NO keyed tbody + anim-fade here: the per-window key remounted
+                the whole tbody on every page flip, and for one frame the old
+                and new tbody coexisted in the DOM — probe hit-test counts
+                read 36 rows for a 25-row window ("行叠加"). Rows animate via
+                the table's own fade below; per-row keys keep reconciliation
+                correct. (2026-11-21 stackup round) */}
+            <tbody>
               {loading && messages.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-3 py-4">
