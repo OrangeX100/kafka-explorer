@@ -19,10 +19,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # probe_contract_test.go resolves the probe base from release
-          # tags; the default shallow checkout (fetch-depth: 1, fetch-tags:
-          # false → `git fetch --no-tags`) leaves the runner with ZERO tags
-          # and the contract silently skipped its entire first CI round.
-          fetch-tags: true
+          # tags; the default shallow checkout (fetch-depth: 1) leaves the
+          # runner with ZERO tags and the contract silently skipped its
+          # entire first CI round. fetch-tags: true alone is NOT enough on
+          # a depth-1 fetch (observed: it only drops `--no-tags` from the
+          # single-ref fetch; git auto-follows only tags pointing at
+          # commits inside the shallow history — none). fetch-depth: 0
+          # fetches all history for all branches AND tags.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
