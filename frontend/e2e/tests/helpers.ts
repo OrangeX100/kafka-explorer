@@ -274,17 +274,31 @@ export async function expectToast(page: Page, text: string | RegExp) {
  *  the truth. */
 export async function connListOpen(page: Page): Promise<boolean> {
   return page.evaluate(() => {
-    const el = document.querySelector('[data-testid="conn-row"]');
-    if (!el) return false;
+    const pane = document.querySelector('[role="complementary"]');
+    if (!pane) return false;
+    // Probe = a connection row when one exists, else the pane's 新建连接
+    // button: a FRESH app (CI runner) has ZERO rows and the row-only probe
+    // read that as "collapsed" forever — ensureConnListOpen then cycled the
+    // rail toggle 10× (a no-op with no active connection) and threw, even
+    // though the list was plainly open (2026-11-20 CI first-run evidence).
+    const probe =
+      document.querySelector('[data-testid="conn-row"]') ||
+      [...pane.querySelectorAll("button")].find((b) =>
+        (b.textContent ?? "").includes("新建连接")
+      );
+    if (!probe) return false;
     // scroll it into view FIRST: with many rows the checked row can sit
     // below the fold — its rect.y exceeds the viewport and elementFromPoint
     // returns null, which a naive hit-test misreads as "collapsed"
-    el.scrollIntoView({ block: "center" });
-    const r = el.getBoundingClientRect();
+    probe.scrollIntoView({ block: "center" });
+    const r = probe.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return false;
     if (r.bottom <= 0 || r.top >= window.innerHeight) return false; // truly off-screen
-    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 12));
-    return !!hit && (hit === el || el.contains(hit) || el.contains(hit.parentElement));
+    const hit = document.elementFromPoint(
+      r.left + r.width / 2,
+      r.top + Math.min(r.height / 2, 12)
+    );
+    return !!hit && (hit === probe || probe.contains(hit) || pane.contains(hit));
   });
 }
 
