@@ -10,8 +10,10 @@ package main
 
 import (
 	"embed"
+	"os"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"kafkaexplorer/internal/buildinfo"
 	"kafkaexplorer/internal/closeguard"
 )
 
@@ -23,6 +25,14 @@ var engineExe []byte
 
 func main() {
 	winOptions := application.WindowsOptions{}
+	// UI-probe affordance, same double-gate as internal/app/bootstrap: a
+	// cdp-stamped probe build + KE_DEBUG_CDP=1 opens the debug port so the
+	// WM_CLOSE guard probe can click 安装 over CDP (the WebView2 UIA bridge
+	// exposes only unnamed elements — see scripts/installer_guard_probe.ps1).
+	// Release builds ship with the stamp empty, so this is inert in prod.
+	if os.Getenv("KE_DEBUG_CDP") == "1" && buildinfo.DebugFeatures == "cdp" {
+		winOptions.AdditionalBrowserArgs = []string{"--remote-debugging-port=9223"}
+	}
 
 	app := application.New(application.Options{
 		Name:    "Kafka Explorer Setup",

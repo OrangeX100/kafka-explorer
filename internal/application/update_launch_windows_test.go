@@ -137,6 +137,63 @@ func TestWaiterScriptRunsEndToEnd(t *testing.T) {
 	t.Fatalf("REGRESSION (P0-2): waiter script never completed — argv folded again? err.log: %s", raw)
 }
 
+// TestWaiterScriptSpacedPathsEndToEnd closes the long-standing "用户名含
+// 空格路径未真机验证" item (v0.4.4 leftover): a Windows profile with spaces
+// (C:\Users\John Doe\...) puts EVERY waiter path — script, log, staged
+// setup — inside a spaced directory. Split argv handles spaces only if the
+// quoting chain stays intact end-to-end, so this drives the EXACT
+// production launch (waiterScriptBody → launchDetached + waiterArgs)
+// against a directory whose every component contains a space.
+func TestWaiterScriptSpacedPathsEndToEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live process test")
+	}
+	dir := filepath.Join(t.TempDir(), "ke waiter spaced dir", "sub dir with spaces")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir spaced dir: %v", err)
+	}
+	fakeSetup := filepath.Join(dir, "KafkaExplorer_Setup_0.0.0-test exe.exe")
+	buildFakeSetup(t, fakeSetup)
+
+	script := filepath.Join(dir, "update waiter.ps1")
+	logFile := filepath.Join(dir, "update waiter.err.log")
+	body := waiterScriptBody(logFile)
+	if err := os.WriteFile(script, append([]byte("\xef\xbb\xbf"), []byte(body)...), 0o600); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	ps := filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+	if _, err := os.Stat(ps); err != nil {
+		t.Skipf("powershell not found: %v", err)
+	}
+	env := map[string]string{
+		"KE_UPDATE_PID":      "999999999",
+		"KE_UPDATE_SETUP":    fakeSetup,
+		"KE_UPDATE_APP":      "unused",
+		"KE_UPDATE_RELAUNCH": "0",
+	}
+	if err := launchDetached(ps, waiterArgs(script), env); err != nil {
+		t.Fatalf("launchDetached: %v", err)
+	}
+
+	// Same success signature as the unspaced E2E: script self-deleted,
+	// staged setup removed, no err.log — under spaces everywhere.
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		_, statScript := os.Stat(script)
+		_, statSetup := os.Stat(fakeSetup)
+		if os.IsNotExist(statScript) && os.IsNotExist(statSetup) {
+			if _, statLog := os.Stat(logFile); statLog == nil {
+				raw, _ := os.ReadFile(logFile)
+				t.Fatalf("waiter hit the failure path instead of success: %s", raw)
+			}
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	raw, _ := os.ReadFile(logFile)
+	t.Fatalf("REGRESSION: spaced-path waiter never completed — quoting chain broke. err.log: %s", raw)
+}
+
 // TestWaiterScriptFailurePathPinsExitCode: the 045 waiter checks the
 // installer's exit code — a failing setup must leave the err.log note and
 // KEEP the staged file (no silent success).
