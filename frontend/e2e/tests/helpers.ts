@@ -274,19 +274,24 @@ export async function expectToast(page: Page, text: string | RegExp) {
  *  the truth. */
 export async function connListOpen(page: Page): Promise<boolean> {
   return page.evaluate(() => {
-    const pane = document.querySelector('[role="complementary"]');
+    // The sidebar is an <aside> — its complementary role is IMPLICIT (the
+    // aria-complementary name only exists in Playwright snapshots); an
+    // explicit [role=complementary] attribute does not exist in the DOM.
+    const pane = document.querySelector('aside');
     if (!pane) return false;
     // Probe = a connection row when one exists, else the pane's 新建连接
     // button: a FRESH app (CI runner) has ZERO rows and the row-only probe
     // read that as "collapsed" forever — ensureConnListOpen then cycled the
     // rail toggle 10× (a no-op with no active connection) and threw, even
     // though the list was plainly open (2026-11-20 CI first-run evidence).
+    // Probe must sit BELOW the frameless-window drag strip: wails paints an
+    // invisible --wails-draggable overlay across the top of the pane, so
+    // the 新建连接 header button hit-tests to the overlay and reads as
+    // "collapsed" even while the list is plainly open (CI evidence). The
+    // search textbox lives below that strip; rows do too.
     const probe =
       document.querySelector('[data-testid="conn-row"]') ||
-      [...pane.querySelectorAll("button")].find((b) =>
-        (b.textContent ?? "").includes("新建连接")
-      );
-    if (!probe) return false;
+      pane.querySelector("input[type='text'], input:not([type])");
     // scroll it into view FIRST: with many rows the checked row can sit
     // below the fold — its rect.y exceeds the viewport and elementFromPoint
     // returns null, which a naive hit-test misreads as "collapsed"
