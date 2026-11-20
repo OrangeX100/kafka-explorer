@@ -182,7 +182,14 @@ test("详情解码链：纯 JSON 自动选 JSON 视图，Hex 可切换", () =>
     test.setTimeout(120_000);
     const ack = await produceMessage(p, '{"n": 1, "ok": true}');
     expect(ack.offset).toBeGreaterThanOrEqual(0);
-    await openFirstMessageDetail(p);
+    // 表格不随 produce 自动刷新且受分区选择器过滤——首行可能是旧文本
+    // 记录（或空表导致 openFirst 静默空点击，曾拿到空 tab 串）。切到 ack
+    // 分区刷新后开最后一行（=刚写入的 JSON 记录），与发送测试同款模式。
+    const partTrigger = p.locator('button[role="combobox"]').first();
+    await keSelect(p, partTrigger, `分区 ${ack.partition}`);
+    await p.getByRole("button", { name: "刷新" }).first().click();
+    await p.waitForTimeout(1500);
+    await openLastMessageDetail(p);
     await p.waitForTimeout(600);
     // bestViewFor: valid JSON text auto-picks the JSON view
     await expect(detailActiveTab(p)).resolves.toMatch(/JSON/);
@@ -259,9 +266,12 @@ test("导出剪贴板 → 导入粘贴往返", () =>
       await p.waitForTimeout(200);
     }
     expect(fresh, "复制按钮应产出 成功/错误 反馈 toast").toBeTruthy();
-    await dlg.getByRole("button", { name: "关闭" }).click().catch(() => {});
-    await expect(p.locator('[role="dialog"]')).toHaveCount(0, { timeout: 5_000 });
-    await expect(p.locator('[role="dialog"]')).toHaveCount(0, { timeout: 5_000 });
+    // 复制成功后对话框自关闭（forceClose）；spec 再点「关闭」会与卸载
+    // 动画竞态——链式 locator（[data-state=open] >> .last() >> 关闭）重
+    // 解析时等父对话框"再出现"且 timeout=0，曾把整个用例挂满全局 240s
+    // （2026-11-20 trace 实证：click before 事件后永无 after）。只断言
+    // 排空，不再点关闭。
+    await expect(p.locator('[role="dialog"]')).toHaveCount(0, { timeout: 10_000 });
 
     // IMPORT leg. The 2026-11-20 round closed the old "UNKNOWN_TOPIC on
     // explicit partition" case: Go-level ITs against the real cluster
@@ -280,7 +290,10 @@ test("导出剪贴板 → 导入粘贴往返", () =>
       .locator("textarea")
       .first()
       .fill(JSON.stringify({ value: "imported-bad-partition", partition: 99 }));
-    await idlg.getByRole("button", { name: "导入", exact: true }).last().click();
+    // 提交按钮可访问名是「导入消息」——getByRole(name:"导入",exact) 永不
+    // 匹配且默认 timeout=0 曾挂满全局超时；用 hasText+显式上界（冒烟脚本
+    // 同款已验证模式）。
+    await idlg.locator("button").filter({ hasText: "导入" }).last().click({ timeout: 8_000 });
     const errBox = idlg.getByText(/分区 99 不存在/);
     await expect(errBox).toBeVisible({ timeout: 10_000 });
     await expect(idlg.getByText(/修正内容后可直接重试/)).toBeVisible();
@@ -293,7 +306,7 @@ test("导出剪贴板 → 导入粘贴往返", () =>
       .fill(JSON.stringify({ value: "imported-roundtrip" }));
     // the toast fires BEFORE the dialog closes — poll body text instead of
     // chasing the short-lived toast element
-    await idlg.getByRole("button", { name: "导入", exact: true }).last().click();
+    await idlg.locator("button").filter({ hasText: "导入" }).last().click({ timeout: 8_000 });
     await expect
       .poll(async () => (await p.locator("body").innerText()).includes("已导入"), {
         timeout: 10_000,
@@ -303,6 +316,9 @@ test("导出剪贴板 → 导入粘贴往返", () =>
     // refresh to the newest window, then the imported record must appear
     await p.getByRole("button", { name: "最新" }).first().click();
     await expect
-      .poll(async () => document.body.innerText.includes("imported-roundtrip"), { timeout: 15_000 })
+      .poll(
+        async () => (await p.locator("body").innerText()).includes("imported-roundtrip"),
+        { timeout: 15_000 },
+      )
       .toBe(true);
   }));

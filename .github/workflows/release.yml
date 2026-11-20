@@ -24,9 +24,9 @@ jobs:
       - uses: ./.github/actions/e2e-probe
         with:
           # cluster probes (connect/messages/groups/registry paths) run only
-          # when the repo variable points at the test broker — set
-          # KE_E2E_KAFKA in repo Variables to enable them on releases
-          kafka: ${{ vars.KE_E2E_KAFKA }}
+          # when the repo secret points at the test broker — KE_E2E_KAFKA is
+          # a SECRET so the address stays private on a public repo
+          kafka: ${{ secrets.KE_E2E_KAFKA }}
           update-flow: "1"
 
   release:

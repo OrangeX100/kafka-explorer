@@ -7,7 +7,7 @@ name: e2e-probe
 description: Build debug exe + run Playwright UI probes over CDP
 inputs:
   kafka:
-    description: "host:port of a reachable Kafka broker (empty = cluster probes skip)"
+    description: "host:port of a reachable Kafka broker (empty = cluster probes skip). Pass a SECRET, not a var — a var would publish the test-cluster address on a public repo"
     required: false
     default: ""
   update-flow:
