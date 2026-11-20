@@ -24,4 +24,5 @@ scripts/av-whitelist.ps1
 
 # Playwright UI-automation artifacts
 frontend/test-results/
+test-results/  # playwright 从仓库根误跑时的漏出点
 frontend/playwright-report/
