@@ -445,8 +445,13 @@ export async function createTopic(page: Page, name: string, partitions: number) 
   await dlg.locator("input").nth(0).fill(name);
   await dlg.locator("input[type=number]").nth(0).fill(String(partitions));
   await dlg.getByRole("button", { name: "创建" }).click();
+  // Topic list is PAGED (50/page, name-sorted): leaked e2e-* topics once
+  // pushed the cluster past one page and new topics landed on page 2 —
+  // invisible to DOM lookups (2026-11-21 goto flake). The leak is cleaned
+  // at the source (scripts/cleanup-e2e-topics.py); keep an assert window
+  // wide enough for kadm's ≤10s metadata cadence.
   await expect(page.locator('[data-testid="topic-row"]').filter({ hasText: name }).first()).toBeVisible({
-    timeout: 20_000,
+    timeout: 30_000,
   });
 }
 

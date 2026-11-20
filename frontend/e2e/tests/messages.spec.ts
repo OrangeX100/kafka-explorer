@@ -325,12 +325,24 @@ test("导出剪贴板 → 导入粘贴往返", () =>
     // the toast fires BEFORE the dialog closes — poll body text instead of
     // chasing the short-lived toast element
     await idlg.locator("button").filter({ hasText: "导入" }).last().click({ timeout: 8_000 });
+    // body-text poll is the toast chase; a WIDER window + the inline panel
+    // as the second signal (post-fix the dialog shows errors inline, so a
+    // failure is always visible somewhere — never a silent dead dialog)
     await expect
-      .poll(async () => (await p.locator("body").innerText()).includes("已导入"), {
-        timeout: 10_000,
-      })
+      .poll(
+        async () => {
+          const body = await p.locator("body").innerText();
+          return body.includes("已导入") || body.includes("分区 99 不存在");
+        },
+        { timeout: 20_000 },
+      )
       .toBe(true);
+    // the corrected payload must SUCCEED — assert after the dialog fully
+    // unmounts: its exit animation (~400ms) keeps the negative branch's
+    // inline error in body.innerText even on success
     await idlg.waitFor({ state: "hidden", timeout: 10_000 });
+    const bodyNow = await p.locator("body").innerText();
+    expect(bodyNow).not.toContain("分区 99 不存在");
     // refresh to the newest window, then the imported record must appear
     await p.getByRole("button", { name: "最新" }).first().click();
     await expect

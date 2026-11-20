@@ -308,12 +308,22 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
   }
 
   // jump to partition 1 offset 0 from the aggregated (All) view
-  await page.getByRole("button", { name: "跳转到" }).click();
+  // 跳转对话框里有分区与模式等多个 combobox（还有 perPage 在工具栏）——
+  // 全部有界+限定（CI 上无界 click 曾把整个用例拖进 180s 全局超时，
+  // develop 同提交绿 = 纯 flaky，2026-11-21）
+  const gotoBtn = page.getByRole("button", { name: "跳转到" });
+  await gotoBtn.click({ timeout: 8_000 });
   const dlg = dialog(page);
   await dlg.waitFor({ state: "visible" });
-  await keSelect(page, dlg.locator('button[role="combobox"]').first(), "1");
+  const dlgCombos = dlg.locator('button[role="combobox"]');
+  await dlgCombos.first().click({ timeout: 8_000 });
+  await page
+    .locator('[role="listbox"][data-state="open"] [role="option"]')
+    .filter({ hasText: /^1$/ })
+    .first()
+    .click({ timeout: 5_000 });
   await dlg.locator("input[type=number]").fill("0");
-  await dlg.getByRole("button", { name: "跳转", exact: true }).click();
+  await dlg.getByRole("button", { name: "跳转", exact: true }).click({ timeout: 8_000 });
 
   // the badge flips instantly while the jump's browse loads async — poll on
   // ROW CONTENT (all p1, ascending, starting at 0) before asserting
