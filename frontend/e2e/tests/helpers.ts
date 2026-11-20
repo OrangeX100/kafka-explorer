@@ -428,7 +428,10 @@ export async function deleteConnection(page: Page, name: string) {
 export async function createTopic(page: Page, name: string, partitions: number) {
   const existing = page.locator('[data-testid="topic-row"]').filter({ hasText: name }).first();
   if ((await existing.count()) > 0 && (await existing.isVisible())) return;
-  await page.locator('button[title="新建主题"]').click();
+  // .first(): a fresh cluster view renders TWO 新建主题 buttons (toolbar +
+  // empty-state main pane) — strict mode would reject the bare locator
+  // (2026-11-20 CI run 4: admin/cluster paging failed on exactly this)
+  await page.locator('button[title="新建主题"]').first().click();
   const dlg = dialog(page);
   await dlg.waitFor({ state: "visible" });
   await dlg.locator("input").nth(0).fill(name);
