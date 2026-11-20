@@ -182,11 +182,27 @@ function CreateACLDialog({
   const [patternType, setPatternType] = useState("LITERAL");
   const [host, setHost] = useState("*");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const toast = useToast();
   const closeRef = { current: onClose };
 
   const create = async () => {
+    // 点击校验（中文友好提示政策）：曾用 disabled 死按钮拦空资源名称——
+    // 点击毫无反应、对话框不消失；裸「User:」（冒号后空）会被 broker 拒绝
+    // 却只有一闪而过的 toast。改为点击时内联列出全部问题。
+    const problems: string[] = [];
+    if (!principal.trim() || /:$/.test(principal.trim())) {
+      problems.push(t("acls.errPrincipalBare"));
+    }
+    if (!resourceName.trim()) {
+      problems.push(t("acls.errResourceName"));
+    }
+    if (problems.length) {
+      setError(problems.join("\n"));
+      return;
+    }
     setBusy(true);
+    setError(null);
     try {
       await adminApi.createACL(connectionId, {
         principal, operation, permissionType, resourceType, resourceName, patternType, host,
@@ -194,7 +210,9 @@ function CreateACLDialog({
       toast.show(`${principal} → ${resourceType}:${resourceName}`, "ok");
       onCreated();
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      const msg = friendlyError(err);
+      toast.show(msg, "error");
+      setError(msg);
     } finally {
       setBusy(false);
     }
@@ -253,11 +271,17 @@ function CreateACLDialog({
             <Field label={t("acls.colHost")} desc={t("acls.fieldDesc.host")}>
               <input className="field font-mono" value={host} onChange={(e) => setHost(e.target.value)} />
             </Field>
+            {error && (
+              <div className="rounded border border-danger/40 bg-danger/10 whitespace-pre-line px-2.5 py-2 text-11 text-danger">
+                {error}
+                <div className="mt-1 text-10 text-ink-400">{t("dialog.retryHint")}</div>
+              </div>
+            )}
             <div className="mt-3 flex justify-end gap-2 border-t border-ink-700 pt-3">
               <button className="btn" onClick={close}>
                 {t("conn.cancel")}
               </button>
-              <button className="btn btn-accent" disabled={busy || !resourceName || !principal} onClick={() => void create()}>
+              <button className="btn btn-accent" disabled={busy} onClick={() => void create()}>
                 {t("conn.save")}
               </button>
             </div>

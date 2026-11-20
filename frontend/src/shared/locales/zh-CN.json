@@ -816,5 +816,9 @@
   "reg.levelFull_long": "双向兼容：新版 schema 与上一版本双向兼容",
   "reg.levelFullT_long": "双向兼容（含历史）：新版 schema 与所有历史版本双向兼容",
   "reg.levelNone_long": "不检查兼容性：任何 schema 都可注册（慎用，混用后难以回退）",
-  "settings.updateNoAsset": "该版本未提供自动更新包（或检查时更新源临时不可用），请通过上方「打开发布页」手动下载安装；稍后重新检查通常可恢复一键更新。"
+  "settings.updateNoAsset": "该版本未提供自动更新包（或检查时更新源临时不可用），请通过上方「打开发布页」手动下载安装；稍后重新检查通常可恢复一键更新。",
+  "quotas.errValue": "数值不能为空——填每秒字节数（如 1048576），0 表示完全禁止该操作。",
+  "acls.errPrincipalBare": "主体不完整——「User:」冒号后要填用户名（SASL 认证用户名）。",
+  "acls.errResourceName": "资源名称不能为空——TOPIC 填主题名，GROUP 填消费者组名，PREFIXED 填前缀。",
+  "dialog.retryHint": "对话框保持打开，修正内容后可直接重试。"
 }

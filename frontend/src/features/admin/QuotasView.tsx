@@ -121,19 +121,32 @@ function CreateQuotaDialog({
   const [key, setKey] = useState("producer_byte_rate");
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const toast = useToast();
   const closeRef = { current: onClose };
 
   const create = async () => {
+    // 点击校验（中文友好提示政策：分类+指引+可见反馈）。曾用 disabled 死
+    // 按钮拦空数值——点击毫无反应、对话框不消失，且与「留空表示默认配额
+    // 组」的文案自相矛盾：线协议里空实体名即默认实体（broker 语义），本来
+    // 就支持，这里放开并允许真正的默认配额组。
+    const num = Number(value);
+    if (!value.trim() || !Number.isFinite(num)) {
+      setError(t("quotas.errValue"));
+      return;
+    }
     setBusy(true);
+    setError(null);
     try {
       const entity: Record<string, string> =
         entityType === "ip" ? { "ip": entityName } : { [entityType]: entityName };
-      await adminApi.alterQuota(connectionId, entity, key, Number(value));
-      toast.show(t("quotas.created", `${entityType}=${entityName || "default"}`, key, value), "ok");
+      await adminApi.alterQuota(connectionId, entity, key, num);
+      toast.show(t("quotas.created", `${entityType}=${entityName || "default"}`, key, String(num)), "ok");
       onCreated();
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      const msg = friendlyError(err);
+      toast.show(msg, "error");
+      setError(msg);
     } finally {
       setBusy(false);
     }
@@ -191,15 +204,17 @@ function CreateQuotaDialog({
             <p key={key} className="text-10 leading-relaxed text-ink-400 anim-fade">
               {t(`quotas.key.${key}`)}
             </p>
+            {error && (
+              <div className="rounded border border-danger/40 bg-danger/10 px-2.5 py-2 text-11 text-danger">
+                {error}
+                <div className="mt-1 text-10 text-ink-400">{t("dialog.retryHint")}</div>
+              </div>
+            )}
             <div className="mt-3 flex justify-end gap-2 border-t border-ink-700 pt-3">
               <button className="btn" onClick={close}>
                 {t("conn.cancel")}
               </button>
-              <button
-                className="btn btn-accent"
-                disabled={busy || !entityName || !value || Number.isNaN(Number(value))}
-                onClick={() => void create()}
-              >
+              <button className="btn btn-accent" disabled={busy} onClick={() => void create()}>
                 {t("conn.save")}
               </button>
             </div>

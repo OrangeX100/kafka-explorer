@@ -816,5 +816,9 @@
   "reg.levelFull_long": "Full: new schema is both backward and forward compatible with the last version",
   "reg.levelFullT_long": "Full (transitive): new schema is compatible with ALL historical versions",
   "reg.levelNone_long": "No compatibility check: any schema can register (careful — hard to undo once mixed)",
-  "settings.updateNoAsset": "This release carries no auto-update package (or the check hit a temporary update-source outage). Use \"Open release page\" above to install manually; re-check later usually restores one-click update."
+  "settings.updateNoAsset": "This release carries no auto-update package (or the check hit a temporary update-source outage). Use \"Open release page\" above to install manually; re-check later usually restores one-click update.",
+  "quotas.errValue": "Value is required — bytes per second (e.g. 1048576); 0 blocks the operation entirely.",
+  "acls.errPrincipalBare": "Incomplete principal — fill the username after \"User:\" (the SASL username).",
+  "acls.errResourceName": "Resource name is required — TOPIC: topic name, GROUP: consumer group, PREFIXED: prefix.",
+  "dialog.retryHint": "The dialog stays open — fix the input and retry."
 }
