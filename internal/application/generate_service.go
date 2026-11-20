@@ -282,6 +282,35 @@ func decodeText(b64 string) (string, bool) {
 	return raw, true
 }
 
+// importTopicPartitions validates the destination topic BEFORE any record
+// leaves: a stale/removed topic used to surface mid-loop as
+// UNKNOWN_TOPIC_OR_PARTITION buried in "import line 1" — indistinguishable
+// from a bad line (2026-11-20 import bug round). One cheap metadata call
+// (same cost as export's exportPartitions) turns it into an actionable
+// message; the max partition id also feeds the per-line range guard.
+func (s *MessageIOService) importTopicPartitions(ctx context.Context, client *kafka.Client, topic string) ([]int32, error) {
+	ids, err := client.TopicPartitionIDs(ctx, topic)
+	if err != nil {
+		// mapErr deliberately flattens *kerr.Error to a labeled string, so
+		// the code name is all that survives here — match it to render the
+		// missing-topic sentence with the topic name.
+		if strings.Contains(err.Error(), "UNKNOWN_TOPIC_OR_PARTITION") {
+			return nil, fmt.Errorf("导入前置检查失败：主题「%s」不存在（或元数据尚未同步）。"+
+				"主题可能刚被删除——请刷新主题列表确认后再试", topic)
+		}
+		return nil, fmt.Errorf("导入前置检查失败：%w。主题可能刚被删除或元数据尚未同步——请刷新主题列表确认后再试", err)
+	}
+	return ids, nil
+}
+
+// importPartitionGuard rejects an out-of-range partition before it reaches
+// kgo: the client-side rejection there ("invalid record partitioning choice
+// of 99 from 2 available") names no topic and no valid range.
+func importPartitionGuard(lineNo int, partition, maxPartition int32) error {
+	return fmt.Errorf("%w: line %d: 分区 %d 不存在（主题分区号 0-%d）——请修正该行 JSON 的 partition 字段",
+		domain.ErrInvalid, lineNo, partition, maxPartition)
+}
+
 // ImportFile produces the parsed records of an import payload.
 func (s *MessageIOService) Import(ctx context.Context, in domain.GenerateInput) (domain.GenerateResult, error) {
 	// Reuse the generator's count/topic fields; Template carries the JSONL payload.
@@ -289,6 +318,11 @@ func (s *MessageIOService) Import(ctx context.Context, in domain.GenerateInput) 
 	if err != nil {
 		return domain.GenerateResult{}, err
 	}
+	ids, err := s.importTopicPartitions(ctx, client, in.Topic)
+	if err != nil {
+		return domain.GenerateResult{}, err
+	}
+	maxPartition := ids[len(ids)-1]
 	start := time.Now()
 	first := int64(-1)
 	count := 0
@@ -301,6 +335,10 @@ func (s *MessageIOService) Import(ctx context.Context, in domain.GenerateInput) 
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			return domain.GenerateResult{Produced: count, FirstOffset: first, ElapsedMs: time.Since(start).Milliseconds()},
 				fmt.Errorf("%w: line %d is not valid JSON: %v", domain.ErrInvalid, i+1, err)
+		}
+		if rec.Partition != nil && (*rec.Partition < 0 || *rec.Partition > maxPartition) {
+			return domain.GenerateResult{Produced: count, FirstOffset: first, ElapsedMs: time.Since(start).Milliseconds()},
+				importPartitionGuard(i+1, *rec.Partition, maxPartition)
 		}
 		var key, value []byte
 		if rec.Key != nil {
@@ -351,6 +389,11 @@ func (s *MessageIOService) ImportFromFile(ctx context.Context, in domain.ImportF
 	if err != nil {
 		return domain.ImportFileResult{}, err
 	}
+	ids, err := s.importTopicPartitions(ctx, client, in.Topic)
+	if err != nil {
+		return domain.ImportFileResult{}, err
+	}
+	maxPartition := ids[len(ids)-1]
 	start := time.Now()
 	res := domain.ImportFileResult{}
 	emit := func() {
@@ -367,6 +410,12 @@ func (s *MessageIOService) ImportFromFile(ctx context.Context, in domain.ImportF
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			res.Failed++
 			res.FailedLines = append(res.FailedLines, domain.ImportLineError{Line: i + 1, Error: fmt.Sprintf("不是合法的 JSON：%v", err)})
+			emit()
+			continue
+		}
+		if rec.Partition != nil && (*rec.Partition < 0 || *rec.Partition > maxPartition) {
+			res.Failed++
+			res.FailedLines = append(res.FailedLines, domain.ImportLineError{Line: i + 1, Error: importPartitionGuard(i+1, *rec.Partition, maxPartition).Error()})
 			emit()
 			continue
 		}

@@ -221,6 +221,7 @@ export function ImportDialog({
 }) {
   const [payload, setPayload] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; failed: number; total: number } | null>(null);
   const [result, setResult] = useState<ImportFileResult | null>(null);
   const toast = useToast();
@@ -238,12 +239,18 @@ export function ImportDialog({
 
   const run = async () => {
     setBusy(true);
+    setError(null);
     try {
       const r = await generateApi.import({ connectionId, topic, count: 0, format: "jsonl", template: payload });
       toast.show(t("msg.importOk", r.produced), "ok");
       closeRef.current();
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      // The toast is transient; the inline panel keeps the failure readable
+      // so the dialog never "sits dead" after a swallowed error toast
+      // (2026-11-20 import bug round).
+      const msg = friendlyError(err);
+      toast.show(msg, "error");
+      setError(msg);
     } finally {
       setBusy(false);
     }
@@ -259,6 +266,7 @@ export function ImportDialog({
     }
     if (!path) return; // cancelled
     setBusy(true);
+    setError(null);
     setResult(null);
     setProgress({ done: 0, failed: 0, total: 0 });
     try {
@@ -270,7 +278,9 @@ export function ImportDialog({
         toast.show(t("msg.importFilePartial", r.produced, r.failed), "error");
       }
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      const msg = friendlyError(err);
+      toast.show(msg, "error");
+      setError(msg);
     } finally {
       setProgress(null);
       setBusy(false);
@@ -285,6 +295,12 @@ export function ImportDialog({
           <div className="space-y-2.5">
             <span className="block text-11 text-ink-400">{t("msg.importHint")}</span>
             <textarea className="field h-40 font-mono" value={payload} onChange={(e) => setPayload(e.target.value)} />
+            {error && (
+              <div className="rounded border border-danger/40 bg-danger/10 px-2.5 py-2 text-11 text-danger">
+                {error}
+                <div className="mt-1 text-10 text-ink-400">{t("msg.importRetryHint")}</div>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <button className="btn" disabled={busy} onClick={() => void runFile()}>
                 {t("msg.importFromFile")}

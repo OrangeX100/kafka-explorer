@@ -477,6 +477,7 @@
   "msg.import": "Import messages",
   "msg.importHint": "One JSON per line: {\"key\":\"…\",\"value\":\"…\",\"headers\":{…}}",
   "msg.importOk": "Imported {0} messages",
+  "msg.importRetryHint": "The dialog stays open — fix the input and retry.",
   "msg.jumpFirstHint": "Jump to the oldest page (window teleports to the log start)",
   "msg.jumpLatestHint": "Jump to the newest page (window teleports to the log end)",
   "msg.latest": "Latest",

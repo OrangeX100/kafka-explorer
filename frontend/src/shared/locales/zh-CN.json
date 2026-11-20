@@ -477,6 +477,7 @@
   "msg.import": "导入消息",
   "msg.importHint": "每行一个 JSON：{\"key\":\"…\",\"value\":\"…\",\"headers\":{…}}",
   "msg.importOk": "已导入 {0} 条",
+  "msg.importRetryHint": "对话框保持打开，修正内容后可直接重试。",
   "msg.jumpFirstHint": "跳到最早一页（窗口瞬移到日志起点）",
   "msg.jumpLatestHint": "跳到最新一页（窗口瞬移到日志末端）",
   "msg.latest": "最新",

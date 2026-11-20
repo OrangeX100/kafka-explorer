@@ -263,25 +263,30 @@ test("导出剪贴板 → 导入粘贴往返", () =>
     await expect(p.locator('[role="dialog"]')).toHaveCount(0, { timeout: 5_000 });
     await expect(p.locator('[role="dialog"]')).toHaveCount(0, { timeout: 5_000 });
 
-    // IMPORT leg: the import produce hits UNKNOWN_TOPIC_OR_PARTITION on a
-    // topic that exists and accepts produces (docs/开发文档-0412导入bug线索
-    // -20261119.md) AND the dialog swallows the error into a toast then sits
-    // dead — a REAL app bug found by this probe. Assertions stay in place;
-    // they flip green the moment the bug is fixed.
-    test.info().annotations.push({
-      type: "issue",
-      description: "导入 UNKNOWN_TOPIC_OR_PARTITION + 对话框假死（见 docs 导入bug线索）",
-    });
-    // IMPORT: JSONL payload through the textarea path. ImportedMessage takes
-    // PLAIN-TEXT value (not base64 — see domain.ImportedMessage).
-    const before2 = await messageRows(p);
+    // IMPORT leg. The 2026-11-20 round closed the old "UNKNOWN_TOPIC on
+    // explicit partition" case: Go-level ITs against the real cluster
+    // (produce_partition_it_test.go) proved the produce path correct for
+    // every partition choice — the original failure had NO partition in the
+    // payload at all (topic-level, out-of-band cleanup). The REAL defects
+    // fixed here were backend upfront validation + the toast-only error
+    // UX; both are probed below.
     await p.locator("button").filter({ hasText: "导入" }).first().click();
     const idlg = dialog(p);
     await idlg.waitFor({ state: "visible" });
-    // NO explicit partition in the payload: this dialog is bound to the
-    // topic the tab shows — if that topic was deleted out-of-band the
-    // produce fails with UNKNOWN_TOPIC_OR_PARTITION and the dialog sits
-    // there with a swallowed error (found the hard way)
+    // NEGATIVE: an out-of-range partition must surface as an INLINE error
+    // with the valid range (backend guard), the dialog stays open for a
+    // retry — never a dead dialog with only a vanished toast.
+    await idlg
+      .locator("textarea")
+      .first()
+      .fill(JSON.stringify({ value: "imported-bad-partition", partition: 99 }));
+    await idlg.getByRole("button", { name: "导入", exact: true }).last().click();
+    const errBox = idlg.getByText(/分区 99 不存在/);
+    await expect(errBox).toBeVisible({ timeout: 10_000 });
+    await expect(idlg.getByText(/修正内容后可直接重试/)).toBeVisible();
+    // retry with a valid payload: same dialog, no reopen
+    // ImportedMessage takes PLAIN-TEXT value (not base64 — see
+    // domain.ImportedMessage).
     await idlg
       .locator("textarea")
       .first()
@@ -290,14 +295,9 @@ test("导出剪贴板 → 导入粘贴往返", () =>
     // chasing the short-lived toast element
     await idlg.getByRole("button", { name: "导入", exact: true }).last().click();
     await expect
-      .poll(
-        async () => {
-          const body = await p.locator("body").innerText();
-          if (body.includes("UNKNOWN_TOPIC")) throw new Error("导入命中 UNKNOWN_TOPIC_OR_PARTITION（tab 绑定的主题已消失）");
-          return body.includes("已导入");
-        },
-        { timeout: 10_000 },
-      )
+      .poll(async () => (await p.locator("body").innerText()).includes("已导入"), {
+        timeout: 10_000,
+      })
       .toBe(true);
     await idlg.waitFor({ state: "hidden", timeout: 10_000 });
     // refresh to the newest window, then the imported record must appear
