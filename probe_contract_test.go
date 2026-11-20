@@ -45,10 +45,11 @@ func TestNoBareTestFixmeInProbes(t *testing.T) {
 	}
 }
 
-// lastReleasedVersion returns the version of the second-newest release tag
-// (newest = the version currently being released or just released; the
-// probe base must equal the one BEFORE it). Tags carry a "v" prefix.
-func lastReleasedVersion(t *testing.T) string {
+// lastReleasedVersion returns the newest and second-newest release tags.
+// The probe base must equal the one BEFORE newest — EXCEPT inside the
+// release window (bump committed, tag not yet pushed), where set_version
+// has already advanced it to newest. Tags carry a "v" prefix.
+func lastReleasedVersion(t *testing.T) (newest, second string) {
 	out, err := exec.Command("git", "tag", "--sort=-creatordate").Output()
 	if err != nil {
 		t.Fatalf("git tag: %v", err)
@@ -79,7 +80,7 @@ func lastReleasedVersion(t *testing.T) string {
 		t.Fatalf("release tag 不足两个，无法确定探针基准——契约必须红而不是静默跳过。" +
 			"CI: checkout 已配 fetch-tags: true（ci.yml gate）；本地: git fetch --tags")
 	}
-	return seen[1]
+	return seen[0], seen[1]
 }
 
 // TestProbeBaseVersionInContract: the update-flow probe builds a debug
@@ -94,7 +95,7 @@ func lastReleasedVersion(t *testing.T) string {
 // forgotten bump fails HERE instead of silently skipping the update-chain
 // probe in CI while the gate stays green.
 func TestProbeBaseVersionInContract(t *testing.T) {
-	base := lastReleasedVersion(t)
+	newest, base := lastReleasedVersion(t)
 
 	// current in-development version must not be used as the probe base —
 	// the debug build would equal the published latest and discover nothing
@@ -122,9 +123,10 @@ func TestProbeBaseVersionInContract(t *testing.T) {
 	if stamp == nil {
 		t.Fatal("action.yml: no buildinfo.Version stamp found")
 	}
-	if stamp[1] != base {
-		t.Errorf("e2e-probe/action.yml 探针基准 = %s，应为上一发布版 %s——"+
-			"基准过期会让更新链探针静默 skip 而 CI 仍绿", stamp[1], base)
+	if stamp[1] != base && stamp[1] != newest {
+		t.Errorf("e2e-probe/action.yml 探针基准 = %s，应为上一发布版 %s"+
+			"（发版窗口内允许 %s）——基准过期会让更新链探针静默 skip 而 CI 仍绿",
+			stamp[1], base, newest)
 	}
 
 	// update-flow.spec.ts: the PROBE_BASE constant must equal the base. The
@@ -141,9 +143,16 @@ func TestProbeBaseVersionInContract(t *testing.T) {
 	if hint == nil {
 		t.Fatal("update-flow.spec.ts: no PROBE_BASE constant found")
 	}
-	if hint[1] != base {
-		t.Errorf("update-flow.spec.ts PROBE_BASE = %s，应为上一发布版 %s（"+
-			"断言与 skip-hint 都从它派生）", hint[1], base)
+	// Release-window tolerance: set_version.py advances the base to the OLD
+	// version the moment a bump happens (0.4.12→0.4.13 writes base=0.4.12),
+	// while the newest TAG is still the previous release (0.4.12) until the
+	// release commit is tagged — so between "bump" and "tag" the contract
+	// must accept BOTH the second-newest tag AND the newest tag. Outside
+	// that window a stale base (older than second-newest) stays a failure.
+	if hint[1] != base && hint[1] != newest {
+		t.Errorf("update-flow.spec.ts PROBE_BASE = %s，应为上一发布版 %s"+
+			"（发版窗口内允许 %s）（断言与 skip-hint 都从它派生）",
+			hint[1], base, newest)
 	}
 	// A version literal baked INTO the assertion itself is the drift class
 	// that broke the e2e job above — the assertion template must derive
@@ -154,7 +163,9 @@ func TestProbeBaseVersionInContract(t *testing.T) {
 			"应从 PROBE_BASE 常量派生，禁止在断言里写死版本")
 	}
 }
-/**
+
+/*
+*
 // TestSetupUninstallerSysoCarryVersion: the setup/uninstaller syso files
 carry PE VERSIONINFO metadata ONLY if their versioninfo json uses the
 FLAT StringFileInfo format goversioninfo expects. The nested
