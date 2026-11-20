@@ -61,7 +61,16 @@ export async function connectApp(): Promise<Page> {
   // destroys and recreates the CDP target, and any command racing that
   // window reports the target as closed. The rail visibility assert below
   // is the boot-complete signal instead.
-  await withWatchdog(page.evaluate(() => localStorage.setItem("ke.locale", "zh-CN")), 10_000);
+  await withWatchdog(
+    page.evaluate(() => {
+      localStorage.setItem("ke.locale", "zh-CN");
+      // pin the connection list open: the probe harness cannot win the
+      // auto-collapse race over a WAN ping (Sidebar.openFlow honors this
+      // key — user machines never have it set)
+      localStorage.setItem("ke.e2eKeepList", "1");
+    }),
+    10_000,
+  );
   // Sidebar rail [data-tip] buttons render = React mounted + bindings up.
   await expect(page.locator("[data-tip]").first()).toBeVisible({ timeout: 20_000 });
   return page;
@@ -590,4 +599,11 @@ export function keepForeground() {
   void ensureForeground();
   const t = setInterval(() => void ensureForeground(), 15_000);
   if (typeof t.unref === "function") t.unref();
+}
+
+/** SSH topic-seed availability: the seed helpers read the local hosts.json
+ *  (user-machine only). CI runners have no such file — specs that need a
+ *  pre-created topic must skip honestly on it instead of failing ENOENT. */
+export function isSSHSeedAvailable(): boolean {
+  return existsSync("C:/Users/51293/bin/hosts.json");
 }

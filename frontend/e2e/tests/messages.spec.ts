@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import {
+  isSSHSeedAvailable,
   connectApp,
   disconnectApp,
   ensureAppRunning,
@@ -116,6 +117,9 @@ async function run(fn: (p: Page) => Promise<void>) {
 }
 
 test.skip(!KAFKA, "需 KE_E2E_KAFKA=host:port 真集群");
+// 主题由本机 SSH 预建（hosts.json 只在作者机上有）——CI 无此文件时诚实跳过，
+// 否则 beforeAll 直接 ENOENT 红（2026-11-20 集群探针首跑实证）。
+test.skip(!isSSHSeedAvailable(), "需本机 hosts.json SSH 主题种子（CI 诚实跳过）");
 
 test.beforeAll(async () => {
   test.setTimeout(240_000);
