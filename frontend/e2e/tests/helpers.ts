@@ -197,7 +197,9 @@ export async function openWorkspaceSection(page: Page, title: string) {
  *  whose options render into a PORTAL (div.ke-select-content[role=listbox]).
  *  querySelector("select") never sees it; drive the real trigger + options. */
 export async function keSelect(page: Page, trigger: Locator, optionLabel: string) {
-  await trigger.click();
+  // bounded: an UNBOUNDED click on a hidden keep-mounted tab's combobox
+  // hung the whole test past its global timeout (2026-11-20 paging debug)
+  await trigger.click({ timeout: 8_000 });
   const listbox = page.locator('[role="listbox"][data-state="open"]');
   await listbox.waitFor({ state: "visible" });
   await listbox.locator('[role="option"]').filter({ hasText: optionLabel }).first().click();
@@ -428,10 +430,16 @@ export async function deleteConnection(page: Page, name: string) {
 export async function createTopic(page: Page, name: string, partitions: number) {
   const existing = page.locator('[data-testid="topic-row"]').filter({ hasText: name }).first();
   if ((await existing.count()) > 0 && (await existing.isVisible())) return;
-  // .first(): a fresh cluster view renders TWO 新建主题 buttons (toolbar +
-  // empty-state main pane) — strict mode would reject the bare locator
-  // (2026-11-20 CI run 4: admin/cluster paging failed on exactly this)
-  await page.locator('button[title="新建主题"]').first().click();
+  // The workspace keeps every tab's section mounted, so MULTIPLE 新建主题
+  // buttons exist (one per tab + hidden panes at w=0). DOM order puts a
+  // HIDDEN one first — .first() picked it and actionability waited forever
+  // on the zero-size element (2026-11-20: local + CI paging hang). Filter
+  // to the visible instance.
+  await page
+    .locator('button[title="新建主题"]')
+    .locator("visible=true")
+    .first()
+    .click({ timeout: 8_000 });
   const dlg = dialog(page);
   await dlg.waitFor({ state: "visible" });
   await dlg.locator("input").nth(0).fill(name);
@@ -554,7 +562,16 @@ export async function produceMessage(
   // wait for FULL unmount before opening the next one
   await expect(page.locator('[role="dialog"]')).toHaveCount(0, { timeout: 5_000 }).catch(() => {});
   // toolbar produce button is the accent button in the messages toolbar
-  await page.locator("button.btn-accent").filter({ hasText: "发送消息" }).first().click();
+  // visible filter: keep-mounted tabs keep a HIDDEN 发送消息 button in the
+  // DOM — .first() picked it and the click hung forever (2026-11-20 paging
+  // debug: accent buttons counted 2, first vis=false). Same family as the
+  // 新建主题 fix in createTopic.
+  await page
+    .locator("button.btn-accent")
+    .filter({ hasText: "发送消息" })
+    .locator("visible=true")
+    .first()
+    .click({ timeout: 8_000 });
   const dlg = dialog(page);
   await dlg.waitFor({ state: "visible" });
   if (partition !== "") {

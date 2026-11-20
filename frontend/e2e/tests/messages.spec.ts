@@ -168,7 +168,10 @@ test("发送增强：Key+指定分区+Headers → ack 校验 + 详情可见", ()
     // the table does NOT auto-refresh after produce, and it shows the
     // selected partition (default 0) — switch to the acked partition,
     // refresh, then open the fresh (last visible) row
-    const partTrigger = p.locator('button[role="combobox"]').first();
+    const partTrigger = p
+      .locator('button[role="combobox"]')
+      .locator("visible=true")
+      .first();
     await keSelect(p, partTrigger, `分区 ${ack.partition}`);
     await p.getByRole('button', { name: '刷新' }).first().click();
     await p.waitForTimeout(1500);
@@ -189,7 +192,10 @@ test("详情解码链：纯 JSON 自动选 JSON 视图，Hex 可切换", () =>
     // 表格不随 produce 自动刷新且受分区选择器过滤——首行可能是旧文本
     // 记录（或空表导致 openFirst 静默空点击，曾拿到空 tab 串）。切到 ack
     // 分区刷新后开最后一行（=刚写入的 JSON 记录），与发送测试同款模式。
-    const partTrigger = p.locator('button[role="combobox"]').first();
+    const partTrigger = p
+      .locator('button[role="combobox"]')
+      .locator("visible=true")
+      .first();
     await keSelect(p, partTrigger, `分区 ${ack.partition}`);
     await p.getByRole("button", { name: "刷新" }).first().click();
     await p.waitForTimeout(1500);

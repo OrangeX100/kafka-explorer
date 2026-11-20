@@ -103,6 +103,10 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   try {
+    // 90s hook budget: heal() alone can eat 40s (its internal race) after a
+    // fresh-app restart, and the residue cleanup still needs to run — the
+    // default 45s hook cap reported the whole spec as failed on cleanup
+    // alone (2026-11-20 CI run 6).
     const p = await Promise.race([
       heal(),
       new Promise<never>((_, rej) => setTimeout(() => rej(new Error("cleanup timeout")), 40_000)),
@@ -118,7 +122,7 @@ test.afterAll(async () => {
     /* residue cleaner covers this */
   }
   await disconnectApp();
-});
+}, 90_000);
 
 test("ACL：新建（e2e 主体）→ 列表出现 → 删除消失", () =>
   run(async (p) => {
@@ -137,7 +141,10 @@ test("ACL：新建（e2e 主体）→ 列表出现 → 删除消失", () =>
     const inputs = dlg.locator("input.font-mono");
     await inputs.nth(0).fill(principal);
     await inputs.nth(1).fill(`e2e-${RUN_ID}-topic`);
-    await dlg.getByRole("button", { name: "创建" }).click();
+    // 对话框提交按钮是「保存」（conn.save）——旧 spec 点「创建」，
+    // 按钮不存在且 click 无默认上界，曾把用例挂满 180s（2026-11-20
+    // trace 实证：click before 后永无 after）
+    await dlg.getByRole("button", { name: "保存" }).click({ timeout: 8_000 });
     const aclRow = p.locator('[data-testid="acl-row"]').filter({ hasText: principal }).first();
     await expect(aclRow).toBeVisible({ timeout: 20_000 });
 
@@ -159,9 +166,11 @@ test("配额：新建 e2e 实体 → 行出现 → 删除键值 → 实体消失
     await dlg.waitFor({ state: "visible" });
     // entity dimension defaults to Client ID; fill the entity name input
     await dlg.locator("input.font-mono").first().fill(entity);
-    // producer_byte_rate key is the default; value input — find a number
-    // field and set 1024
-    const valueInput = dlg.locator("input").nth(2); // entity name(1) → key combo → value input
+    // producer_byte_rate key is the default; the value input is the ONLY
+    // number input (the dialog has exactly two inputs: entity name + value
+    // — the key picker is a Select, not an input; nth(2) never existed and
+    // the fill waited forever)
+    const valueInput = dlg.locator('input[type="number"]').first();
     await valueInput.fill("1024");
     await dlg.getByRole("button", { name: "保存" }).click();
     const row = p.locator('[data-testid="quota-row"]').filter({ hasText: entity }).first();

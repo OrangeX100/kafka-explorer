@@ -197,7 +197,13 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 			}
 		}
 		page.NextAnchor = &next
-	} else {
+	} else if forward {
+		// Forward short page = the log end is inside this window: nothing
+		// newer exists, 下一页 is done. A BACKWARD short page only means the
+		// OLDEST page was reached (log start inside the window) — marking it
+		// exhausted disabled 下一页 even though newer pages remain, trapping
+		// the user at the log start with 最新 as the only way out
+		// (2026-11-21 paging probe found it; user-visible).
 		page.Exhausted = true
 	}
 	return page, nil
