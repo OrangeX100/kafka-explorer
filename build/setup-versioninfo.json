@@ -4,8 +4,8 @@
     "FileDescription": "Kafka Explorer 安装程序",
     "LegalCopyright": "Copyright (C) 2026 Kafka Explorer contributors",
     "ProductName": "Kafka Explorer",
-    "FileVersion": "0.4.14",
-    "ProductVersion": "0.4.14",
+    "FileVersion": "0.4.15",
+    "ProductVersion": "0.4.15",
     "OriginalFilename": "KafkaExplorer_Setup.exe",
     "InternalName": "KafkaExplorer_Setup"
   },
