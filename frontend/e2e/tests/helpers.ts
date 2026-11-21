@@ -461,8 +461,10 @@ export async function createTopic(page: Page, name: string, partitions: number) 
     .locator("visible=true")
     .first()
     .click({ timeout: 8_000 });
+  console.log("[ct]", "button clicked", name, Date.now());
   const dlg = dialog(page);
   await dlg.waitFor({ state: "visible" });
+  console.log("[ct]", "dialog visible", name, Date.now());
   await dlg.locator("input").nth(0).fill(name);
   await dlg.locator("input[type=number]").nth(0).fill(String(partitions));
   await dlg.getByRole("button", { name: "创建" }).click();

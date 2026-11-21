@@ -371,6 +371,9 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
   // 实测 180s 两连超时 2026-11-21——每轮真对话框 15-25s，峰值 6×25+跳转 >180）
   await openWorkspaceSection(page, "主题");
   console.log("[gt]", "section open", Date.now());
+  // 重试路径：上一试次可能残留 GoToDialog 模态——先清再建（createTopic 的
+  // 对话框 waitFor 在模态遮罩下永不出现 = 5min 挂死，2026-11-21 CI 实证）
+  await dismissOverlays(page);
   await createTopic(page, GOTO_TOPIC, 2);
   console.log("[gt]", "topic created", Date.now());
   await openTopic(page, GOTO_TOPIC);
@@ -418,7 +421,7 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
       if (rs.length === 0) return "empty";
       if (!rs.every((r) => r.partition === 1)) return "mixed-partitions";
       return `${rs[0].offset}-${rs[rs.length - 1].offset}`;
-    }, { timeout: 15_000 })
+    }, { timeout: 45_000, intervals: [1500, 2500, 3000] })
     .toBe("0-2");
 
   const badge = await positionBadge(page);
