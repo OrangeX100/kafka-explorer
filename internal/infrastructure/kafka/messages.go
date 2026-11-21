@@ -229,11 +229,24 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 				page.Exhausted = true
 			}
 		} else if ends, ok := c.cachedEnds(req.Topic); ok {
-			// backward: records are sorted NEWEST FIRST — records[0] is the
-			// window's newest edge; touching the end means this window IS
-			// the newest page (covers whole-log-in-one-page topics too).
-			if end, has := ends[partition]; has && records[0].Offset+1 >= end {
-				page.Exhausted = true
+			// backward: exhausted when the window's UPPER edge reaches the
+			// log end — no more pages exist past this window even if the
+			// newest VISIBLE record sits below the end. A trailing invisible
+			// record (txn control marker: command topic watermark 2 with
+			// visible offsets {0}, 2026-11-21 user report) used to keep
+			// exhausted=false and bury the gap note; the old records[0] test
+			// also mis-handled a full tail page whose top offsets were all
+			// invisible (下一页 then landed on an empty newest page). The
+			// window edge: explicit anchor off for [off-limit, off), the log
+			// end itself for anchorless tail browses.
+			if end, has := ends[partition]; has {
+				windowEnd := end
+				if req.StartOffset != nil {
+					windowEnd = *req.StartOffset
+				}
+				if windowEnd >= end {
+					page.Exhausted = true
+				}
 			}
 		}
 	}

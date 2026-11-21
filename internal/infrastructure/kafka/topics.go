@@ -166,6 +166,13 @@ func (c *Client) TopicDetail(ctx context.Context, topic string) (domain.TopicDet
 	sort.Slice(detail.PartitionList, func(i, j int) bool {
 		return detail.PartitionList[i].ID < detail.PartitionList[j].ID
 	})
+	// TopicDetail.MessageCount: the watermark view (Σ logEnd−logStart), same
+	// figure the topic list shows. For compacted topics this overstates the
+	// surviving records — the frontend compaction banner explains that gap,
+	// so the field must carry the real watermark, not a default zero.
+	for _, ps := range detail.PartitionList {
+		detail.MessageCount += ps.MessageCount
+	}
 
 	if errConf == nil {
 		for _, rc := range rawConfigs.Resources {

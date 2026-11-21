@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessagesToolbar } from "./MessagesToolbar.js";
 import { GlidingTabs } from "../common/GlidingTabs.js";
 import { messagesApi, settingsApi } from "../../shared/api.js";
@@ -93,6 +93,26 @@ export function MessagesView({
     void loadPage("tail", undefined, true);
   };
   const [generating, setGenerating] = useState(false);
+  // 压缩主题（cleanup.policy=compact）：旧值被 broker 按 key 物理删除——
+  // 水位（分区选择器的 N）≠ 实际存活记录数，尾页行数少于页大小属正常
+  // 语义（2026-11-21 用户报告"72 条只显示 9 条"，broker 实证 _schemas
+  // compact、水位 72、存活 23）。显示说明条消除"丢消息"误解。
+  const isCompacted = detail?.config.some(
+    (c) => c.name === "cleanup.policy" && (c.value ?? "").includes("compact"),
+  ) ?? false;
+  // 尾页不可见记录检测（2026-11-21 用户报告 ksql 命令主题"2 条只显示 1 条"，
+  // dump-log 实证 offset 1 = endTxnMarker COMMIT——事务控制记录对所有消费
+  // 者不可见）。exhausted 尾页内 存活行数 < (logEnd − 页内最小 offset) 即
+  // 区间存在不可见记录；delete 策略主题该区间必连续（LogStart 之外的旧段
+  // 已被整段滚出、不在水位口径内），不会误报。
+  const tailGap = useMemo(() => {
+    if (!exhausted || messages.length === 0) return 0;
+    const part = detail?.partitionList.find((p) => p.id === partition);
+    if (!part) return 0;
+    const minOff = Math.min(...messages.map((m) => m.offset));
+    const missing = part.logEnd - minOff - messages.length;
+    return missing > 0 ? missing : 0;
+  }, [exhausted, messages, detail, partition]);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -280,6 +300,7 @@ export function MessagesView({
         <RateChart connectionId={connectionId} topic={topic} partitions={detail?.partitionList ?? []} />
       )}
       {view === "messages" && (
+        <>
         <MessagesToolbar
           detail={detail}
           isProtected={isProtectedTopic(topic)}
@@ -320,6 +341,17 @@ export function MessagesView({
           // is how newly arrived messages become visible
           refresh={() => void loadPage(cursor, undefined, true)}
         />
+        {isCompacted && exhausted && messages.length > 0 && messages.length < pageSize && (
+          <div className="flex-none px-3 py-1.5 text-11 text-ink-300 border-b border-ink-700 bg-ink-900" data-testid="compaction-note">
+            压缩主题：旧值已被 Kafka 按 key 物理删除，水位 {detail?.messageCount ?? "—"} 不等于实际存活记录数——这里显示的是主题里真实存在的消息，并非丢数据。
+          </div>
+        )}
+        {!isCompacted && exhausted && tailGap > 0 && (
+          <div className="flex-none px-3 py-1.5 text-11 text-ink-300 border-b border-ink-700 bg-ink-900" data-testid="gap-note">
+            本分区尾段有 {tailGap} 条不可见记录：事务提交/中止标记等控制记录对所有消费者都不显示，并非丢数据。
+          </div>
+        )}
+        </>
       )}
       {view === "config" ? (
         /* Same bounded wrapper as the messages branch: without min-h-0 the
