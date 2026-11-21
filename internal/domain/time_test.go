@@ -7,10 +7,10 @@ import (
 
 func TestFlexTimeUnmarshal(t *testing.T) {
 	cases := []struct {
-		name  string
-		json  string
-		zero  bool // expect zero time
-		want  string
+		name string
+		json string
+		zero bool // expect zero time
+		want string
 	}{
 		{"empty string tolerated", `""`, true, ""},
 		{"null tolerated", `null`, true, ""},

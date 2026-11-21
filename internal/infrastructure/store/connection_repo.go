@@ -123,14 +123,14 @@ func scanConnection(s rowScanner) (*domain.Connection, error) {
 		pinned           int
 	)
 	var (
-		tunnelOn          int
-		tunnelHost        sql.NullString
-		tunnelPort        int
-		tunnelUser        sql.NullString
-		tunnelAuth        sql.NullString
-		tunnelKeyPath     sql.NullString
-		tunnelSecretRef   sql.NullString
-		tunnelHostKey     sql.NullString
+		tunnelOn        int
+		tunnelHost      sql.NullString
+		tunnelPort      int
+		tunnelUser      sql.NullString
+		tunnelAuth      sql.NullString
+		tunnelKeyPath   sql.NullString
+		tunnelSecretRef sql.NullString
+		tunnelHostKey   sql.NullString
 	)
 	if err := s.Scan(&c.ID, &c.Name, &c.Bootstrap, &security, &username, &ref,
 		&tlsOn, &ca, &cert, &key, &insecure, &created, &updated, &pinned,

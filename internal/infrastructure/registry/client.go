@@ -19,10 +19,10 @@ import (
 )
 
 type Client struct {
-	base  string
-	user  string
-	pass  string
-	http  *http.Client
+	base string
+	user string
+	pass string
+	http *http.Client
 }
 
 func New(url, user, pass string) *Client {

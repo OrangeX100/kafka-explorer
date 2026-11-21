@@ -83,10 +83,18 @@ export function currentPageOrThrow(): Page {
 
 export async function disconnectApp() {
   // 探针 key 不残留进共享的 WebView2 profile（同机生产自测会被污染成
-  // "新连接后列表不再自动收起"）
-  await browser?.contexts()[0]?.pages()[0]
-    ?.evaluate(() => localStorage.removeItem("ke.e2eKeepList"))
-    .catch(() => {});
+  // "新连接后列表不再自动收起"）。选页复用 connectApp 的谓词——盲取
+  // pages()[0] 会把 removeItem 打到 DevTools/about:blank 的 localStorage。
+  // watchdog 包裹：wedged renderer 的 evaluate 永不 settle，catch 接不住。
+  const appPage = browser?.contexts()[0]?.pages().find(
+    (pg) => !pg.url().startsWith("devtools://") && pg.url() !== "about:blank",
+  );
+  if (appPage) {
+    await Promise.race([
+      appPage.evaluate(() => localStorage.removeItem("ke.e2eKeepList")),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("cleanup timeout")), 10_000)),
+    ]).catch(() => {});
+  }
   currentPage = null;
   await browser?.close();
 }
@@ -286,11 +294,12 @@ export async function connListOpen(page: Page): Promise<boolean> {
     // explicit [role=complementary] attribute does not exist in the DOM.
     const pane = document.querySelector('aside');
     if (!pane) return false;
-    // Probe = a connection row when one exists, else the pane's 新建连接
-    // button: a FRESH app (CI runner) has ZERO rows and the row-only probe
-    // read that as "collapsed" forever — ensureConnListOpen then cycled the
-    // rail toggle 10× (a no-op with no active connection) and threw, even
-    // though the list was plainly open (2026-11-20 CI first-run evidence).
+    // Probe = a connection row when one exists, else the pane's search
+    // textbox (below the frameless drag strip): a FRESH app (CI runner)
+    // has ZERO rows and the row-only probe read that as "collapsed"
+    // forever — ensureConnListOpen then cycled the rail toggle 10× (a
+    // no-op with no active connection) and threw, even though the list
+    // was plainly open (2026-11-20 CI first-run evidence).
     // Probe must sit BELOW the frameless-window drag strip: wails paints an
     // invisible --wails-draggable overlay across the top of the pane, so
     // the 新建连接 header button hit-tests to the overlay and reads as
@@ -329,7 +338,12 @@ export async function ensureConnListOpen(page: Page) {
     // toggle may have raced another collapse (health-poll ping landing)
     await page.locator('[data-tip="集群连接"]').click({ timeout: 4_000 }).catch(() => {});
   }
-  throw new Error("连接列表无法展开（rail 开关被探活收起循环干扰）");
+  const hadPane = await page.evaluate(() => !!document.querySelector("aside"));
+  throw new Error(
+    hadPane
+      ? "连接列表无法展开（rail 开关被探活收起循环干扰）"
+      : "连接列表无法展开（工作区未处于集群连接视图——侧栏结构可能已变更）",
+  );
 }
 
 /** Wait out the post-open churn: the health ping lands (public handshake

@@ -100,8 +100,8 @@ func (c *Client) Test(ctx context.Context) (string, error) {
 // ConnectorSummary is one connector with its current state.
 type ConnectorSummary struct {
 	Name   string `json:"name"`
-	Type   string `json:"type"`   // source | sink
-	State  string `json:"state"`  // RUNNING | FAILED | PAUSED
+	Type   string `json:"type"`  // source | sink
+	State  string `json:"state"` // RUNNING | FAILED | PAUSED
 	Worker string `json:"worker"`
 }
 
@@ -116,7 +116,7 @@ func (c *Client) ListConnectors(ctx context.Context) ([]ConnectorSummary, error)
 		out := make([]ConnectorSummary, 0, len(names))
 		for _, n := range names {
 			var st struct {
-				Name   string `json:"name"`
+				Name      string `json:"name"`
 				Connector struct {
 					State  string `json:"state"`
 					Type   string `json:"type"`
@@ -158,12 +158,12 @@ func (c *Client) ListConnectors(ctx context.Context) ([]ConnectorSummary, error)
 
 // ConnectorDetail adds tasks and config to the summary.
 type ConnectorDetail struct {
-	Name    string          `json:"name"`
-	Type    string          `json:"type"`
-	State   string          `json:"state"`
-	Worker  string          `json:"worker"`
-	Config  map[string]string `json:"config"`
-	Tasks   []TaskStatus    `json:"tasks"`
+	Name   string            `json:"name"`
+	Type   string            `json:"type"`
+	State  string            `json:"state"`
+	Worker string            `json:"worker"`
+	Config map[string]string `json:"config"`
+	Tasks  []TaskStatus      `json:"tasks"`
 }
 
 // TaskStatus is one connector task's runtime state.

@@ -1,9 +1,9 @@
 package kafka
 
 import (
-	"sort"
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/twmb/franz-go/pkg/kadm"
@@ -82,12 +82,12 @@ func (c *Client) ListTopics(ctx context.Context) ([]domain.TopicSummary, error) 
 // degrades to an empty config list; the other three are fatal.
 func (c *Client) TopicDetail(ctx context.Context, topic string) (domain.TopicDetail, error) {
 	var (
-		wg                    sync.WaitGroup
-		details               kadm.TopicDetails
-		ends, starts          kadm.ListedOffsets
-		rawConfigs            *kmsg.DescribeConfigsResponse
-		errMeta, errEnd       error
-		errStart, errConf     error
+		wg                sync.WaitGroup
+		details           kadm.TopicDetails
+		ends, starts      kadm.ListedOffsets
+		rawConfigs        *kmsg.DescribeConfigsResponse
+		errMeta, errEnd   error
+		errStart, errConf error
 	)
 	// Configs go through raw kmsg: kadm.Config drops ReadOnly/IsDefault/
 	// Documentation, which the config panel needs (read-only marking was
@@ -139,15 +139,15 @@ func (c *Client) TopicDetail(ctx context.Context, topic string) (domain.TopicDet
 		if pd.Err != nil {
 			continue
 		}
-			ps := domain.PartitionSummary{
-				ID:     p,
-				Leader: pd.Leader,
-				// Defensive copies: nil replicas/ISR from metadata would
-				// marshal as JSON null and the tables index into them.
-				// []int32{} (not nil-append) keeps the empty case non-nil.
-				Replicas: append([]int32{}, pd.Replicas...),
-				ISR:      append([]int32{}, pd.ISR...),
-			}
+		ps := domain.PartitionSummary{
+			ID:     p,
+			Leader: pd.Leader,
+			// Defensive copies: nil replicas/ISR from metadata would
+			// marshal as JSON null and the tables index into them.
+			// []int32{} (not nil-append) keeps the empty case non-nil.
+			Replicas: append([]int32{}, pd.Replicas...),
+			ISR:      append([]int32{}, pd.ISR...),
+		}
 		if lo, ok := ends.Lookup(topic, p); ok && lo.Err == nil {
 			ps.LogEnd = lo.Offset
 			ps.MessageCount = lo.Offset
@@ -195,12 +195,12 @@ func (c *Client) TopicDetail(ctx context.Context, topic string) (domain.TopicDet
 					}
 				}
 				detail.Config = append(detail.Config, domain.ConfigEntry{
-					Name:      cfg.Name,
-					Value:     value,
+					Name:  cfg.Name,
+					Value: value,
 					// The broker's own flag. Previously this was derived from
 					// ConfigSource, which marked every default-valued config
 					// read-only (default != immutable).
-					ReadOnly:  cfg.ReadOnly,
+					ReadOnly: cfg.ReadOnly,
 					// The raw IsDefault flag can stay false after an
 					// override is deleted (kmsg: "replaced in favor of
 					// Source"); Source is authoritative for "is this

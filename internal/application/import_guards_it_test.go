@@ -95,6 +95,14 @@ func TestITImportGuards(t *testing.T) {
 		if res.FirstOffset < 0 {
 			t.Errorf("FirstOffset 应为首个写入 offset，实得 %d", res.FirstOffset)
 		}
+		// -1 是 Produce 层的 auto 哨兵：归一为 nil 自动分区（回归网）
+		resAuto, err := svc.Import(ctx, input(`{"value":"auto","partition":-1}`))
+		if err != nil {
+			t.Fatalf("-1 应归一为 auto 成功落库：%v", err)
+		}
+		if resAuto.Produced != 1 {
+			t.Errorf("-1 auto Produced = %d, want 1", resAuto.Produced)
+		}
 	})
 
 	t.Run("file import: good lines land, bad partition listed", func(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
 	wailsapp "github.com/wailsapp/wails/v3/pkg/application"
+	"go.uber.org/zap"
 
 	"kafkaexplorer/internal/application"
 	"kafkaexplorer/internal/domain"

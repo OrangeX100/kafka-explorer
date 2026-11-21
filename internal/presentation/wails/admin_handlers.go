@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"go.uber.org/zap"
 	wailsapp "github.com/wailsapp/wails/v3/pkg/application"
+	"go.uber.org/zap"
 
 	"kafkaexplorer/internal/application"
 	"kafkaexplorer/internal/application/decode"
@@ -81,7 +81,6 @@ func (h *AdminHandler) DeleteACL(ctx context.Context, connectionID string, acl d
 func (h *AdminHandler) ListQuotas(ctx context.Context, connectionID string) ([]domain.Quota, error) {
 	return h.svc.ListQuotas(ctx, connectionID)
 }
-
 
 // DescribeQuorum exposes the KRaft quorum status. ZooKeeper clusters answer
 // UNSUPPORTED_VERSION — translate into the friendly "not KRaft" guidance.
@@ -241,7 +240,7 @@ func (h *SchemaRegistryHandler) DecodeLocal(ctx context.Context, schemaType, sch
 // (write-only, like the connection form).
 type RegistrySaveInput struct {
 	Registry domain.SchemaRegistry `json:"registry"`
-	Password string               `json:"password,omitempty"`
+	Password string                `json:"password,omitempty"`
 }
 
 // GenerateHandler exposes the data generator and message import/export.

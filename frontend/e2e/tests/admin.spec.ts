@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import {
   connectApp,
   disconnectApp,
+  dismissOverlays,
   ensureAppRunning,
   keepForeground,
   restartApp,
@@ -102,7 +103,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  test.setTimeout(90_000); // heal() alone can eat 40s (its internal race)
+  test.setTimeout(120_000); // heal() alone can eat 40s (its internal race)
   // after a fresh-app restart, and the residue cleanup still needs to run —
   // the default 45s hook cap reported the whole spec as failed on cleanup
   // alone (2026-11-20 CI run 6). NOTE: test.afterAll(fn, 90_000) is a

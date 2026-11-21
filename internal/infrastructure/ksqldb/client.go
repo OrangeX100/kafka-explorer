@@ -18,8 +18,8 @@ import (
 )
 
 type Client struct {
-	base     string
-	http     *http.Client
+	base string
+	http *http.Client
 	// streamHTTP has NO client-level timeout: http.Client.Timeout covers the
 	// whole body read, so the 15s limit would kill every push query
 	// (EMIT CHANGES) after exactly 15s mid-stream. QueryStream's lifetime is
@@ -111,9 +111,9 @@ func (c *Client) Info(ctx context.Context) (version, serviceID, status string, e
 	}
 	var out struct {
 		KsqlServerInfo struct {
-			Version     string `json:"version"`
+			Version       string `json:"version"`
 			KsqlServiceID string `json:"ksqlServiceId"`
-			ServerStatus string `json:"serverStatus"`
+			ServerStatus  string `json:"serverStatus"`
 		} `json:"KsqlServerInfo"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
@@ -153,17 +153,17 @@ func (c *Client) Exec(ctx context.Context, ksql string) (domain.KsqlExecResult, 
 
 	out := domain.KsqlExecResult{Streams: []domain.KsqlStreamRow{}, Tables: []domain.KsqlTableRow{}, Queries: []domain.KsqlQueryRow{}}
 	var items []struct {
-		Type          string           `json:"@type"`
-		StatementText string           `json:"statementText"`
-		QueryID       string           `json:"queryId"`
-		Warnings      []string         `json:"warnings"`
-		Streams       []domain.KsqlStreamRow `json:"streams"`
-		Tables        []domain.KsqlTableRow  `json:"tables"`
-		Queries       []domain.KsqlQueryRow  `json:"queries"`
-		Properties    map[string]any   `json:"properties"`
-		Entity        map[string]any   `json:"entity"`
-		Entities      []map[string]any `json:"entities"`
-		SourceDescription map[string]any `json:"sourceDescription"`
+		Type              string                 `json:"@type"`
+		StatementText     string                 `json:"statementText"`
+		QueryID           string                 `json:"queryId"`
+		Warnings          []string               `json:"warnings"`
+		Streams           []domain.KsqlStreamRow `json:"streams"`
+		Tables            []domain.KsqlTableRow  `json:"tables"`
+		Queries           []domain.KsqlQueryRow  `json:"queries"`
+		Properties        map[string]any         `json:"properties"`
+		Entity            map[string]any         `json:"entity"`
+		Entities          []map[string]any       `json:"entities"`
+		SourceDescription map[string]any         `json:"sourceDescription"`
 	}
 	if err := json.Unmarshal(data, &items); err != nil {
 		return domain.KsqlExecResult{}, fmt.Errorf("decode /ksql: %w", err)

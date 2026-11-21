@@ -351,9 +351,10 @@ func (s *MessageIOService) Import(ctx context.Context, in domain.GenerateInput) 
 			return domain.GenerateResult{Produced: count, FirstOffset: first, ElapsedMs: time.Since(start).Milliseconds()},
 				fmt.Errorf("%w: line %d is not valid JSON: %v", domain.ErrInvalid, i+1, err)
 		}
-		if rec.Partition != nil && *rec.Partition < 0 {
-			// 负值 = Produce 层自己的 auto 哨兵（-1，见 find.go Client.Produce）——
-			// 归一为 nil 走自动分区，不再对自家哨兵报「分区 -1 不存在」。
+		if rec.Partition != nil && *rec.Partition == -1 {
+			// -1 = Produce 层自己的 auto 哨兵（见 find.go Client.Produce）——
+			// 归一为 nil 走自动分区。仅 -1：其余负数仍走 importPartitionGuard
+			// 明确报错（静默吞任意负数会掩盖 payload 错误）。
 			rec.Partition = nil
 		}
 		if rec.Partition != nil && *rec.Partition > maxPartition {
@@ -433,8 +434,8 @@ func (s *MessageIOService) ImportFromFile(ctx context.Context, in domain.ImportF
 			emit()
 			continue
 		}
-		if rec.Partition != nil && *rec.Partition < 0 {
-			rec.Partition = nil // 同上：负值归一为 auto
+		if rec.Partition != nil && *rec.Partition == -1 {
+			rec.Partition = nil // 同上：仅 -1 归一为 auto
 		}
 		if rec.Partition != nil && *rec.Partition > maxPartition {
 			res.Failed++

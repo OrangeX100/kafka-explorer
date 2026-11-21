@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, Gauge, Plus, Trash2 } from "lucide-react";
 import { Modal } from "../common/Modal.js";
 import { Select } from "../common/controls.js";
@@ -120,7 +120,7 @@ function CreateQuotaDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
-  const closeRef = { current: onClose };
+  const closeRef = useRef<() => void>(() => {});
 
   const create = async () => {
     // 点击校验（中文友好提示政策：分类+指引+可见反馈）。曾用 disabled 死
@@ -152,7 +152,7 @@ function CreateQuotaDialog({
   };
 
   return (
-    <Modal title={t("quotas.create")} width={460} onClose={onClose}>
+    <Modal title={t("quotas.create")} width={460} onClose={onClose} lockClose={busy}>
       {(close) => {
         closeRef.current = close;
         return (

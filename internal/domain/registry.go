@@ -1,15 +1,14 @@
 package domain
 
-
 // ---- Schema Registry ----
 
 // SchemaRegistry is a saved Confluent Schema Registry connection.
 type SchemaRegistry struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	URL       string    `json:"url"` // http(s)://host:port
-	Username  string    `json:"username,omitempty"`
-	SecretRef string    `json:"secretRef,omitempty"` // basic-auth password reference
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	URL       string `json:"url"` // http(s)://host:port
+	Username  string `json:"username,omitempty"`
+	SecretRef string `json:"secretRef,omitempty"` // basic-auth password reference
 	// ConnectionID binds the registry to one cluster: message decoding on
 	// that connection resolves schema ids HERE first. Empty = global
 	// fallback (serves any connection without its own binding).
@@ -30,12 +29,12 @@ func (r SchemaRegistry) Validate() error {
 
 // SchemaSubject is one registry subject with its latest version.
 type SchemaSubject struct {
-	Name          string     `json:"name"`
-	Version       int        `json:"version"`
-	ID            int        `json:"id"`
-	SchemaType    string     `json:"schemaType"` // AVRO | JSON | PROTOBUF
-	Compatibility string     `json:"compatibility"`
-	Schema        string     `json:"schema"` // raw schema JSON
+	Name          string      `json:"name"`
+	Version       int         `json:"version"`
+	ID            int         `json:"id"`
+	SchemaType    string      `json:"schemaType"` // AVRO | JSON | PROTOBUF
+	Compatibility string      `json:"compatibility"`
+	Schema        string      `json:"schema"` // raw schema JSON
 	References    []SchemaRef `json:"references,omitempty"`
 }
 
@@ -71,13 +70,13 @@ type GlobalConfig struct {
 // database — the decode path for Confluent-framed payloads when no
 // registry connection is configured .
 type LocalSchema struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	SchemaType string   `json:"schemaType"` // AVRO | JSON | PROTOBUF
-	Schema     string   `json:"schema"`
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	SchemaType string      `json:"schemaType"` // AVRO | JSON | PROTOBUF
+	Schema     string      `json:"schema"`
 	References []SchemaRef `json:"references,omitempty"`
-	CreatedAt  FlexTime `json:"createdAt,omitempty"`
-	UpdatedAt  FlexTime `json:"updatedAt,omitempty"`
+	CreatedAt  FlexTime    `json:"createdAt,omitempty"`
+	UpdatedAt  FlexTime    `json:"updatedAt,omitempty"`
 }
 
 func (s LocalSchema) Validate() error {
@@ -104,8 +103,8 @@ type BrokerSummary struct {
 // deletes the override, restoring the cluster default. Static (restart-only)
 // configs are rejected by the broker itself with a clear error.
 type AlterBrokerConfigInput struct {
-	ConnectionID string            `json:"connectionId"`
-	BrokerID     int32             `json:"brokerId"`
+	ConnectionID string             `json:"connectionId"`
+	BrokerID     int32              `json:"brokerId"`
 	Values       map[string]*string `json:"values"`
 }
 
@@ -117,49 +116,49 @@ type BrokerDetail struct {
 
 // LogDir is one log directory entry of a broker.
 type LogDir struct {
-	BrokerID  int32            `json:"brokerId"`
-	Path      string           `json:"path"`
-	TotalBytes uint64          `json:"totalBytes"`
-	UsableBytes uint64         `json:"usableBytes"`
-	Topics    []LogDirTopic    `json:"topics,omitempty"`
+	BrokerID    int32         `json:"brokerId"`
+	Path        string        `json:"path"`
+	TotalBytes  uint64        `json:"totalBytes"`
+	UsableBytes uint64        `json:"usableBytes"`
+	Topics      []LogDirTopic `json:"topics,omitempty"`
 }
 
 // LogDirTopic is one topic's partition footprint inside a log dir.
 type LogDirTopic struct {
-	Topic      string `json:"topic"`
-	Partition  int32  `json:"partition"`
-	SizeBytes  uint64 `json:"sizeBytes"`
-	OffsetLag  int64  `json:"offsetLag,omitempty"`
+	Topic     string `json:"topic"`
+	Partition int32  `json:"partition"`
+	SizeBytes uint64 `json:"sizeBytes"`
+	OffsetLag int64  `json:"offsetLag,omitempty"`
 }
 
 // ---- ACLs ----
 
 // ACL is one access control entry.
 type ACL struct {
-	Principal       string `json:"principal"`
-	Host            string `json:"host"`
-	Operation       string `json:"operation"`       // READ, WRITE, CREATE, DELETE, ALTER, DESCRIBE, ...
-	PermissionType  string `json:"permissionType"`  // ALLOW | DENY
-	ResourceType    string `json:"resourceType"`    // TOPIC, GROUP, CLUSTER, TRANSACTIONAL_ID
-	ResourceName    string `json:"resourceName"`
-	PatternType     string `json:"patternType"`     // LITERAL | PREFIXED
+	Principal      string `json:"principal"`
+	Host           string `json:"host"`
+	Operation      string `json:"operation"`      // READ, WRITE, CREATE, DELETE, ALTER, DESCRIBE, ...
+	PermissionType string `json:"permissionType"` // ALLOW | DENY
+	ResourceType   string `json:"resourceType"`   // TOPIC, GROUP, CLUSTER, TRANSACTIONAL_ID
+	ResourceName   string `json:"resourceName"`
+	PatternType    string `json:"patternType"` // LITERAL | PREFIXED
 }
 
 // ---- Quotas ----
 
 // Quota is one client quota entry.
 type Quota struct {
-	Entity      map[string]string `json:"entity"` // user / client-id entries
-	Values      map[string]float64 `json:"values"` // producer_byte_rate, consumer_byte_rate, request_percentage
+	Entity map[string]string  `json:"entity"` // user / client-id entries
+	Values map[string]float64 `json:"values"` // producer_byte_rate, consumer_byte_rate, request_percentage
 }
 
 // ---- Cluster compare ----
 
 // ClusterDiff is the comparison result of two clusters.
 type ClusterDiff struct {
-	TopicsOnlyInA []string          `json:"topicsOnlyInA"`
-	TopicsOnlyInB []string          `json:"topicsOnlyInB"`
-	Both          []TopicPairDiff   `json:"both"`
+	TopicsOnlyInA []string        `json:"topicsOnlyInA"`
+	TopicsOnlyInB []string        `json:"topicsOnlyInB"`
+	Both          []TopicPairDiff `json:"both"`
 }
 
 // TopicPairDiff compares one topic present in both clusters.
@@ -186,9 +185,9 @@ type GenerateInput struct {
 
 // GenerateResult summarizes a generation run.
 type GenerateResult struct {
-	Produced int   `json:"produced"`
+	Produced    int   `json:"produced"`
 	FirstOffset int64 `json:"firstOffset"`
-	ElapsedMs int64 `json:"elapsedMs"`
+	ElapsedMs   int64 `json:"elapsedMs"`
 }
 
 // ---- Message import/export ----
@@ -212,10 +211,10 @@ type ExportMessagesInput struct {
 
 // ImportedMessage is one record coming in from an import file.
 type ImportedMessage struct {
-	Key     *string            `json:"key,omitempty"` // plain text (not base64): files are human-authored
-	Value   *string            `json:"value,omitempty"`
-	Headers map[string]string  `json:"headers,omitempty"`
-	Partition *int32           `json:"partition,omitempty"`
+	Key       *string           `json:"key,omitempty"` // plain text (not base64): files are human-authored
+	Value     *string           `json:"value,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Partition *int32            `json:"partition,omitempty"`
 }
 
 // ImportFileInput selects an import payload file (path chosen by the user

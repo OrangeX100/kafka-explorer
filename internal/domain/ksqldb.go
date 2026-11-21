@@ -22,11 +22,11 @@ func (k KsqlDbServer) Validate() error {
 
 // KsqlStreamRow is one SHOW STREAMS entity row.
 type KsqlStreamRow struct {
-	Name       string `json:"name"`
-	Topic      string `json:"topic"`
-	KeyFormat  string `json:"keyFormat"`
+	Name        string `json:"name"`
+	Topic       string `json:"topic"`
+	KeyFormat   string `json:"keyFormat"`
 	ValueFormat string `json:"valueFormat"`
-	WindowType string `json:"windowType,omitempty"`
+	WindowType  string `json:"windowType,omitempty"`
 }
 
 // KsqlTableRow is one SHOW TABLES entity row.

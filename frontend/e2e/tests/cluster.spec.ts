@@ -145,7 +145,18 @@ test.afterAll(async () => {
         await dismissOverlays(page);
         await page.locator('[data-tip="集群连接"]').click();
         await openWorkspaceSection(page, "主题");
-        for (const t of [PAGING_TOPIC, GOTO_TOPIC]) await deleteTopic(page, t);
+        // openWorkspaceSection 只等 300ms——切 section 会 remount TopicsView
+        // 且 load() 异步拉列表，deleteTopic 的幂等守卫会在列表返回前静默
+        // 跳删（CI 每轮泄 2 主题的真正机制，2026-11-21 终审）。先等行出现。
+        for (const t of [PAGING_TOPIC, GOTO_TOPIC]) {
+          await page
+            .locator('[data-testid="topic-row"]')
+            .filter({ hasText: t })
+            .first()
+            .waitFor({ state: "visible", timeout: 15_000 })
+            .catch(() => {});
+          await deleteTopic(page, t);
+        }
         await deleteConnection(page, CONN);
       });
     }

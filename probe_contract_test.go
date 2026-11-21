@@ -45,7 +45,8 @@ func TestNoBareTestFixmeInProbes(t *testing.T) {
 			// 跳过整个 spec——2026-11-21 两次乌龙（全族 6 skipped / 0 tests
 			// discovered）。环境闸（test.skip(!KAFKA...)）是合法的文件级
 			// 设计，不在此列；test 体内的合法 skip 都有缩进。
-			if strings.HasPrefix(line, "test.skip(true") {
+			trimmed := strings.TrimSpace(line)
+			if skipTrue := regexp.MustCompile(`^test\.skip\(\s*true`); skipTrue.MatchString(trimmed) {
 				t.Errorf("%s:%s: FILE-LEVEL unconditional test.skip(true) found — "+
 					"a file-level skip silently skips the WHOLE spec (2026-11-21 "+
 					"double incident). Move the skip inside the test body. Line: %s",
@@ -132,6 +133,12 @@ func TestProbeBaseVersionInContract(t *testing.T) {
 	action, err := os.ReadFile(".github/actions/e2e-probe/action.yml")
 	if err != nil {
 		t.Fatalf("read action.yml: %v", err)
+	}
+	// CGO pin parity: the probe build must carry the same CGO_ENABLED=0 pin
+	// as the Taskfile release build (2025-11 runner CGO default flipped and
+	// the CGO debug build never opened its CDP port on CI).
+	if !strings.Contains(string(action), "CGO_ENABLED=0") {
+		t.Errorf("e2e-probe/action.yml lost the CGO_ENABLED=0 pin — probe/release config fork")
 	}
 	reStamp := regexp.MustCompile(`buildinfo\.Version=(\d+\.\d+\.\d+)`)
 	stamp := reStamp.FindStringSubmatch(string(action))

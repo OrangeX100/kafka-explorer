@@ -18,9 +18,9 @@ func TestTaskfileContract(t *testing.T) {
 	}
 	var tf struct {
 		Tasks map[string]struct {
-			Desc string `yaml:"desc"`
+			Desc string   `yaml:"desc"`
 			Deps []string `yaml:"deps"`
-			Cmds []any `yaml:"cmds"`
+			Cmds []any    `yaml:"cmds"`
 		} `yaml:"tasks"`
 	}
 	if err := yaml.Unmarshal(raw, &tf); err != nil {
@@ -50,10 +50,16 @@ func TestTaskfileContract(t *testing.T) {
 		}
 	}
 	joined := strings.Join(buildCmds, "\n")
-	for _, required := range []string{"sync_versioninfo.py", "goversioninfo", "-trimpath", "-ldflags"} {
+	for _, required := range []string{"sync_versioninfo.py", "goversioninfo", "-trimpath", "-ldflags", "CGO_ENABLED=0"} {
 		if !strings.Contains(joined, required) {
 			t.Errorf("build task cmds missing %q — PE metadata/flags must stay wired (AV false-positive mitigation)", required)
 		}
+	}
+	// CGO_ENABLED=0 must stay pinned: the 2025-11 runner image flipped Go's
+	// default to CGO=1 (mingw on PATH) and the CGO debug build never opened
+	// its window on CI — unpinning forks the release/probe configs apart.
+	if !strings.Contains(joined, "CGO_ENABLED=0 go build") {
+		t.Errorf("build task go build lost the CGO_ENABLED=0 prefix — release/probe config fork")
 	}
 	// Stale-dist guard: `task build` must refresh frontend/dist first.
 	found := false

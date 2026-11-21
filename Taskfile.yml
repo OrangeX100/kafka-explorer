@@ -66,7 +66,7 @@ tasks:
       # Same 360 mitigation as the main build — VERSIONINFO+icon in one syso.
       - python scripts/sync_uninstaller_versioninfo.py "{{.VERSION}}"
       - go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0 -o cmd/uninstaller/uninstall_windows.syso -manifest build/app.manifest build/uninstaller-versioninfo.json
-      - go build -trimpath -ldflags "-H=windowsgui" -o bin/installer/KafkaExplorer_Uninstall.exe ./cmd/uninstaller
+      - CGO_ENABLED=0 go build -trimpath -ldflags "-H=windowsgui" -o bin/installer/KafkaExplorer_Uninstall.exe ./cmd/uninstaller
       # Inno engine FIRST: the setup front-end EMBEDS it (go:embed all:engine
       # in cmd/setup) so the release stays a single self-contained exe.
       - '"{{.ISCC}}" /DVersion={{.VERSION}} /DVersionInfoVersion={{.VERSIONINFOVERSION}} build/installer/installer.iss'
@@ -83,7 +83,7 @@ tasks:
       # -X buildinfo.Version lets the service skip the pre-uninstall on
       # version upgrades (same-version reinstalls are the only case Inno
       # silently skips — see cmd/setup/service.go install()).
-      - go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version={{.VERSION}}" -o bin/installer/KafkaExplorer_Setup.exe ./cmd/setup
+      - CGO_ENABLED=0 go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version={{.VERSION}}" -o bin/installer/KafkaExplorer_Setup.exe ./cmd/setup
       # the PUBLISHED artifact is the front-end (engine embedded) under the
       # versioned name: users download it AND the in-app auto-update matches
       # exactly this pattern (see internal/application/update_service.go).
@@ -175,7 +175,7 @@ tasks:
       # update-flow probe drives the REAL production feed. Override
       # VERSION to a value below the published latest to exercise the full
       # discover→download→cancel chain: task dev:cdp VERSION=0.4.10
-      - go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version={{.VERSION}} -X kafkaexplorer/internal/buildinfo.Commit={{.COMMIT}} -X kafkaexplorer/internal/buildinfo.UpdateRepo={{.RELEASE_REPO}} -X kafkaexplorer/internal/buildinfo.DebugFeatures=cdp" -o bin/kafka-explorer-cdp.exe .
+      - CGO_ENABLED=0 go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version={{.VERSION}} -X kafkaexplorer/internal/buildinfo.Commit={{.COMMIT}} -X kafkaexplorer/internal/buildinfo.UpdateRepo={{.RELEASE_REPO}} -X kafkaexplorer/internal/buildinfo.DebugFeatures=cdp" -o bin/kafka-explorer-cdp.exe .
       - cmd /c "set KE_DEBUG_CDP=1&& start "" bin\kafka-explorer-cdp.exe"
       - 'echo "CDP 端口 9223 已随窗口启动；跑 UI 用例 → cd frontend && npx playwright test"'
     vars:

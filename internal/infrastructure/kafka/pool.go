@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-
 	"kafkaexplorer/internal/domain"
 )
 

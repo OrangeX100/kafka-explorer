@@ -20,7 +20,7 @@ func TestMigrationsAreDenseAndApplied(t *testing.T) {
 	}
 	for i, m := range sources {
 		base := filepath.Base(m.Name)
-		wantPrefix := pad(i + 1) + "_"
+		wantPrefix := pad(i+1) + "_"
 		if len(base) < 5 || base[:5] != wantPrefix {
 			t.Errorf("migration %d is named %s, want prefix %s (dense numbering)", i+1, base, wantPrefix)
 		}

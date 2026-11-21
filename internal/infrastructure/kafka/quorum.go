@@ -41,23 +41,23 @@ func (c *Client) DescribeQuorum(ctx context.Context) (domain.QuorumInfo, error) 
 				return domain.QuorumInfo{}, fmt.Errorf("quorum 分区查询失败 (code %d)", part.ErrorCode)
 			}
 			info := domain.QuorumInfo{
-				LeaderID:     part.LeaderID,
-				LeaderEpoch:  part.LeaderEpoch,
+				LeaderID:      part.LeaderID,
+				LeaderEpoch:   part.LeaderEpoch,
 				HighWatermark: part.HighWatermark,
 				// Non-nil even with zero voters — the null-array contract.
 				Voters: []domain.QuorumVoter{},
 			}
 			for _, vt := range part.CurrentVoters {
 				info.Voters = append(info.Voters, domain.QuorumVoter{
-					ReplicaID:     vt.ReplicaID,
-					Role:          "voter",
-					LogEndOffset:  vt.LogEndOffset,
-					LastFetchMs:   vt.LastFetchTimestamp,
+					ReplicaID:    vt.ReplicaID,
+					Role:         "voter",
+					LogEndOffset: vt.LogEndOffset,
+					LastFetchMs:  vt.LastFetchTimestamp,
 					// LogEndOffset -1 = the voter has not reported (unreachable or
 					// lagging reporter): unknown is NOT synced — the old
 					// `LogEndOffset < 0 ||` branch painted dead voters green.
-					Synced:        vt.LogEndOffset >= 0 && vt.LogEndOffset == part.HighWatermark,
-					IsLeader:      vt.ReplicaID == part.LeaderID,
+					Synced:   vt.LogEndOffset >= 0 && vt.LogEndOffset == part.HighWatermark,
+					IsLeader: vt.ReplicaID == part.LeaderID,
 				})
 			}
 			for _, ob := range part.Observers {

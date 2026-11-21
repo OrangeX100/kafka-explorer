@@ -111,7 +111,6 @@ func (h *ConnectHandler) Resume(ctx context.Context, clusterID, name string) err
 	return h.svc.Resume(ctx, clusterID, name)
 }
 
-
 // connectConnectorSummary / connectConnectorDetail alias the infra types for
 // handler returns (JSON shapes identical).
 type connectConnectorSummary = connect.ConnectorSummary

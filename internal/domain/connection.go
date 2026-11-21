@@ -75,8 +75,8 @@ type Connection struct {
 	Name      string            `json:"name"`
 	Bootstrap string            `json:"bootstrap"` // "host:port,host:port"
 	Security  SecurityMechanism `json:"security"`
-	Username  string            `json:"username,omitempty"` // SASL user; not a secret
-	SecretRef string            `json:"secretRef,omitempty"`// keyring entry name; empty when mechanism needs no password
+	Username  string            `json:"username,omitempty"`  // SASL user; not a secret
+	SecretRef string            `json:"secretRef,omitempty"` // keyring entry name; empty when mechanism needs no password
 	TLS       TLSSettings       `json:"tls"`
 	// Tunnel: when enabled, every broker connection is dialed through an
 	// SSH jump host (local forwarders remap advertised listener addresses).

@@ -24,12 +24,12 @@ type KsqlDbHandler struct {
 	log     *zap.Logger
 	emit    func(topic string, data ...any)
 
-	mu      sync.Mutex
+	mu sync.Mutex
 	// cancels keys a live query by requestID. Same-id re-entry MUST supersede
 	// (cancel old, register new) with generation-gated cleanup: func values
 	// can't be compared, so the old goroutine's blind delete erased the NEW
 	// query's cancel and broke its 停止 button until the 30-min TTL.
-	cancels map[string]queryReg
+	cancels  map[string]queryReg
 	queryGen int64
 }
 

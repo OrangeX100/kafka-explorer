@@ -39,7 +39,7 @@ runs:
         # bindings are a gitignored generated artifact — regenerate first
         wails3 task generate:bindings
         cd frontend && npm ci --no-audit --no-fund && npm run build && cd ..
-        # VERSION=0.4.11 < published latest → the update-flow probe walks the
+        # VERSION=<probe base> < published latest → the update-flow probe walks the
         # REAL discover→download→cancel chain against the production feed.
         # UpdateRepo matches the release stamp (settings.Get falls back to it).
         # DebugFeatures=cdp is the ONLY gate that lets KE_DEBUG_CDP open the

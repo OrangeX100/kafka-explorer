@@ -209,9 +209,9 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 		// those exhausted disables 下一页/上一页 with records still beyond
 		// the cursor. The backward variant trapped the user at the log
 		// start (2026-11-21 paging probe); the forward mirror was the same
-		// defect one page over. When bounds are unavailable stay
-		// conservative (legacy true) — the UI self-heals on the empty
-		// follow-up click either way.
+		// defect one page over. Forward without cached bounds stays
+		// conservative (legacy true); backward without them relies on row
+		// derivation paging to self-heal — no cursor, both buttons live.
 		if forward {
 			if ends, ok := c.cachedEnds(req.Topic); ok {
 				if end, has := ends[partition]; has {

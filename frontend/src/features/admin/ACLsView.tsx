@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {  Copy, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { adminApi, friendlyError } from "../../shared/api.js";
 import { useToast } from "../../state/stores.js";
@@ -154,7 +154,10 @@ export function ACLsView({ connectionId }: { connectionId: string }) {
       {creating && (
         <CreateACLDialog
           connectionId={connectionId}
-          onClose={() => setCreating(false)}
+          onClose={() => {
+            setCreating(false);
+            void load();
+          }}
                   />
       )}
     </div>
@@ -178,7 +181,7 @@ function CreateACLDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
-  const closeRef = { current: onClose };
+  const closeRef = useRef<() => void>(() => {});
 
   const create = async () => {
     // 点击校验（中文友好提示政策）：曾用 disabled 死按钮拦空资源名称——
@@ -240,7 +243,7 @@ function CreateACLDialog({
   }
 
   return (
-    <Modal title={t("acls.create")} width={520} onClose={onClose}>
+    <Modal title={t("acls.create")} width={520} onClose={onClose} lockClose={busy}>
       {(close) => {
         closeRef.current = close;
         return (

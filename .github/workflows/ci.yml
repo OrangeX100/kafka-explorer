@@ -50,8 +50,8 @@ jobs:
         shell: bash
         run: rm -rf .gotmp || true
 
-  # UI probes on every push: build a CDP-enabled debug binary (0.4.11 stamp —
-  # below the published latest), launch it on the runner, and run the
+  # UI probes on every push: build a CDP-enabled debug binary (probe-base stamp —
+  # below the published latest; the base rides the release tag cadence), launch it on the runner, and run the
   # non-cluster suite (shell boot / isWindows regression / settings echo /
   # the REAL update chain). Cluster probes run only when the repo secret
   # KE_E2E_KAFKA points at a reachable broker (honest skips otherwise).

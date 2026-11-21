@@ -114,7 +114,7 @@ func (c *Client) ShareGroupDetail(ctx context.Context, group string) (domain.Sha
 			MemberEpoch: m.MemberEpoch,
 			// Non-nil slices only: nil marshals to JSON null and the
 			// frontend's .length/.map throws (white screen).
-			Subscribed:  make([]string, 0, len(m.SubscribedTopicNames)),
+			Subscribed: make([]string, 0, len(m.SubscribedTopicNames)),
 		}
 		sm.Subscribed = append(sm.Subscribed, m.SubscribedTopicNames...)
 		if m.RackID != nil {

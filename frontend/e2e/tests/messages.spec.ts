@@ -140,7 +140,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  test.setTimeout(120_000); // heal/ensureAppRunning 内部兜底各 45s，hook 级
+  test.setTimeout(150_000); // sshKafka 上限 90s 可占预算 60%——heal 最坏 67s 需余量 // heal/ensureAppRunning 内部兜底各 45s，hook 级
   // 超时 try/catch 挡不住——默认 45s 曾让清理单独把 spec 打红（评审）
 
   try {

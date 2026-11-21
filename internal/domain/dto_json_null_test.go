@@ -76,26 +76,26 @@ var inputOnlyNullOK = map[string]bool{
 // a NEW slice/map field not listed here fails the build until its
 // construction sites are fixed (preferred) or it is consciously listed.
 var guaranteedNonNil = map[string]bool{
-	"TopicDetail.PartitionList":      true, // literal make() in kafka.TopicDetail
-	"TopicDetail.Config":             true, // literal []ConfigEntry{} — survives a DescribeConfigs failure
-	"PartitionSummary.Replicas":      true, // append([]int32{}, ...) in TopicDetail
-	"PartitionSummary.ISR":           true, // append([]int32{}, ...) in TopicDetail
-	"ConsumerGroupDetail.Members":    true, // literal [] in GroupDetail
-	"ConsumerGroupDetail.Offsets":    true, // literal [] in GroupDetail
-	"GroupMember.Assignment":         true, // literal []string{} — share-group members fail AsConsumer
-	"ShareGroupSummary.Subscribed":   true, // append([]string{}, SubscribedTopics()...)
-	"ShareGroupDetail.Members":       true, // literal [] in ShareGroupDetail
-	"ShareGroupDetail.Offsets":       true, // literal [] in ShareGroupDetail
-	"ShareMember.Subscribed":         true, // make+append in ShareGroupDetail
-	"ShareMember.Assignment":         true, // make+append in ShareGroupDetail
-	"BrowsePage.Messages":            true, // every return path initializes [] — incl. past-the-end jumps
-	"Quota.Entity":                   true, // literal map in ListQuotas
-	"Quota.Values":                   true, // literal map in ListQuotas
-	"BrokerDetail.Configs":           true, // literal []ConfigEntry{} — survives an empty config list
-	"ClusterDiff.TopicsOnlyInA":      true, // literal [] in CompareTopics
-	"ClusterDiff.TopicsOnlyInB":      true, // literal [] in CompareTopics
-	"ClusterDiff.Both":               true, // literal [] in CompareTopics
-	"QuorumInfo.Voters":              true, // see quorum.go construction sites
+	"TopicDetail.PartitionList":    true, // literal make() in kafka.TopicDetail
+	"TopicDetail.Config":           true, // literal []ConfigEntry{} — survives a DescribeConfigs failure
+	"PartitionSummary.Replicas":    true, // append([]int32{}, ...) in TopicDetail
+	"PartitionSummary.ISR":         true, // append([]int32{}, ...) in TopicDetail
+	"ConsumerGroupDetail.Members":  true, // literal [] in GroupDetail
+	"ConsumerGroupDetail.Offsets":  true, // literal [] in GroupDetail
+	"GroupMember.Assignment":       true, // literal []string{} — share-group members fail AsConsumer
+	"ShareGroupSummary.Subscribed": true, // append([]string{}, SubscribedTopics()...)
+	"ShareGroupDetail.Members":     true, // literal [] in ShareGroupDetail
+	"ShareGroupDetail.Offsets":     true, // literal [] in ShareGroupDetail
+	"ShareMember.Subscribed":       true, // make+append in ShareGroupDetail
+	"ShareMember.Assignment":       true, // make+append in ShareGroupDetail
+	"BrowsePage.Messages":          true, // every return path initializes [] — incl. past-the-end jumps
+	"Quota.Entity":                 true, // literal map in ListQuotas
+	"Quota.Values":                 true, // literal map in ListQuotas
+	"BrokerDetail.Configs":         true, // literal []ConfigEntry{} — survives an empty config list
+	"ClusterDiff.TopicsOnlyInA":    true, // literal [] in CompareTopics
+	"ClusterDiff.TopicsOnlyInB":    true, // literal [] in CompareTopics
+	"ClusterDiff.Both":             true, // literal [] in CompareTopics
+	"QuorumInfo.Voters":            true, // see quorum.go construction sites
 }
 
 // TestDTOZeroValueNeverMarshalsNull walks each DTO's zero-value JSON and

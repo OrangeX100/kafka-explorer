@@ -13,9 +13,9 @@ import (
 
 	wailsapp "github.com/wailsapp/wails/v3/pkg/application"
 	"kafkaexplorer/internal/appdir"
-	"kafkaexplorer/internal/fsutil"
 	"kafkaexplorer/internal/application"
 	"kafkaexplorer/internal/buildinfo"
+	"kafkaexplorer/internal/fsutil"
 )
 
 // promptSingleSelection normalizes a native file-dialog result: wails maps
