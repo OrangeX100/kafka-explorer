@@ -396,6 +396,8 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
   // 全部有界+限定（CI 上无界 click 曾把整个用例拖进 180s 全局超时，
   // develop 同提交绿 = 纯 flaky，2026-11-21）
   console.log("[gt]", "seeded", Date.now());
+  const preRows = await messageRows(page);
+  console.log("[gt]", "pre-jump rows", JSON.stringify(preRows));
   const gotoBtn = page.getByRole("button", { name: "跳转到" });
   await gotoBtn.click({ timeout: 8_000 });
   const dlg = dialog(page);
@@ -415,13 +417,21 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
   console.log("[gt]", "polling rows", Date.now());
   // the badge flips instantly while the jump's browse loads async — poll on
   // ROW CONTENT (all p1, ascending, starting at 0) before asserting
+  // Poll 120s: the jump LANDING time scales with accumulated keep-mounted
+  // tab state (local 11.8s fresh → 41s after a day of runs; CI 2-core
+  // amplifies past 45s — round-9 failed 3/3 with stale-p0 "mixed" samples
+  // and skeleton-phase "empty" samples of the SAME slow landing). The
+  // diagnostic received value carries the full row dump on failure —
+  // ground truth beats taxonomy (2026-11-21).
   await expect
     .poll(async () => {
       const rs = await messageRows(page);
       if (rs.length === 0) return "empty";
-      if (!rs.every((r) => r.partition === 1)) return "mixed-partitions";
+      if (!rs.every((r) => r.partition === 1)) {
+        return `mixed:${rs.map((r) => `p${r.partition}:${r.offset}`).join(",")}`;
+      }
       return `${rs[0].offset}-${rs[rs.length - 1].offset}`;
-    }, { timeout: 45_000, intervals: [1500, 2500, 3000] })
+    }, { timeout: 120_000, intervals: [2000, 3000, 5000] })
     .toBe("0-2");
 
   const badge = await positionBadge(page);
