@@ -70,7 +70,7 @@ test("检查更新→发现新版→按钮渲染→下载启动→取消→恢�
         await expect(result).toContainText("已是最新版本");
         test.info().annotations.push({
           type: "notice",
-          description: "门禁时序：探针基准 == published latest，已验证"已是最新"诚实态；发现→下载链路由 develop CI（stamp<latest）覆盖",
+          description: "门禁时序：探针基准 == published latest，已验证「已是最新」诚实态；发现→下载链路由 develop CI（stamp<latest）覆盖",
         });
         return;
       }
