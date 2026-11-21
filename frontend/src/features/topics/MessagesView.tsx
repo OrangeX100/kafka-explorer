@@ -129,6 +129,15 @@ export function MessagesView({
   // THEN commits setPartition; the [partition] effect's duplicate tail
   // reload wins the seq guard and erases a timestamp jump — skip it.
   const pendingGoto = useRef(false);
+  // The jump TARGET rides the effect as the single request path: onJump
+  // only parks the target + commits partition/cursor state, and the
+  // [partition] effect below fires the browse with goto pinned. The old
+  // double path (onJump firing its own request while the effect merely
+  // skips) depended on pendingGoto outliving A until the effect ran — on a
+  // slow render pipeline the effect fires AFTER A's finally cleared the
+  // flag, its tail reload wins the seq guard, and the table lands empty
+  // forever (2026-11-21 CI: cross-partition jump → empty, 3/3 attempts).
+  const pendingGotoTarget = useRef<GoToTarget | null>(null);
 
   useEffect(() => {
     void topicsApi
@@ -222,6 +231,15 @@ export function MessagesView({
 
   useEffect(() => {
     setSelected(null);
+    // A parked jump target: this effect IS the request (single path — see
+    // pendingGotoTarget). Clear it here so later pageSize/decodeOn refires
+    // fall through to the plain tail reload.
+    const gt = pendingGotoTarget.current;
+    if (gt) {
+      pendingGotoTarget.current = null;
+      void loadPage(gt.offset !== undefined ? { offset: gt.offset } : "tail", gt, true);
+      return;
+    }
     // pendingGoto clears when the jump REQUEST completes (loadPage finally),
     // so every effect re-fire DURING the flight — partition, pageSize or
     // decodeOn — skips its duplicate tail reload, not just the partition one.
@@ -482,9 +500,19 @@ export function MessagesView({
             // decodeOn — would send a duplicate tail reload that wins the
             // seq guard and erases the target window.
             pendingGoto.current = true;
-            setPartition(target.partition);
+            if (target.partition === partition) {
+              // Same partition: setPartition is a no-op, the effect below
+              // never fires — fire the request here as before.
+              void loadPage(target.offset !== undefined ? { offset: target.offset } : "tail", target);
+            } else {
+              // Cross-partition: park the target and let the [partition]
+              // effect fire the ONE request (single-path rework — the old
+              // onJump-issued request raced its own finally on slow render
+              // pipelines and left the table empty, 2026-11-21 CI 3/3).
+              pendingGotoTarget.current = target;
+              setPartition(target.partition);
+            }
             setCursor(target.offset !== undefined ? { offset: target.offset } : "tail");
-            void loadPage(target.offset !== undefined ? { offset: target.offset } : "tail", target);
           }}
           onClose={() => setGoTo(false)}
         />
