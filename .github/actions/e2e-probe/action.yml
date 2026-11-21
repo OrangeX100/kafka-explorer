@@ -56,6 +56,12 @@ runs:
     - name: Launch app with CDP port
       shell: bash
       run: |
+        # WebView2 后台节流/挂起是 CI 独有挂死根因（2026-11-21 实证：runner
+        # 上 app 窗口被遮挡，page.evaluate 静默停摆 ~5min 再恢复，goto 两连
+        # 300s 整卡死而本地前台全过；v0.4.12 的 rAF 前台化只救了 actiona-
+        # bility，救不了 renderer backgrounding 的 evaluate 停摆）。三个
+        # Chromium 开关禁掉：定时器节流 + 渲染器 backgrounding + 遮挡挂起。
+        export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows"
         KE_DEBUG_CDP=1 ./bin/kafka-explorer-cdp.exe &
         ok=0
         for i in $(seq 1 30); do

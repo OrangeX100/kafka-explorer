@@ -370,8 +370,11 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
   test.setTimeout(300_000); // 6 produce cycles + dialog flows（CI WAN 波动
   // 实测 180s 两连超时 2026-11-21——每轮真对话框 15-25s，峰值 6×25+跳转 >180）
   await openWorkspaceSection(page, "主题");
+  console.log("[gt]", "section open", Date.now());
   await createTopic(page, GOTO_TOPIC, 2);
+  console.log("[gt]", "topic created", Date.now());
   await openTopic(page, GOTO_TOPIC);
+  console.log("[gt]", "topic opened", Date.now());
 
   // deterministic offsets: 3 records to each partition, verified per ack
   for (let i = 0; i < 3; i++) {
@@ -389,10 +392,12 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
   // 跳转对话框里有分区与模式等多个 combobox（还有 perPage 在工具栏）——
   // 全部有界+限定（CI 上无界 click 曾把整个用例拖进 180s 全局超时，
   // develop 同提交绿 = 纯 flaky，2026-11-21）
+  console.log("[gt]", "seeded", Date.now());
   const gotoBtn = page.getByRole("button", { name: "跳转到" });
   await gotoBtn.click({ timeout: 8_000 });
   const dlg = dialog(page);
   await dlg.waitFor({ state: "visible" });
+  console.log("[gt]", "goto dialog open", Date.now());
   const dlgCombos = dlg.locator('button[role="combobox"]');
   await dlgCombos.first().click({ timeout: 8_000 });
   await page
@@ -402,7 +407,9 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
     .click({ timeout: 5_000 });
   await dlg.locator("input[type=number]").fill("0");
   await dlg.getByRole("button", { name: "跳转", exact: true }).click({ timeout: 8_000 });
+  console.log("[gt]", "jump clicked", Date.now());
 
+  console.log("[gt]", "polling rows", Date.now());
   // the badge flips instantly while the jump's browse loads async — poll on
   // ROW CONTENT (all p1, ascending, starting at 0) before asserting
   await expect
