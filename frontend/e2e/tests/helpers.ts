@@ -649,6 +649,15 @@ export async function produceMessage(
  *  to the foreground (Win32 SetForegroundWindow, restore if minimized)
  *  before touching any click. */
 export async function ensureForeground() {
+  // CI: never run. The runner's only window IS the app, so there is nothing
+  // to fight for the foreground — and the execSync here BLOCKS the node
+  // event loop for the whole PowerShell lifetime (Add-Type compiles C# on
+  // every spawn, uncached). Under produce-dialog CPU load each call blew
+  // past its own 15s timeout, the interval refired immediately on unblock,
+  // and the runner entered a permanent freeze (2026-11-21: [wi]/[gt]
+  // breadcrumbs printing then ~5min of silence, tests failing in rotation
+  // across rounds while the same sequence passed locally in 35s).
+  if (process.env.CI) return;
   const { execSync } = await import("node:child_process");
   const { fileURLToPath } = await import("node:url");
   // resolve the .ps1 relative to this module (e2e/tests/ → e2e/tools/)
