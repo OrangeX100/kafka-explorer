@@ -399,7 +399,7 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
   const gotoBtn = page.getByRole("button", { name: "跳转到" });
   await gotoBtn.click({ timeout: 8_000 });
   const dlg = dialog(page);
-  await dlg.waitFor({ state: "visible" });
+  await dlg.waitFor({ state: "visible", timeout: 15_000 });
   console.log("[gt]", "goto dialog open", Date.now());
   const dlgCombos = dlg.locator('button[role="combobox"]');
   await dlgCombos.first().click({ timeout: 8_000 });

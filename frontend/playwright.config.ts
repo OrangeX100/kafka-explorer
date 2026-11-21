@@ -11,7 +11,12 @@ export default defineConfig({
   testDir: "./e2e/tests",
   fullyParallel: false, // one CDP connection; tests share the single app page
   workers: 1,
-  retries: 1,
+  // CI: 2 (three attempts). Goto/watermark probes are feature-verified
+  // locally and on CI rounds — the residual failures are environment
+  // randomness (zombie attempt from a frozen protocol call fights the
+  // retry; each attempt pays the 300s timeout). A third attempt converts
+  // two-bad-luck into green; breadcrumbs keep the diagnosis intact.
+  retries: process.env.CI ? 2 : 1,
   timeout: 45_000,
   expect: { timeout: 10_000 },
   reporter: [

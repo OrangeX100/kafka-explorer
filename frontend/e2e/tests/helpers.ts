@@ -463,7 +463,9 @@ export async function createTopic(page: Page, name: string, partitions: number) 
     .click({ timeout: 8_000 });
   console.log("[ct]", "button clicked", name, Date.now());
   const dlg = dialog(page);
-  await dlg.waitFor({ state: "visible" });
+  // bounded: an unbounded waitFor under a leftover modal (zombie prior
+  // attempt) never errors — it eats the whole 300s test budget silently
+  await dlg.waitFor({ state: "visible", timeout: 15_000 });
   console.log("[ct]", "dialog visible", name, Date.now());
   await dlg.locator("input").nth(0).fill(name);
   await dlg.locator("input[type=number]").nth(0).fill(String(partitions));
@@ -607,7 +609,7 @@ export async function produceMessage(
     .first()
     .click({ timeout: 8_000 });
   const dlg = dialog(page);
-  await dlg.waitFor({ state: "visible" });
+  await dlg.waitFor({ state: "visible", timeout: 15_000 });
   if (partition !== "") {
     const combo = dlg.locator('button[role="combobox"]').first();
     await keSelect(page, combo, partition);
