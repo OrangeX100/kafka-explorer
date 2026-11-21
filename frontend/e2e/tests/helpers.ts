@@ -468,8 +468,10 @@ export async function createTopic(page: Page, name: string, partitions: number) 
   await dlg.waitFor({ state: "visible", timeout: 15_000 });
   console.log("[ct]", "dialog visible", name, Date.now());
   await dlg.locator("input").nth(0).fill(name);
+  console.log("[ct]", "name filled", name, Date.now());
   await dlg.locator("input[type=number]").nth(0).fill(String(partitions));
   await dlg.getByRole("button", { name: "创建" }).click();
+  console.log("[ct]", "create clicked", name, Date.now());
   // Topic list is PAGED (50/page, name-sorted): leaked e2e-* topics pushed
   // the cluster past one page and new topics landed on page 2 — invisible
   // to page-1 DOM lookups (2026-11-21 goto flake; 55 leaked topics purged
