@@ -4,8 +4,8 @@
     "FileDescription": "Kafka Explorer 卸载程序",
     "LegalCopyright": "Copyright (C) 2026 Kafka Explorer contributors",
     "ProductName": "Kafka Explorer",
-    "FileVersion": "0.4.16",
-    "ProductVersion": "0.4.16",
+    "FileVersion": "0.4.17",
+    "ProductVersion": "0.4.17",
     "OriginalFilename": "KafkaExplorer_Uninstall.exe",
     "InternalName": "KafkaExplorer_Uninstall"
   },
