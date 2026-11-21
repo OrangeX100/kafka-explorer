@@ -21,13 +21,13 @@ import {
 // Probe base: the version the CI debug build stamps (must sit BELOW the
 // published latest so 检查更新 discovers an update). Single source for the
 // discover assertion below AND the skip hints — set_version.py rewrites
-// this constant (and every "0.4.14" literal in comments) at every bump:
+// this constant (and every "0.4.15" literal in comments) at every bump:
 // the old released version becomes the new base. probe_contract_test.go
 // pins this constant to the second-newest release tag. Hard-coding a
 // version INSIDE an assertion was exactly the drift that broke CI: the
-// stamp moved 0.4.10 → 0.4.14, the app rendered 0.4.14 correctly, and the
+// stamp moved 0.4.10 → 0.4.15, the app rendered 0.4.15 correctly, and the
 // assertion still expected 0.4.10.
-const PROBE_BASE = "0.4.14";
+const PROBE_BASE = "0.4.15";
 
 let page: Page;
 
