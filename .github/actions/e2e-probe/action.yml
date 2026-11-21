@@ -80,7 +80,19 @@ runs:
         KE_E2E_KAFKA: ${{ inputs.kafka }}
         KE_E2E_UPDATE_FLOW: ${{ inputs.update-flow }}
         KE_APP_DIR: ${{ github.workspace }}/bin
-      run: cd frontend && npx playwright test --retries=1
+      # retries live in playwright.config.ts (CI→2, single source) — the
+      # hardcoded --retries=1 here silently overrode it (2026-11-21: three-
+      # attempt budget never engaged, release run burned both attempts)
+      run: cd frontend && npx playwright test
+
+    - name: Upload probe failure context
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: e2e-error-context
+        path: frontend/test-results/
+        retention-days: 7
+        if-no-files-found: ignore
 
     - name: Upload probe artifacts
       if: always()
