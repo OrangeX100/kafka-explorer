@@ -316,6 +316,54 @@ test("messages-paging：最早/最新/上一页/下一页→表内容与徽章�
   if (originalPerPage !== "25 / 页") await keSelect(page, perPage, originalPerPage);
 }));
 
+test("watermark-invariant：_schemas 徽章水位 ≥ 渲染行数，差值必有横幅解释", () => run(async () => {
+  test.setTimeout(120_000);
+  await openWorkspaceSection(page, "主题");
+  // _schemas 是系统保留主题，集群主题可能翻页（50/页）——走 filter 框直达，
+  // 分页漂移免疫（createTopic 同款，2026-11-21 教训）
+  const filterBox = page.getByPlaceholder("filter…").locator("visible=true").first();
+  await filterBox.fill("_schemas");
+  await page.waitForTimeout(1200);
+  await page
+    .locator('[data-testid="topic-row"]')
+    .filter({ hasText: "_schemas" })
+    .locator("visible=true")
+    .first()
+    .click({ timeout: 15_000 });
+  await filterBox.fill("");
+  // 主题打开即可点最早按钮 = detail 已加载；WAN 首次 browse 数秒，且 browse
+  // 与 detail 是两个并发请求——rows=1 且横幅未出的瞬态多发（2026-11-21
+  // 本探针首版就抓到过）。不变式写成 poll 谓词：瞬态自动跳过，最终稳定态
+  // 必须满足——徽章水位 ≥ 渲染行数，差值必有解释横幅（compaction-note /
+  // gap-note），缺横幅即 UI 撒谎——CI 必红
+  await expect(page.getByRole("button", { name: "最早" })).toBeVisible({ timeout: 15_000 });
+  await expect
+    .poll(
+      async () => {
+        const s = await page.evaluate(() => {
+          const vis = (el: Element) => (typeof el.checkVisibility === "function" ? el.checkVisibility() : true);
+          const badge = [...document.querySelectorAll('button[role="combobox"]')]
+            .filter(vis)
+            .map((b) => b.textContent ?? "")
+            .find((t) => t.includes("分区 ") && t.includes("("));
+          const rows = [...document.querySelectorAll("table tbody tr")].filter(vis).length;
+          const note = [...document.querySelectorAll('[data-testid="compaction-note"],[data-testid="gap-note"]')].filter(vis).length;
+          const m = /分区 \d+ \(([\d,]+)\)/.exec(badge ?? "");
+          return m ? { watermark: Number(m[1].replace(/,/g, "")), rows, note } : null;
+        });
+        if (!s) return "pending"; // detail 未就绪
+        console.log("[wi]", JSON.stringify(s));
+        if (s.rows > s.watermark) return "FAIL: 行数超过水位";
+        // rows<水位 且横幅未出 = browse/detail 竞态瞬态或真缺陷——瞬态会随
+        // 后续轮询满足，真缺陷保持此态直到超时（超时报错含 [wi] 日志定位）
+        if (s.rows < s.watermark && s.note === 0) return "pending";
+        return "ok";
+      },
+      { timeout: 30_000, intervals: [1500, 2500, 3000] },
+    )
+    .toBe("ok");
+}));
+
 test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B）", () => run(async () => {
   test.setTimeout(180_000); // 6 produce cycles + dialog flows
   await openWorkspaceSection(page, "主题");
