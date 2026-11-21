@@ -405,12 +405,12 @@ func (s *setupService) runEngine(dir string) (installErr error) {
 		// "Log closed." and shellRunScript's first poll would otherwise
 		// judge the NEW script launch dead on the OLD log — reporting a
 		// false failure while the script engine installs fine (045 round).
-	os.Remove(logPath)
-	scriptWritten := true
-	if werr := writeHandoffScript(scriptPath, engine, engineArgs(logPath)); werr != nil {
-		problems = append(problems, "写脚本: "+werr.Error())
-		scriptWritten = false // GBK 编码失败等：脚本不存在时超时文案不应指向它
-	} else if serr := shellRunScript(scriptPath, logPath); serr == nil {
+		os.Remove(logPath)
+		scriptWritten := true
+		if werr := writeHandoffScript(scriptPath, engine, engineArgs(logPath)); werr != nil {
+			problems = append(problems, "写脚本: "+werr.Error())
+			scriptWritten = false // GBK 编码失败等：脚本不存在时超时文案不应指向它
+		} else if serr := shellRunScript(scriptPath, logPath); serr == nil {
 			return nil // the shell-launched script completed the whole install
 		} else {
 			problems = append(problems, "shellexec: "+describeRunErr(serr))
