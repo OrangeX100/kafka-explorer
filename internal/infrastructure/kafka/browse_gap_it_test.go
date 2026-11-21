@@ -34,7 +34,11 @@ func TestITBrowseTrailingControlRecord(t *testing.T) {
 	if err := admin.CreateTopic(ctx, topic, 1, 2, nil); err != nil {
 		t.Fatalf("create topic: %v", err)
 	}
-	t.Cleanup(func() { _ = admin.DeleteTopic(context.Background(), topic) })
+	// Defer, NOT t.Cleanup: cleanups run AFTER the test fn's defers, by
+	// which time admin.Close has already shut the kgo client — every real-
+	// cluster run leaked its topic (ErrClientClosed swallowed by _ =).
+	// LIFO ordering deletes the topic first, while the client is alive.
+	defer func() { _ = admin.DeleteTopic(context.Background(), topic) }()
 
 	// 独立事务生产者：3 条数据记录一个事务提交 → 尾部恰好 1 条控制记录。
 	// 用 kgo 原生栈而非 app 生产路径，隔离变量只测浏览语义。
@@ -72,13 +76,17 @@ func TestITBrowseTrailingControlRecord(t *testing.T) {
 	// 水位 = 4（3 数据 + 1 控制记录）先证控制记录确实在——否则 exhausted
 	// 断言不具区分力（无控制记录时 3 条也会 exhausted=true）。控制记录由
 	// coordinator 在提交完成后异步写入数据分区，轮询等待落盘。
+	// kadm.Close closes the WRAPPED kgo client too; the explicit cl.Close
+	// below would then run twice (harmless but pointless) — review P3.
 	adm := kadm.NewClient(cl)
-	defer adm.Close()
 	var endOff int64 = -1
+	var lastListErr error
 	for i := 0; i < 30; i++ {
 		ends, err := adm.ListEndOffsets(ctx, topic)
 		if err != nil {
-			t.Fatalf("list end offsets: %v", err)
+			lastListErr = err // transient WAN blips retry with the loop
+			time.Sleep(500 * time.Millisecond)
+			continue
 		}
 		lo, ok := ends.Lookup(topic, 0)
 		if ok && lo.Err == nil {
@@ -90,6 +98,9 @@ func TestITBrowseTrailingControlRecord(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	if endOff != 4 {
+		if lastListErr != nil {
+			t.Fatalf("事务提交后水位未达 4（实得 %d），末次 ListEndOffsets 错误: %v", endOff, lastListErr)
+		}
 		t.Fatalf("事务提交后水位应为 4（3 数据+1 控制记录），实得 %d", endOff)
 	}
 
@@ -140,7 +151,9 @@ func TestITBrowseCompactTopic(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create compact topic: %v", err)
 	}
-	t.Cleanup(func() { _ = admin.DeleteTopic(context.Background(), topic) })
+	// LIFO defer — see the txn test's cleanup comment (client must outlive
+	// the delete).
+	defer func() { _ = admin.DeleteTopic(context.Background(), topic) }()
 
 	cl, err := kgo.NewClient(kgo.SeedBrokers(bootstrap), kgo.RecordDeliveryTimeout(30*time.Second))
 	if err != nil {

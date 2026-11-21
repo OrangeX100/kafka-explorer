@@ -105,14 +105,22 @@ export function MessagesView({
   // 者不可见）。exhausted 尾页内 存活行数 < (logEnd − 页内最小 offset) 即
   // 区间存在不可见记录；delete 策略主题该区间必连续（LogStart 之外的旧段
   // 已被整段滚出、不在水位口径内），不会误报。
+  //
+  // 两道防假阳性门（2026-11-22 评审）：
+  // - pagingSuspended：find 结果页也置 exhausted 但只含匹配行，"区间连续"
+  //   前提完全不成立（搜命中最旧 2 条 → 横幅敢报"尾段 9993 条不可见"）；
+  // - 行属分区一致性：跨分区跳转在途/目标越界的早退路径会留下旧分区行配
+  //   新分区的 logEnd，算术结果无意义且可能持久显示。
+  const viewPartition = messages.length > 0 ? messages[0].partition : null;
+  const rowsBelongToPartition = viewPartition === partition;
   const tailGap = useMemo(() => {
-    if (!exhausted || messages.length === 0) return 0;
+    if (!exhausted || pagingSuspended || !rowsBelongToPartition || messages.length === 0) return 0;
     const part = detail?.partitionList.find((p) => p.id === partition);
     if (!part) return 0;
     const minOff = Math.min(...messages.map((m) => m.offset));
     const missing = part.logEnd - minOff - messages.length;
     return missing > 0 ? missing : 0;
-  }, [exhausted, messages, detail, partition]);
+  }, [exhausted, pagingSuspended, rowsBelongToPartition, messages, detail, partition]);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -125,9 +133,10 @@ export function MessagesView({
   // flight must not let the stale response overwrite the newer one (the
   // "click A, see B" bug). State updates land only from the latest request.
   const requestSeq = useRef(0);
-  // Cross-partition GoTo fires its own request (goto.partition pins it) and
-  // THEN commits setPartition; the [partition] effect's duplicate tail
-  // reload wins the seq guard and erases a timestamp jump — skip it.
+  // True while a jump request is in flight (cleared in loadPage finally):
+  // every [partition/pageSize/decodeOn] effect re-fire during the flight
+  // skips its duplicate reload (single-path rework — the request itself is
+  // issued BY that effect, see pendingGotoTarget below).
   const pendingGoto = useRef(false);
   // The jump TARGET rides the effect as the single request path: onJump
   // only parks the target + commits partition/cursor state, and the
@@ -138,6 +147,13 @@ export function MessagesView({
   // flag, its tail reload wins the seq guard, and the table lands empty
   // forever (2026-11-21 CI: cross-partition jump → empty, 3/3 attempts).
   const pendingGotoTarget = useRef<GoToTarget | null>(null);
+  // Set when an effect re-fire was suppressed by an in-flight jump (user
+  // changed pageSize/decodeOn mid-jump). Bumped via refireTick after the
+  // flight so the effect re-runs with a FRESH closure — a direct loadPage
+  // call from the old finally would reuse the stale closure (045 round-4
+  // family). Jumps without concurrent changes never bump it.
+  const suppressedRefire = useRef(false);
+  const [refireTick, setRefireTick] = useState(0);
 
   useEffect(() => {
     void topicsApi
@@ -193,9 +209,9 @@ export function MessagesView({
           toast.show(friendlyError(err), "error");
           // A failed jump leaves the table on the OLD partition's rows while
           // the selector already shows the new partition. Reload the new
-          // partition's tail explicitly — the memoized loadPage closure is
-          // bound to the OLD partition, so a bare "tail" here would reload
-          // the wrong partition and keep the inconsistency alive.
+          // partition's tail explicitly — the retry rides the request's own
+          // goto pin (goto.partition), so it lands on the RIGHT partition
+          // even though this closure may be from any render.
           if (goto) {
             requestSeq.current++; // invalidate the failed request
             const req = buildBrowseReq({
@@ -217,7 +233,15 @@ export function MessagesView({
           }
         }
       } finally {
-        if (goto) pendingGoto.current = false; // flight over: toggles work again
+        if (goto) {
+          pendingGoto.current = false; // flight over: toggles work again
+          // A suppressed pageSize/decodeOn re-fire gets its fresh-closure
+          // reload now; a jump without concurrent changes stays single-shot.
+          if (suppressedRefire.current) {
+            suppressedRefire.current = false;
+            setRefireTick((t) => t + 1);
+          }
+        }
         // UNCONDITIONAL: the catch path bumps requestSeq (invalidating seq)
         // to run the tail-retry — a conditional release here left loading
         // stuck true after every failed jump (045 round-4 regression).
@@ -244,11 +268,12 @@ export function MessagesView({
     // so every effect re-fire DURING the flight — partition, pageSize or
     // decodeOn — skips its duplicate tail reload, not just the partition one.
     if (pendingGoto.current) {
+      suppressedRefire.current = true; // the finally re-fires us via the tick
       return;
     }
     void loadPage(cursor, undefined, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [partition, pageSize, decodeOn]);
+  }, [partition, pageSize, decodeOn, refireTick]);
 
   const goNext = () => {
     const last = messages[messages.length - 1];
@@ -359,9 +384,9 @@ export function MessagesView({
           // is how newly arrived messages become visible
           refresh={() => void loadPage(cursor, undefined, true)}
         />
-        {isCompacted && exhausted && messages.length > 0 && messages.length < pageSize && (
+        {isCompacted && exhausted && !pagingSuspended && rowsBelongToPartition && messages.length > 0 && messages.length < pageSize && (
           <div className="flex-none px-3 py-1.5 text-11 text-ink-300 border-b border-ink-700 bg-ink-900" data-testid="compaction-note">
-            压缩主题：旧值已被 Kafka 按 key 物理删除，水位 {detail?.messageCount ?? "—"} 不等于实际存活记录数——这里显示的是主题里真实存在的消息，并非丢数据。
+            压缩主题：旧值已被 Kafka 按 key 物理删除，水位 {detail?.partitionList.find((p) => p.id === partition)?.messageCount ?? "—"} 不等于实际存活记录数——这里显示的是主题里真实存在的消息，并非丢数据。
           </div>
         )}
         {!isCompacted && exhausted && tailGap > 0 && (

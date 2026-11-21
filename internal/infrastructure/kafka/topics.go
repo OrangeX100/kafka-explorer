@@ -154,7 +154,13 @@ func (c *Client) TopicDetail(ctx context.Context, topic string) (domain.TopicDet
 		}
 		if lo, ok := starts.Lookup(topic, p); ok && lo.Err == nil {
 			ps.LogStart = lo.Offset
-			ps.MessageCount = ps.LogEnd - ps.LogStart
+			// Guard the degraded path: with ends failed but starts OK, the
+			// naive LogEnd(0)−LogStart would go NEGATIVE and render a
+			// negative count (review P3: List skips the partition instead —
+			// keep the two views consistent).
+			if ps.LogStart <= ps.LogEnd {
+				ps.MessageCount = ps.LogEnd - ps.LogStart
+			}
 		}
 		detail.PartitionList = append(detail.PartitionList, ps)
 		if len(pd.Replicas) > 0 {

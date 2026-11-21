@@ -14,6 +14,10 @@ inputs:
     description: "Set '1' to run the full discover→download→cancel update chain"
     required: false
     default: "1"
+  update-gate:
+    description: "Set '1' in RELEASE gates: the probe stamp equals published latest there (gh release create runs after e2e), so the honest '已是最新' verdict passes instead of skipping. Never set in develop CI — a mis-stamped build must stay visible."
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -79,6 +83,7 @@ runs:
       env:
         KE_E2E_KAFKA: ${{ inputs.kafka }}
         KE_E2E_UPDATE_FLOW: ${{ inputs.update-flow }}
+        KE_UPDATE_GATE: ${{ inputs.update-gate }}
         KE_APP_DIR: ${{ github.workspace }}/bin
       # retries live in playwright.config.ts (CI→2, single source) — the
       # hardcoded --retries=1 here silently overrode it (2026-11-21: three-

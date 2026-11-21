@@ -215,13 +215,15 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 		if forward {
 			if ends, ok := c.cachedEnds(req.Topic); ok {
 				if end, has := ends[partition]; has {
-					var maxOff int64 = -1
-					for _, r := range records {
-						if r.Offset > maxOff {
-							maxOff = r.Offset
-						}
-					}
-					if maxOff+1 >= end {
+					// 2026-11-22 review: the forward mirror of the backward
+					// fix — a trailing invisible record (txn control marker)
+					// keeps maxOff below the end, and the old records test
+					// left 下一页 enabled into an empty newest page. Same
+					// window-edge rule as backward: the designed window is
+					// [anchor, anchor+limit); touching end means nothing
+					// beyond. anchor is the resolveAnchor result this page
+					// anchored on.
+					if anchor+int64(limit) >= end { //nolint:gosec // limit clamped ≤1000
 						page.Exhausted = true
 					}
 				}
@@ -235,14 +237,23 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 			// record (txn control marker: command topic watermark 2 with
 			// visible offsets {0}, 2026-11-21 user report) used to keep
 			// exhausted=false and bury the gap note; the old records[0] test
-			// also mis-handled a full tail page whose top offsets were all
-			// invisible (下一页 then landed on an empty newest page). The
-			// window edge: explicit anchor off for [off-limit, off), the log
-			// end itself for anchorless tail browses.
+			// also mis-handled a short tail page with invisible top offsets
+			// (下一页 then landed on an empty newest page). The window edge:
+			// the explicit anchor off for [off-limit, off) — widened to the
+			// furthest fetched record when the fetch ran past the anchor
+			// (backward fetches CONSUME FORWARD from the anchor, so a goto
+			// to offset 0 on a log whose end sits inside the page must count
+			// those records: 2026-11-22 review) — or the log end itself for
+			// anchorless tail browses.
 			if end, has := ends[partition]; has {
 				windowEnd := end
 				if req.StartOffset != nil {
 					windowEnd = *req.StartOffset
+					for _, r := range records {
+						if r.Offset+1 > windowEnd {
+							windowEnd = r.Offset + 1
+						}
+					}
 				}
 				if windowEnd >= end {
 					page.Exhausted = true

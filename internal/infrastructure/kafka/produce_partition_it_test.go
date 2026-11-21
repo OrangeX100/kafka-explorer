@@ -38,7 +38,10 @@ func TestITProduceExplicitPartition(t *testing.T) {
 	if err := c.CreateTopic(ctx, topic, 2, 2, nil); err != nil {
 		t.Fatalf("create topic: %v", err)
 	}
-	t.Cleanup(func() { _ = c.DeleteTopic(ctx, topic) })
+	// LIFO defer, NOT t.Cleanup — cleanups run after this fn's defers, i.e.
+	// after c.Close has shut the client: every run leaked the topic
+	// (2026-11-22 review; browse_gap_it_test.go carries the full note).
+	defer func() { _ = c.DeleteTopic(ctx, topic) }()
 
 	// 导出行的真实形状（Export JSONL 渲染器生成，Import 按行解析）。
 	exportLine := func(p int) string {
@@ -119,7 +122,8 @@ func TestITProbeSequenceReplica(t *testing.T) {
 	if err := admin.CreateTopic(ctx, topic, 2, 2, nil); err != nil {
 		t.Fatalf("create topic: %v", err)
 	}
-	t.Cleanup(func() { _ = admin.DeleteTopic(ctx, topic) })
+	// LIFO defer, NOT t.Cleanup — see the first cleanup comment above.
+	defer func() { _ = admin.DeleteTopic(ctx, topic) }()
 
 	// ③ 探针接下来浏览分区列表（export 的 exportPartitions 同款调用）
 	ids, err := app.TopicPartitionIDs(ctx, topic)

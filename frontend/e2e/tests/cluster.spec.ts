@@ -346,17 +346,28 @@ test("watermark-invariant：_schemas 徽章水位 ≥ 渲染行数，差值必�
             .filter(vis)
             .map((b) => b.textContent ?? "")
             .find((t) => t.includes("分区 ") && t.includes("("));
+          const perPage = [...document.querySelectorAll('button[role="combobox"]')]
+            .filter(vis)
+            .map((b) => b.textContent ?? "")
+            .find((t) => t.includes("/ 页"));
           const rows = [...document.querySelectorAll("table tbody tr")].filter(vis).length;
           const note = [...document.querySelectorAll('[data-testid="compaction-note"],[data-testid="gap-note"]')].filter(vis).length;
           const m = /分区 \d+ \(([\d,]+)\)/.exec(badge ?? "");
-          return m ? { watermark: Number(m[1].replace(/,/g, "")), rows, note } : null;
+          const pm = /(\d+)\s*\/\s*页/.exec(perPage ?? "");
+          return m ? { watermark: Number(m[1].replace(/,/g, "")), pageSize: pm ? Number(pm[1]) : 100, rows, note } : null;
         });
-        if (!s) return "pending"; // detail 未就绪
+        if (!s) return "no-badge"; // detail 未就绪（与无横幅分支区分定位）
         console.log("[wi]", JSON.stringify(s));
         if (s.rows > s.watermark) return "FAIL: 行数超过水位";
-        // rows<水位 且横幅未出 = browse/detail 竞态瞬态或真缺陷——瞬态会随
+        if (s.rows === s.watermark) return "ok"; // 全窗口：行数=水位，无差值
+        // 整页尾窗（rows==pageSize<水位）：差值是"未取的页"不是 UI 撒谎 —
+        // _schemas 存活数随 SR 版本越过 pageSize 后这是常态诚实态
+        // （P1 评审：旧谓词把该态 pending 到死；messages-paging 崩溃残留
+        // 25/页时更是必炸）
+        if (s.rows === s.pageSize && s.rows < s.watermark) return "ok";
+        // 不足整页且无横幅 = browse/detail 竞态瞬态或真缺陷——瞬态会随
         // 后续轮询满足，真缺陷保持此态直到超时（超时报错含 [wi] 日志定位）
-        if (s.rows < s.watermark && s.note === 0) return "pending";
+        if (s.rows < s.watermark && s.note === 0) return "no-note";
         return "ok";
       },
       // CI 首载瞬态实证超 30s（2026-11-21 e2e job：rows=1 pending 到
@@ -367,13 +378,18 @@ test("watermark-invariant：_schemas 徽章水位 ≥ 渲染行数，差值必�
 }));
 
 test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B）", () => run(async () => {
-  test.setTimeout(300_000); // 6 produce cycles + dialog flows（CI WAN 波动
-  // 实测 180s 两连超时 2026-11-21——每轮真对话框 15-25s，峰值 6×25+跳转 >180）
+  test.setTimeout(360_000); // 6 produce cycles + dialog flows（CI WAN 波动
+  // 实测 180s 两连超时 2026-11-21——每轮真对话框 15-25s，峰值 6×25+跳转；
+  // 评审 P3：最坏 pre-poll 180s + poll 120s 恰好顶格 300s，留 60s 余量）
   await openWorkspaceSection(page, "主题");
   console.log("[gt]", "section open", Date.now());
   // 重试路径：上一试次可能残留 GoToDialog 模态——先清再建（createTopic 的
   // 对话框 waitFor 在模态遮罩下永不出现 = 5min 挂死，2026-11-21 CI 实证）
   await dismissOverlays(page);
+  // retries 重跑同 topic：createTopic 幂等跳过 → produce offset 从 6 起步，
+  // `expect(ack.offset).toBe(i)` 必死且白烧试次（评审 P2）——先删残留主题，
+  // 重试与首跑同构（删除无行时即时返回）
+  await deleteTopic(page, GOTO_TOPIC);
   await createTopic(page, GOTO_TOPIC, 2);
   console.log("[gt]", "topic created", Date.now());
   await openTopic(page, GOTO_TOPIC);

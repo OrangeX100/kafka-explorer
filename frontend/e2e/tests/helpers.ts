@@ -15,6 +15,11 @@ export const KAFKA = process.env.KE_E2E_KAFKA || "";
 /** Set (plus a binary built with VERSION below the published latest) to
  *  exercise the full update chain: discover → download → cancel → idle. */
 export const UPDATE_FLOW = process.env.KE_E2E_UPDATE_FLOW === "1";
+// Release-gate marker (release.yml passes update-gate=1): the probe stamp
+// equals published latest there, so the honest "已是最新" verdict passes.
+// develop CI / local must NEVER see this set — a mis-stamped build has to
+// stay visible as the annotated skip.
+export const UPDATE_GATE = process.env.KE_UPDATE_GATE === "1";
 
 export const RUN_ID = `e2e-${Date.now().toString(36)}`;
 
@@ -518,7 +523,9 @@ export async function messageRows(page: Page): Promise<{ partition: number; offs
       const tds = tr.querySelectorAll("td");
       if (tds.length < 2) continue;
       const p = Number(tds[0].textContent?.trim());
-      const o = Number(tds[1].textContent?.trim());
+      // offset 渲染走 formatNumber（千分位）——"1,024" 直 parse 成 NaN 会把
+      // 整窗行静默丢成 "empty"（评审 P2-3）
+      const o = Number((tds[1].textContent ?? "").replace(/,/g, "").trim());
       if (Number.isFinite(p) && Number.isFinite(o)) out.push({ partition: p, offset: o });
     }
     return out;

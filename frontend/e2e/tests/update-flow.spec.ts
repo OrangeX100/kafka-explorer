@@ -4,6 +4,7 @@ import {
   disconnectApp,
   openSettingsSection,
   UPDATE_FLOW,
+  UPDATE_GATE,
   type Page,
 } from "./helpers.js";
 
@@ -59,6 +60,20 @@ test("检查更新→发现新版→按钮渲染→下载启动→取消→恢�
     await expect(result).toContainText(/已是最新版本|发现新版本/, { timeout: 30_000 });
     latest = await readResult();
     if (latest.includes("已是最新版本")) {
+      if (UPDATE_GATE) {
+        // Release-gate timing (review P2-4): gh release create flips
+        // --latest AFTER this e2e gate, so stamp == published latest and
+        // "已是最新" is the CORRECT verdict — assert that UI state honestly
+        // instead of skipping (the annotated skip made the gate's update
+        // leg vacuous). The discover→download chain still runs on develop
+        // CI, where stamp < latest.
+        await expect(result).toContainText("已是最新版本");
+        test.info().annotations.push({
+          type: "notice",
+          description: "门禁时序：探针基准 == published latest，已验证"已是最新"诚实态；发现→下载链路由 develop CI（stamp<latest）覆盖",
+        });
+        return;
+      }
       test.info().annotations.push({
         type: "skip",
         description: "二进制版本 ≥ 最新版（或更新源缓存滞后），下载链路需 VERSION=<探针基准> 构建",
