@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -288,17 +289,31 @@ func decodeText(b64 string) (string, bool) {
 // from a bad line (2026-11-20 import bug round). One cheap metadata call
 // (same cost as export's exportPartitions) turns it into an actionable
 // message; the max partition id also feeds the per-line range guard.
+// Protected topics are rejected here too (one upfront refusal instead of
+// N identical per-line failures on the file path).
 func (s *MessageIOService) importTopicPartitions(ctx context.Context, client *kafka.Client, topic string) ([]int32, error) {
+	switch tier := domain.ProtectedTopicTierOf(topic); tier {
+	case domain.TopicTierKafka:
+		return nil, fmt.Errorf("导入前置检查失败：「%s」是 Kafka 系统保留主题，其内容由集群自身写入，已阻止导入", topic)
+	case domain.TopicTierEcosystem:
+		return nil, fmt.Errorf("导入前置检查失败：「%s」由外部服务托管（如 Schema Registry / Kafka Connect），已阻止导入", topic)
+	}
 	ids, err := client.TopicPartitionIDs(ctx, topic)
 	if err != nil {
-		// mapErr deliberately flattens *kerr.Error to a labeled string, so
-		// the code name is all that survives here — match it to render the
-		// missing-topic sentence with the topic name.
-		if strings.Contains(err.Error(), "UNKNOWN_TOPIC_OR_PARTITION") {
+		// TopicPartitionIDs maps broker code 3 to domain.ErrNotFound (its
+		// not-in-metadata branch uses ErrInvalid instead) — errors.Is is the
+		// typed discriminator; matching the flattened string would break on
+		// any future mapErr rewording.
+		if errors.Is(err, domain.ErrNotFound) {
 			return nil, fmt.Errorf("导入前置检查失败：主题「%s」不存在（或元数据尚未同步）。"+
 				"主题可能刚被删除——请刷新主题列表确认后再试", topic)
 		}
 		return nil, fmt.Errorf("导入前置检查失败：%w。主题可能刚被删除或元数据尚未同步——请刷新主题列表确认后再试", err)
+	}
+	if len(ids) == 0 {
+		// Broker-legal topics always have ≥1 partition; this only fires on
+		// a corrupted metadata response — refuse instead of indexing [-1].
+		return nil, fmt.Errorf("导入前置检查失败：主题「%s」的分区元数据为空，无法导入", topic)
 	}
 	return ids, nil
 }
@@ -336,7 +351,12 @@ func (s *MessageIOService) Import(ctx context.Context, in domain.GenerateInput) 
 			return domain.GenerateResult{Produced: count, FirstOffset: first, ElapsedMs: time.Since(start).Milliseconds()},
 				fmt.Errorf("%w: line %d is not valid JSON: %v", domain.ErrInvalid, i+1, err)
 		}
-		if rec.Partition != nil && (*rec.Partition < 0 || *rec.Partition > maxPartition) {
+		if rec.Partition != nil && *rec.Partition < 0 {
+			// 负值 = Produce 层自己的 auto 哨兵（-1，见 find.go Client.Produce）——
+			// 归一为 nil 走自动分区，不再对自家哨兵报「分区 -1 不存在」。
+			rec.Partition = nil
+		}
+		if rec.Partition != nil && *rec.Partition > maxPartition {
 			return domain.GenerateResult{Produced: count, FirstOffset: first, ElapsedMs: time.Since(start).Milliseconds()},
 				importPartitionGuard(i+1, *rec.Partition, maxPartition)
 		}
@@ -413,7 +433,10 @@ func (s *MessageIOService) ImportFromFile(ctx context.Context, in domain.ImportF
 			emit()
 			continue
 		}
-		if rec.Partition != nil && (*rec.Partition < 0 || *rec.Partition > maxPartition) {
+		if rec.Partition != nil && *rec.Partition < 0 {
+			rec.Partition = nil // 同上：负值归一为 auto
+		}
+		if rec.Partition != nil && *rec.Partition > maxPartition {
 			res.Failed++
 			res.FailedLines = append(res.FailedLines, domain.ImportLineError{Line: i + 1, Error: importPartitionGuard(i+1, *rec.Partition, maxPartition).Error()})
 			emit()

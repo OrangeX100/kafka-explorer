@@ -9,14 +9,14 @@ import {
 
 // Update-chain probe (P0 — the update link broke FIVE times in 0.4.x and
 // every break reached users). Drives the REAL production feed:
-//   dev build stamped VERSION=0.4.13 (below the published latest) +
-//   UpdateRepo=OrangeX100/kafka-explorer → 检查更新 discovers 0.4.13 →
+//   dev build stamped with PROBE_BASE (below the published latest) +
+//   UpdateRepo=OrangeX100/kafka-explorer → 检查更新 discovers the release →
 //   下载更新 starts the segmented download → progress UI renders →
 //   取消 → idle restored (download button back).
 //
 // Never clicks 安装并重启 — that would quit the app and run the installer.
 // Requires KE_E2E_UPDATE_FLOW=1 AND a binary built with
-// `task dev:cdp VERSION=0.4.13`; otherwise the suite skips.
+// `task dev:cdp VERSION=<PROBE_BASE>`; otherwise the suite skips.
 
 // Probe base: the version the CI debug build stamps (must sit BELOW the
 // published latest so 检查更新 discovers an update). Single source for the
@@ -40,7 +40,7 @@ test.afterAll(async () => {
 });
 
 test("检查更新→发现新版→按钮渲染→下载启动→取消→恢复 idle", async () => {
-  test.skip(!UPDATE_FLOW, "需 KE_E2E_UPDATE_FLOW=1 + task dev:cdp VERSION=0.4.13 构建");
+  test.skip(!UPDATE_FLOW, "需 KE_E2E_UPDATE_FLOW=1 + task dev:cdp VERSION=<探针基准> 构建");
 
   await openSettingsSection(page, "版本与更新");
   await page.getByRole("button", { name: "检查更新" }).click();
@@ -61,7 +61,7 @@ test("检查更新→发现新版→按钮渲染→下载启动→取消→恢�
     if (latest.includes("已是最新版本")) {
       test.info().annotations.push({
         type: "skip",
-        description: "二进制版本 ≥ 最新版（或更新源缓存滞后），下载链路需 VERSION=0.4.13 构建",
+        description: "二进制版本 ≥ 最新版（或更新源缓存滞后），下载链路需 VERSION=<探针基准> 构建",
       });
       return;
     }

@@ -231,6 +231,7 @@ export function ImportDialog({
   // path is fast enough to stay a single call.
   useEffect(() => {
     const off = Events.On("io:import:progress", (ev: unknown) => {
+      if (runFileDone.current) return; // runFile 已收尾，晚到事件不复活进度条
       const data = (ev as { data?: { done: number; failed: number; total: number } }).data;
       if (data) setProgress(data);
     });
@@ -240,6 +241,7 @@ export function ImportDialog({
   const run = async () => {
     setBusy(true);
     setError(null);
+    setResult(null); // runFile 的陈旧汇总不与粘贴路径的错误面板并存
     try {
       const r = await generateApi.import({ connectionId, topic, count: 0, format: "jsonl", template: payload });
       toast.show(t("msg.importOk", r.produced), "ok");
@@ -256,6 +258,9 @@ export function ImportDialog({
     }
   };
 
+  // 进度事件经 Wails 事件总线异步派发：文件导入完成后末尾事件可能晚到，
+  // 把 finally 里清掉的进度条复活成常驻陈旧文本——runFile 存活期 ref 拦截。
+  const runFileDone = useRef(false);
   const runFile = async () => {
     let path: string;
     try {
@@ -265,6 +270,7 @@ export function ImportDialog({
       return;
     }
     if (!path) return; // cancelled
+    runFileDone.current = false;
     setBusy(true);
     setError(null);
     setResult(null);
@@ -282,6 +288,7 @@ export function ImportDialog({
       toast.show(msg, "error");
       setError(msg);
     } finally {
+      runFileDone.current = true;
       setProgress(null);
       setBusy(false);
     }

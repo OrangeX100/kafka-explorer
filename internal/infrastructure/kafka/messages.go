@@ -197,14 +197,45 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 			}
 		}
 		page.NextAnchor = &next
-	} else if forward {
-		// Forward short page = the log end is inside this window: nothing
-		// newer exists, 下一页 is done. A BACKWARD short page only means the
-		// OLDEST page was reached (log start inside the window) — marking it
-		// exhausted disabled 下一页 even though newer pages remain, trapping
-		// the user at the log start with 最新 as the only way out
-		// (2026-11-21 paging probe found it; user-visible).
+	} else if len(records) == 0 {
+		// Zero records fetched (fully trimmed window): nothing to page in
+		// either direction — legacy conservative exhausted.
 		page.Exhausted = true
+	} else {
+		// Short page: exhausted ONLY when the window provably touches the
+		// log's far edge in its own direction — zero records or a slow
+		// broker round can also produce a short page mid-log (the poll loop
+		// above documents "the log boundary OR a slow broker"), and marking
+		// those exhausted disables 下一页/上一页 with records still beyond
+		// the cursor. The backward variant trapped the user at the log
+		// start (2026-11-21 paging probe); the forward mirror was the same
+		// defect one page over. When bounds are unavailable stay
+		// conservative (legacy true) — the UI self-heals on the empty
+		// follow-up click either way.
+		if forward {
+			if ends, ok := c.cachedEnds(req.Topic); ok {
+				if end, has := ends[partition]; has {
+					var maxOff int64 = -1
+					for _, r := range records {
+						if r.Offset > maxOff {
+							maxOff = r.Offset
+						}
+					}
+					if maxOff+1 >= end {
+						page.Exhausted = true
+					}
+				}
+			} else {
+				page.Exhausted = true
+			}
+		} else if ends, ok := c.cachedEnds(req.Topic); ok {
+			// backward: records are sorted NEWEST FIRST — records[0] is the
+			// window's newest edge; touching the end means this window IS
+			// the newest page (covers whole-log-in-one-page topics too).
+			if end, has := ends[partition]; has && records[0].Offset+1 >= end {
+				page.Exhausted = true
+			}
+		}
 	}
 	return page, nil
 }

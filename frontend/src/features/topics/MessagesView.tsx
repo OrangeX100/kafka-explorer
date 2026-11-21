@@ -347,9 +347,9 @@ export function MessagesView({
             {/* NO keyed tbody + anim-fade here: the per-window key remounted
                 the whole tbody on every page flip, and for one frame the old
                 and new tbody coexisted in the DOM — probe hit-test counts
-                read 36 rows for a 25-row window ("行叠加"). Rows animate via
-                the table's own fade below; per-row keys keep reconciliation
-                correct. (2026-11-21 stackup round) */}
+                read 36 rows for a 25-row window ("行叠加"). Rows render
+                without a fade (the tbody-level animation WAS the artifact);
+                per-row keys keep reconciliation correct. (2026-11-21) */}
             <tbody>
               {loading && messages.length === 0 && (
                 <tr>

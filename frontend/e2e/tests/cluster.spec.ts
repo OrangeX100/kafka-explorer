@@ -23,6 +23,7 @@ import {
   dialog,
   openConnectionDialog,
   isTargetLost,
+  isSSHSeedAvailable,
   KAFKA,
   RUN_ID,
 } from "./helpers.js";
@@ -95,6 +96,8 @@ async function run(fn: () => Promise<void>) {
 }
 
 test.beforeAll(async () => {
+  test.setTimeout(300_000); // WAN 建连+开工作区健康路径即 35-50s（公网 RTT
+  // 抖动会超 45s 默认 hook 预算——2026-11-21 评审实测）
   page = await connectApp();
   await ensureConnection(page, CONN, KAFKA);
   await openConnection(page, CONN);
@@ -124,15 +127,28 @@ test.afterAll(async () => {
     // the following deleteConnection then timed out inside the 300s hook
     // (2026-11-21). The UI delete stays for the CONNECTION (exercise the
     // real confirm flow at least once per run).
-    try {
-      sshKafka(`--delete --topic ${PAGING_TOPIC}`);
-      sshKafka(`--delete --topic ${GOTO_TOPIC}`);
-    } catch { /* best effort */ }
-    await heal(async () => {
-      await dismissOverlays(page);
-      await page.locator('[data-tip="集群连接"]').click();
-      await deleteConnection(page, CONN);
-    });
+    // CI 无 hosts.json → SSH 不可用 → 走 UI 删主题兜底（与消息族
+    // isSSHSeedAvailable 同源判断），否则每次 run 泄 2 个主题、主题总数
+    // 破列表单页 50 条后新主题落第二页（goto flake 的根因，2026-11-21）。
+    if (isSSHSeedAvailable()) {
+      try {
+        sshKafka(`--delete --topic ${PAGING_TOPIC}`);
+        sshKafka(`--delete --topic ${GOTO_TOPIC}`);
+      } catch { /* best effort */ }
+      await heal(async () => {
+        await dismissOverlays(page);
+        await page.locator('[data-tip="集群连接"]').click();
+        await deleteConnection(page, CONN);
+      });
+    } else {
+      await heal(async () => {
+        await dismissOverlays(page);
+        await page.locator('[data-tip="集群连接"]').click();
+        await openWorkspaceSection(page, "主题");
+        for (const t of [PAGING_TOPIC, GOTO_TOPIC]) await deleteTopic(page, t);
+        await deleteConnection(page, CONN);
+      });
+    }
   }
   await disconnectApp();
 });
@@ -219,7 +235,6 @@ test("messages-paging：最早/最新/上一页/下一页→表内容与徽章�
     "5-29": "最新",
     "0-24": "上一页",
     "25-29": "下一页",
-    "0-29": "最早",
   };
   const waitForWindow = async (first: number, last: number) => {
     const key = `${first}-${last}`;
@@ -235,14 +250,20 @@ test("messages-paging：最早/最新/上一页/下一页→表内容与徽章�
       if (rs.length > 0) {
         const btn = reanchorTo[key];
         if (!btn) break;
+        // 重锚间隔 2.5s：WAN browse 常超短周期——重点击 requestSeq++ 会取消
+        // 上一发 fetch，把"加载中"变成永久取消循环（2026-11-21 评审）。
+        // catch 只吞 disabled（exhausted 是正确语义）；target-lost 必须上抛
+        // 让 run() 的重连重试有机会接管。
         await page
           .getByRole("button", { name: btn })
           .locator("visible=true")
           .first()
           .click({ timeout: 5_000 })
-          .catch(() => {}); // disabled (exhausted) — the next poll decides
+          .catch((err) => {
+            if (isTargetLost(err)) throw err;
+          });
       }
-      await page.waitForTimeout(1_200);
+      await page.waitForTimeout(2_500);
     }
     throw new Error(`window never settled on ${key} (last seen ${lastSeen})`);
   };

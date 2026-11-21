@@ -87,8 +87,7 @@ export function QuotasView({ connectionId }: { connectionId: string }) {
       {creating && (
         <CreateQuotaDialog
           connectionId={connectionId}
-          onClose={() => setCreating(false)}
-          onCreated={() => {
+          onClose={() => {
             setCreating(false);
             void load();
           }}
@@ -110,14 +109,12 @@ const QUOTA_KEYS = [
 function CreateQuotaDialog({
   connectionId,
   onClose,
-  onCreated,
 }: {
   connectionId: string;
   onClose: () => void;
-  onCreated: () => void;
 }) {
   const [entityType, setEntityType] = useState("client-id");
-  const [entityName, setEntityName] = useState("");
+  const [entityNameRaw, setEntityName] = useState("");
   const [key, setKey] = useState("producer_byte_rate");
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
@@ -127,14 +124,16 @@ function CreateQuotaDialog({
 
   const create = async () => {
     // 点击校验（中文友好提示政策：分类+指引+可见反馈）。曾用 disabled 死
-    // 按钮拦空数值——点击毫无反应、对话框不消失，且与「留空表示默认配额
-    // 组」的文案自相矛盾：线协议里空实体名即默认实体（broker 语义），本来
-    // 就支持，这里放开并允许真正的默认配额组。
+    // 按钮拦空数值——点击毫无反应、对话框不消失。实体名留空 = 默认配额组
+    // （后端把空名映射为 wire null，broker 语义）；实体名发送前 trim，
+    // 防「 client-1 」幽灵实体。成功走 close() 的退出动画再卸载（与
+    // ImportDialog 的 forceClose 范式一致，不再"闪没"）。
     const num = Number(value);
     if (!value.trim() || !Number.isFinite(num)) {
       setError(t("quotas.errValue"));
       return;
     }
+    const entityName = entityNameRaw.trim();
     setBusy(true);
     setError(null);
     try {
@@ -142,7 +141,7 @@ function CreateQuotaDialog({
         entityType === "ip" ? { "ip": entityName } : { [entityType]: entityName };
       await adminApi.alterQuota(connectionId, entity, key, num);
       toast.show(t("quotas.created", `${entityType}=${entityName || "default"}`, key, String(num)), "ok");
-      onCreated();
+      closeRef.current();
     } catch (err) {
       const msg = friendlyError(err);
       toast.show(msg, "error");
@@ -179,7 +178,7 @@ function CreateQuotaDialog({
               </label>
               <label className="block">
                 <span className="mb-1 block text-11 text-ink-300">{t("quotas.entityName")}</span>
-                <input className="field font-mono" value={entityName} onChange={(e) => setEntityName(e.target.value)} />
+                <input className="field font-mono" value={entityNameRaw} onChange={(e) => setEntityName(e.target.value)} />
               </label>
             </div>
             <div className="grid grid-cols-2 gap-2.5">

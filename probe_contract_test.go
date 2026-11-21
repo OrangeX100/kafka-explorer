@@ -41,23 +41,37 @@ func TestNoBareTestFixmeInProbes(t *testing.T) {
 					"record it in docs/ (release notes must list it). Line: %s",
 					path, strconv.Itoa(i+1), strings.TrimSpace(line))
 			}
+			// 字面量 test.skip(true,...)（column-0）= 无条件文件级跳过，
+			// 跳过整个 spec——2026-11-21 两次乌龙（全族 6 skipped / 0 tests
+			// discovered）。环境闸（test.skip(!KAFKA...)）是合法的文件级
+			// 设计，不在此列；test 体内的合法 skip 都有缩进。
+			if strings.HasPrefix(line, "test.skip(true") {
+				t.Errorf("%s:%s: FILE-LEVEL unconditional test.skip(true) found — "+
+					"a file-level skip silently skips the WHOLE spec (2026-11-21 "+
+					"double incident). Move the skip inside the test body. Line: %s",
+					path, strconv.Itoa(i+1), strings.TrimSpace(line))
+			}
 		}
 	}
 }
+
+// reReleaseTag pins the release-tag shape (v + semver, no rc/beta suffix).
+var reReleaseTag = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
 // lastReleasedVersion returns the newest and second-newest release tags.
 // The probe base must equal the one BEFORE newest — EXCEPT inside the
 // release window (bump committed, tag not yet pushed), where set_version
 // has already advanced it to newest. Tags carry a "v" prefix.
 func lastReleasedVersion(t *testing.T) (newest, second string) {
-	out, err := exec.Command("git", "tag", "--sort=-creatordate").Output()
+	out, err := exec.Command("git", "tag", "--sort=-v:refname").Output()
 	if err != nil {
 		t.Fatalf("git tag: %v", err)
 	}
 	var seen []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		v := strings.TrimPrefix(strings.TrimSpace(line), "v")
-		if v == "" {
+		// 只认 x.y.z 形状的发布 tag：rc/beta 或非发布 tag 会污染排序
+		if v == "" || !reReleaseTag.MatchString(v) {
 			continue
 		}
 		dup := false
@@ -108,7 +122,8 @@ func TestProbeBaseVersionInContract(t *testing.T) {
 	if m == nil {
 		t.Fatal("Taskfile.yml: no VERSION default found")
 	}
-	if m[1] == base {
+	taskfileVersion := m[1]
+	if taskfileVersion == base {
 		t.Fatalf("探针基准 == 当前版本 %s——debug 构建将发现不了任何更新。"+
 			"set_version.py 应在 bump 时把基准改为旧版本", base)
 	}
@@ -123,7 +138,7 @@ func TestProbeBaseVersionInContract(t *testing.T) {
 	if stamp == nil {
 		t.Fatal("action.yml: no buildinfo.Version stamp found")
 	}
-	if stamp[1] != base && stamp[1] != newest {
+	if stamp[1] != base && (stamp[1] != newest || taskfileVersion == newest) {
 		t.Errorf("e2e-probe/action.yml 探针基准 = %s，应为上一发布版 %s"+
 			"（发版窗口内允许 %s）——基准过期会让更新链探针静默 skip 而 CI 仍绿",
 			stamp[1], base, newest)
@@ -149,7 +164,10 @@ func TestProbeBaseVersionInContract(t *testing.T) {
 	// release commit is tagged — so between "bump" and "tag" the contract
 	// must accept BOTH the second-newest tag AND the newest tag. Outside
 	// that window a stale base (older than second-newest) stays a failure.
-	if hint[1] != base && hint[1] != newest {
+	// newest-tag 容忍仅在"已 bump 未打 tag"窗口成立（Taskfile VERSION 已
+	// 越过 newest）：窗口之外 hint==newest 意味着探针构建==已发布 latest，
+	// 更新链静默发现不了任何东西——恰是本契约要防的形态。
+	if hint[1] != base && (hint[1] != newest || taskfileVersion == newest) {
 		t.Errorf("update-flow.spec.ts PROBE_BASE = %s，应为上一发布版 %s"+
 			"（发版窗口内允许 %s）（断言与 skip-hint 都从它派生）",
 			hint[1], base, newest)

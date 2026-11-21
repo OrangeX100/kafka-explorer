@@ -20,8 +20,10 @@ import (
 var assets embed.FS
 
 func main() {
-	// KE_DEBUG_CDP=1 exposes a WebView2 DevTools port for automated UI
-	// testing (same switch as the main app). Never set in release installs.
+	// NOTE: no CDP debug gate here (unlike the main app and the setup
+	// front-end) — the uninstaller flow has no probe needing one. If a
+	// probe ever needs to drive this window, port the double-gate from
+	// cmd/setup/main.go first.
 	winOptions := application.WindowsOptions{}
 
 	app := application.New(application.Options{

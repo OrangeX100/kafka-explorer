@@ -155,11 +155,7 @@ export function ACLsView({ connectionId }: { connectionId: string }) {
         <CreateACLDialog
           connectionId={connectionId}
           onClose={() => setCreating(false)}
-          onCreated={() => {
-            setCreating(false);
-            void load();
-          }}
-        />
+                  />
       )}
     </div>
   );
@@ -168,11 +164,9 @@ export function ACLsView({ connectionId }: { connectionId: string }) {
 function CreateACLDialog({
   connectionId,
   onClose,
-  onCreated,
 }: {
   connectionId: string;
   onClose: () => void;
-  onCreated: () => void;
 }) {
   const [principal, setPrincipal] = useState("User:");
   const [operation, setOperation] = useState("READ");
@@ -201,14 +195,20 @@ function CreateACLDialog({
       setError(problems.join("\n"));
       return;
     }
+    // 校验用 trim、发送也 trim：首/尾空格曾原样落库成永不匹配的幽灵
+    // principal / 资源名（"User:alice " ≠ "User:alice"）。成功走 close()
+    // 退出动画再卸载（与 ImportDialog 范式一致）。
+    const p = principal.trim();
+    const rn = resourceName.trim();
+    const h = host.trim();
     setBusy(true);
     setError(null);
     try {
       await adminApi.createACL(connectionId, {
-        principal, operation, permissionType, resourceType, resourceName, patternType, host,
+        principal: p, operation, permissionType, resourceType, resourceName: rn, patternType, host: h,
       });
-      toast.show(`${principal} → ${resourceType}:${resourceName}`, "ok");
-      onCreated();
+      toast.show(`${p} → ${resourceType}:${rn}`, "ok");
+      closeRef.current();
     } catch (err) {
       const msg = friendlyError(err);
       toast.show(msg, "error");

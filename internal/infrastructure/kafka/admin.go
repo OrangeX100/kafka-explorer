@@ -78,7 +78,7 @@ func (c *Client) BrokerDetail(ctx context.Context, brokerID int32) (domain.Broke
 
 	// Broker configs ride the DescribeConfigs admin API with a broker resource.
 	req := kmsg.NewPtrDescribeConfigsRequest()
-	req.IncludeSynonyms = true     // default-value display in the edit dialog
+	req.IncludeSynonyms = true      // default-value display in the edit dialog
 	req.IncludeDocumentation = true // English-mode description fallback
 	req.Resources = []kmsg.DescribeConfigsRequestResource{
 		{ResourceType: kmsg.ConfigResourceTypeBroker, ResourceName: strconv.Itoa(int(brokerID))},
@@ -266,12 +266,18 @@ func (c *Client) ListQuotas(ctx context.Context) ([]domain.Quota, error) {
 }
 
 // AlterQuota upserts (or deletes when value is nil) one quota value.
+// An EMPTY entity name maps to wire NULL — the broker's built-in DEFAULT
+// entity (brokers explicitly reject "Empty <type> not supported"; kmsg's
+// entity_name is COMPACT_NULLABLE_STRING and only null maps to Default).
 func (c *Client) AlterQuota(ctx context.Context, entity map[string]string, key string, value *float64) error {
 	req := kmsg.NewPtrAlterClientQuotasRequest()
 	entry := kmsg.NewAlterClientQuotasRequestEntry()
 	for t, n := range entity {
-		name := n
-		ev := kmsg.AlterClientQuotasRequestEntryEntity{Type: t, Name: &name}
+		ev := kmsg.AlterClientQuotasRequestEntryEntity{Type: t}
+		if n != "" {
+			name := n
+			ev.Name = &name
+		}
 		entry.Entity = append(entry.Entity, ev)
 	}
 	ops := kmsg.NewAlterClientQuotasRequestEntryOp()

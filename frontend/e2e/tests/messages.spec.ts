@@ -10,12 +10,10 @@ import {
   ensureAppRunning,
   keepForeground,
   restartApp,
-  ensureConnection,
   ensureConnListOpen,
   openConnectionDialog,
   openWorkspaceSection,
   openTopic,
-  deleteTopic,
   deleteConnection,
   dialog,
   produceMessage,
@@ -25,7 +23,6 @@ import {
   detailTabClick,
   openFirstMessageDetail,
   openLastMessageDetail,
-  expectToast,
   keSelect,
   KAFKA,
   RUN_ID,
@@ -143,6 +140,9 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
+  test.setTimeout(120_000); // heal/ensureAppRunning 内部兜底各 45s，hook 级
+  // 超时 try/catch 挡不住——默认 45s 曾让清理单独把 spec 打红（评审）
+
   try {
     sshKafka(`--delete --topic ${TOPIC}`);
   } catch {

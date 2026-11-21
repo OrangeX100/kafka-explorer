@@ -82,6 +82,11 @@ export function currentPageOrThrow(): Page {
 }
 
 export async function disconnectApp() {
+  // 探针 key 不残留进共享的 WebView2 profile（同机生产自测会被污染成
+  // "新连接后列表不再自动收起"）
+  await browser?.contexts()[0]?.pages()[0]
+    ?.evaluate(() => localStorage.removeItem("ke.e2eKeepList"))
+    .catch(() => {});
   currentPage = null;
   await browser?.close();
 }
@@ -294,6 +299,7 @@ export async function connListOpen(page: Page): Promise<boolean> {
     const probe =
       document.querySelector('[data-testid="conn-row"]') ||
       pane.querySelector("input[type='text'], input:not([type])");
+    if (!probe) return false; // 侧栏结构变更时退化为 false 而非抛错
     // scroll it into view FIRST: with many rows the checked row can sit
     // below the fold — its rect.y exceeds the viewport and elementFromPoint
     // returns null, which a naive hit-test misreads as "collapsed"
@@ -315,12 +321,13 @@ export async function connListOpen(page: Page): Promise<boolean> {
  *  main pane and clicks never land. The rail 集群连接 button toggles it. */
 export async function ensureConnListOpen(page: Page) {
   if (await connListOpen(page)) return;
-  await page.locator('[data-tip="集群连接"]').click();
+  // 有界 click：无上界的 rail click 曾被残留 modal 架空外层预算
+  await page.locator('[data-tip="集群连接"]').click({ timeout: 4_000 }).catch(() => {});
   for (let i = 0; i < 10; i++) {
     await page.waitForTimeout(300);
     if (await connListOpen(page)) return;
     // toggle may have raced another collapse (health-poll ping landing)
-    await page.locator('[data-tip="集群连接"]').click();
+    await page.locator('[data-tip="集群连接"]').click({ timeout: 4_000 }).catch(() => {});
   }
   throw new Error("连接列表无法展开（rail 开关被探活收起循环干扰）");
 }

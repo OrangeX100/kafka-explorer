@@ -102,15 +102,18 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
+  test.setTimeout(90_000); // heal() alone can eat 40s (its internal race)
+  // after a fresh-app restart, and the residue cleanup still needs to run —
+  // the default 45s hook cap reported the whole spec as failed on cleanup
+  // alone (2026-11-20 CI run 6). NOTE: test.afterAll(fn, 90_000) is a
+  // SILENT NO-OP in Playwright (no timeout overload — jest semantics don't
+  // apply), the budget must go through setTimeout inside the hook.
   try {
-    // 90s hook budget: heal() alone can eat 40s (its internal race) after a
-    // fresh-app restart, and the residue cleanup still needs to run — the
-    // default 45s hook cap reported the whole spec as failed on cleanup
-    // alone (2026-11-20 CI run 6).
     const p = await Promise.race([
       heal(),
       new Promise<never>((_, rej) => setTimeout(() => rej(new Error("cleanup timeout")), 40_000)),
     ]);
+    await dismissOverlays(p); // 残留 modal/菜单会挡住 rail click 白耗预算
     await ensureConnListOpen(p);
     const row = p.locator('[data-testid="conn-row"]').filter({ hasText: CONN }).first();
     if (await row.isVisible().catch(() => false)) {
@@ -122,7 +125,7 @@ test.afterAll(async () => {
     /* residue cleaner covers this */
   }
   await disconnectApp();
-}, 90_000);
+});
 
 test("ACL：新建（e2e 主体）→ 列表出现 → 删除消失", () =>
   run(async (p) => {
