@@ -359,13 +359,16 @@ test("watermark-invariant：_schemas 徽章水位 ≥ 渲染行数，差值必�
         if (s.rows < s.watermark && s.note === 0) return "pending";
         return "ok";
       },
-      { timeout: 30_000, intervals: [1500, 2500, 3000] },
+      // CI 首载瞬态实证超 30s（2026-11-21 e2e job：rows=1 pending 到
+      // 30s 超时、retry 8.9s 即过）——90s 三倍余量
+      { timeout: 90_000, intervals: [1500, 2500, 3000] },
     )
     .toBe("ok");
 }));
 
 test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B）", () => run(async () => {
-  test.setTimeout(180_000); // 6 produce cycles + dialog flows
+  test.setTimeout(300_000); // 6 produce cycles + dialog flows（CI WAN 波动
+  // 实测 180s 两连超时 2026-11-21——每轮真对话框 15-25s，峰值 6×25+跳转 >180）
   await openWorkspaceSection(page, "主题");
   await createTopic(page, GOTO_TOPIC, 2);
   await openTopic(page, GOTO_TOPIC);
