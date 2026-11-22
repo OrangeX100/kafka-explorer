@@ -20,7 +20,8 @@ def api(url, data=None, headers=None):
         raw = urllib.request.urlopen(req, timeout=60).read()
         # Gitee 对不存在的 tag 返回字面量 null 体（2026-11-22 实证）——
         # 归一为 {} 走创建路径
-        return json.loads(raw) if raw.strip() else {}
+        parsed = json.loads(raw) if raw.strip() else None
+        return parsed if isinstance(parsed, dict) else {}
     except Exception as e:  # noqa: BLE001 — 统一降级为可读错误
         return {"_err": str(e)}
 
