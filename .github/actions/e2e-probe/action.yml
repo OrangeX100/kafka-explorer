@@ -102,6 +102,11 @@ runs:
     # evidence: 6min hangs ×3 after crossing the threshold). Honest skip
     # without the password — local runs purge via scripts/cleanup-e2e-topics.py.
     - name: Purge leaked e2e topics
+      # best-effort by design: GitHub runners are often RESET by CN-server
+      # sshd/firewall (ConnectionReset on banner, 2026-11-22) — the probes
+      # must run regardless; openTopic is filter-scoped so drift is already
+      # tolerated. Local runs purge via scripts/cleanup-e2e-topics.py.
+      continue-on-error: true
       shell: bash
       env:
         CN_SSH_HOST: 110.40.185.78
