@@ -23,7 +23,11 @@ jobs:
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
+          # --force (NOT --force-with-lease): a fresh runner checkout has NO
+          # gitee remote-tracking refs, so the lease ALWAYS reads "stale
+          # info" and fails (2026-11-22: every mirror run red from this).
+          # The Gitee repo is a pure mirror — force is the intent.
           git remote add gitee "https://OrangeX100:${GITEE_TOKEN}@gitee.com/OrangeX100/kafka-explorer.git"
-          git push gitee --force-with-lease origin/main:master
-          git push gitee --force-with-lease origin/develop:develop
-          git push gitee --force-with-lease origin "refs/tags/v*:refs/tags/v*"
+          git push gitee --force origin/main:master
+          git push gitee --force origin/develop:develop
+          git push gitee --force origin "refs/tags/v*:refs/tags/v*"
