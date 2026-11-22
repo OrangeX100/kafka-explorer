@@ -112,7 +112,13 @@ export function ConnectView() {
     try {
       await connectApi.remove(c.id);
       toast(t("connect.deletedOk", c.name), "ok");
-      if (activeId === c.id) setActiveId(null);
+      if (activeId === c.id) {
+        setActiveId(null);
+        // 删掉 active 集群后旧行残留继续渲染，lifecycle/restart 全部静默
+        // no-op（0.4.21 评审 P3）
+        setConnectors(null);
+        setConnectorsError(null);
+      }
       await load();
     } catch (err) {
       toast(friendlyError(err), "error");

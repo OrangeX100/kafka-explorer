@@ -124,6 +124,11 @@ export function GroupsView({ connectionId }: { connectionId: string }) {
                           .deleteGroup(connectionId, g.group)
                           .then(() => {
                             toast(t("groups.deleteOk", g.group), "ok");
+                            // 删除的正是选中组时清右侧详情（0.4.21 评审 P3）
+                            if (selected === g.group) {
+                              setSelected(null);
+                              setDetail(null);
+                            }
                             void load();
                           })
                           .catch((e2) => toast(friendlyError(e2), "error"));

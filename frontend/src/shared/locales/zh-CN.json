@@ -826,5 +826,8 @@
   "settings.updateSourceHint": "自动=直连优先、卡顿自动切国内加速；国内镜像优先=直接走加速通道；仅直连=不用第三方加速",
   "settings.source.auto": "自动（直连优先）",
   "settings.source.mirrorFirst": "国内镜像优先",
-  "settings.source.direct": "仅直连 GitHub"
+  "settings.source.direct": "仅直连 GitHub",
+  "settings.pageSizeHint": "单页上限 5000；更大量请用「查找」定位或「导出」到文件",
+  "msg.compactedNote": "压缩主题：旧值已被 Kafka 按 key 物理删除，水位 {0} 不等于实际存活记录数——这里显示的是主题里真实存在的消息，并非丢数据。",
+  "msg.gapNote": "本分区尾段有 {0} 条不可见记录：事务提交/中止标记等控制记录对所有消费者都不显示，并非丢数据。"
 }

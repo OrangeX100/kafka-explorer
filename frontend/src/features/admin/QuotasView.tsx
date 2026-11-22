@@ -271,6 +271,9 @@ function QuotaKeyRow({
     }
   };
 
+  // Enter→blur 同帧双发去重（0.4.21 评审 P3）：两次调用共享同一渲染闭包
+  // 的这个变量；busy state 是异步的，同帧第二次 save 读到的仍是 false。
+  let savingInFlight = false;
   const save = async () => {
     const raw = editing.trim();
     if (raw === String(value ?? "")) return;
@@ -279,9 +282,15 @@ function QuotaKeyRow({
       toast.show(t("error.invalid"), "error");
       return;
     }
-    // 仅成功弹成功提示——失败已由 alter 弹错误，谎报成功会误导用户
-    // 以为写入生效（2026-11-22 审计 P1-2）
-    if (await alter(num)) toast.show(t("quotas.saved", entityLabel, quotaKey, String(num)), "ok");
+    if (savingInFlight) return;
+    savingInFlight = true;
+    try {
+      // 仅成功弹成功提示——失败已由 alter 弹错误，谎报成功会误导用户
+      // 以为写入生效（2026-11-22 审计 P1-2）
+      if (await alter(num)) toast.show(t("quotas.saved", entityLabel, quotaKey, String(num)), "ok");
+    } finally {
+      savingInFlight = false;
+    }
   };
 
   const deleteKey = async () => {

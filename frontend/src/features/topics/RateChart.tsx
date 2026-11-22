@@ -100,6 +100,10 @@ export function RateChart({
     const padB = 24;
     const padT = 10;
     const maxCount = Math.max(1, ...data.map((b) => b.count));
+    // 桶宽从相邻桶起点推导：旧实现按 rangeMs/桶数 推算末端时间标签，
+    // oldest/offset 模式实际扫描窗口 ≠ rangeMs，末端标签可差数天
+    // （0.4.21 评审 P3-16）
+    const bucketMs = data.length > 1 ? data[1].startMs - data[0].startMs : 0;
     const bw = (W - padL) / data.length;
     const pts = data.map((b, i) => ({
       x: padL + i * bw + bw / 2,
@@ -109,7 +113,7 @@ export function RateChart({
     const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
     const area = `${line} L${pts[pts.length - 1].x.toFixed(1)},${H - padB} L${pts[0].x.toFixed(1)},${H - padB} Z`;
     const gridY = [0, 0.25, 0.5, 0.75, 1].map((f) => padT + f * (H - padT - padB));
-    return { W, H, padL, padT, padB, pts, line, area, gridY, maxCount, bw };
+    return { W, H, padL, padT, padB, pts, line, area, gridY, maxCount, bw, bucketMs };
   }, [data]);
 
   const tickLabel = (ms: number) => fmtTime(ms);
@@ -157,7 +161,12 @@ export function RateChart({
               <button
                 className="btn flex-none !px-2"
                 title={t("viz.applyTime")}
-                onClick={() => setAppliedCustom(Number(customStart))}
+                // NaN 曾静默退回 newest 24h 窗口而芯片仍显示用户输入
+                // （0.4.21 评审 P3-16）——非法输入直接不应用
+                onClick={() => {
+                  const n = Number(customStart);
+                  if (Number.isFinite(n)) setAppliedCustom(n);
+                }}
               >
                 <Check size={14} />
               </button>
@@ -243,7 +252,7 @@ export function RateChart({
                 {tickLabel(data?.[0]?.startMs ?? 0)}
               </text>
               <text x={chart.W} y={chart.H - 6} fill="rgb(var(--ink-400))" fontSize={10} textAnchor="end">
-                {tickLabel((data?.[data.length - 1]?.startMs ?? 0) + rangeMs / (data?.length ?? 1))}
+                {tickLabel((data?.[data.length - 1]?.startMs ?? 0) + (chart.bucketMs || rangeMs / (data?.length ?? 1)))}
               </text>
             </svg>
             {hover !== null && data?.[hover] && (

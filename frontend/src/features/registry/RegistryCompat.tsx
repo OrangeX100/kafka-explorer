@@ -83,16 +83,23 @@ export function CompatTab({
     ...(versions ?? []).map((v) => ({ value: String(v.version), label: `${t("reg.colVersion")} ${v.version}` })),
   ];
 
+  // runCheck 的 seq 守卫：in-flight 判定晚到时不得覆盖新面板——宿主不
+  // remount，切 subject 后旧请求的 setCheck 会盖在新 subject 的结果上
+  // （0.4.21 评审 P2-2；根治是宿主 <CompatTab key={subject.name}>）
+  const checkSeq = useRef(0);
   const runCheck = async () => {
+    const seq = ++checkSeq.current;
     setBusy(true);
     setCheck(null);
     try {
       const anchor = checkAnchor === "latest" ? 0 : Number(checkAnchor);
-      setCheck(await registryApi.compatibilityVersion(registryId, subject.name, anchor, candidate, subject.schemaType));
+      const result = await registryApi.compatibilityVersion(registryId, subject.name, anchor, candidate, subject.schemaType);
+      if (seq !== checkSeq.current) return; // subject/candidate 已变
+      setCheck(result);
     } catch (err) {
-      toast(friendlyError(err), "error");
+      if (seq === checkSeq.current) toast(friendlyError(err), "error");
     } finally {
-      setBusy(false);
+      if (seq === checkSeq.current) setBusy(false);
     }
   };
 

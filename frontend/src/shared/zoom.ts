@@ -1,4 +1,8 @@
 // UI zoom bridge: 界面字号 scales the whole body via CSS zoom, which puts
+// NOTE: these are IDENTITY transforms today — the body-zoom scheme was
+// replaced by the html font-size/rem typography (state/settings.ts). They
+// stay as seams so a future zoom feature has one place to hook.
+
 // mouse event coordinates (viewport px) and element layout coordinates into
 // DIFFERENT spaces. Anything that positions an element from clientX/Y must
 // convert through these helpers.

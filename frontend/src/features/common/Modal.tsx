@@ -9,6 +9,11 @@ import type { ReactNode } from "react";
 // We keep the node mounted through the exit animation (data-state=closing)
 // and only then invoke onClose, so the parent's conditional render never
 // clips the exit transition.
+// Escape 栈（0.4.21 评审 P2-1）：嵌套 Modal（对话框内再弹删除确认）挂
+// 两个 window keydown 监听，stopPropagation 拦不住同节点的另一个监听——
+// 按 Esc 曾两层齐关，内层输入随之丢失。只有栈顶响应 Escape。
+const modalStack: symbol[] = [];
+
 interface ModalProps {
   title: ReactNode;
   danger?: boolean;
@@ -25,6 +30,15 @@ export function Modal({ title, danger, width = 440, onClose, lockClose, children
   const [phase, setPhase] = useState<"open" | "closing">("open");
   const panelRef = useRef<HTMLDivElement>(null);
   const closedRef = useRef(false);
+  const stackId = useRef(Symbol());
+
+  useEffect(() => {
+    modalStack.push(stackId.current);
+    return () => {
+      const i = modalStack.indexOf(stackId.current);
+      if (i >= 0) modalStack.splice(i, 1);
+    };
+  }, []);
 
   // Programmatic close from dialog code (children' close): NOT gated by
   // lockClose. lockClose exists to stop USER dismissal (✕/Escape/backdrop)
@@ -49,6 +63,7 @@ export function Modal({ title, danger, width = 440, onClose, lockClose, children
     const onKey = (e: KeyboardEvent) => {
       if (phase !== "open") return;
       if (e.key === "Escape") {
+        if (modalStack[modalStack.length - 1] !== stackId.current) return; // 只有栈顶响应
         e.stopPropagation();
         if (lockClose) return;
         close();

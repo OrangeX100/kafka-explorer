@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { groupsApi } from "../../shared/api.js";
 import { useToast } from "../../state/stores.js";
 import { t } from "../../shared/i18n.js";
@@ -108,6 +108,10 @@ export function ClearShareOffsetsDialog({
   onApplied: () => void;
 }) {
   const [selected, setSelected] = useState<string[]>(topics);
+  // topics prop 来自异步 detail：落地前是空数组——选中集必须随 prop 同步，
+  // 否则目标组竞态下会把旧组的 topic 名提交给新组（0.4.21 评审 P2-2 的
+  // 对话框侧一半）
+  useEffect(() => setSelected(topics), [topics]);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 

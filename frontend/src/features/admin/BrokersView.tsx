@@ -94,7 +94,11 @@ export function BrokersView({ connectionId }: { connectionId: string }) {
 
   useEffect(() => {
     if (selected === null) return;
+    // 切 broker 先清旧配置行：旧 broker 的行曾静默换成新 broker 而用户
+    // 无从分辨（面板也不显示 broker id，0.4.21 评审 P3）
+    if (detail !== null) setDetail(null);
     void loadDetail(selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, connectionId, loadDetail]);
 
   const [logDirs, setLogDirs] = useState<LogDir[] | null>(null);

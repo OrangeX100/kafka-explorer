@@ -64,7 +64,7 @@ export function UpdateSection({
       result.assetSha256 ?? "",
       reqID,
       settings.updateSource || "auto",
-    );
+    ).catch((e: unknown) => upd.done(true, "", friendlyError(e)));
   };
 
   const cancelDownload = () => {

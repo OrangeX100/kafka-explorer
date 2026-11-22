@@ -52,6 +52,10 @@ export function DateTimePicker({
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
+      // 白名单：内嵌小时/分钟 Select 的选项 portal 到 document.body——
+      // mousedown 落在 rootRef 之外会把整个日期面板关掉，click 落空后
+      // 时间永远选不上（0.4.21 评审 P1：时间戳模式静默按种子 09:00 提交）
+      if ((e.target as Element)?.closest?.(".ke-select-content")) return;
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
     window.addEventListener("mousedown", close);

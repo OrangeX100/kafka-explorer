@@ -21,7 +21,13 @@ const useConfirmStore = create<{ req: ConfirmRequest | null }>(() => ({ req: nul
 // with the app shell and cannot be themed.
 export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
   return new Promise((resolve) => {
-    useConfirmStore.setState({ req: { ...opts, resolve } });
+    // 单槽覆盖前先 resolve 前一个等待者（false）：旧实现让前一个 promise
+    // 永久挂起——第一个 confirm 的调用方（如删除流程）静默丢失
+    // （0.4.21 评审 P3）
+    useConfirmStore.setState((cur) => {
+      cur.req?.resolve(false);
+      return { req: { ...opts, resolve } };
+    });
   });
 }
 

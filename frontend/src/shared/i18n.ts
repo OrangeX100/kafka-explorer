@@ -54,4 +54,3 @@ export function t(key: string, ...args: (string | number)[]): string {
   return template.replace(/\{(\d+)\}/g, (_, i) => String(args[Number(i)] ?? ""));
 }
 
-export const localeNames: Record<Locale, string> = { "zh-CN": "简体中文", en: "English" };

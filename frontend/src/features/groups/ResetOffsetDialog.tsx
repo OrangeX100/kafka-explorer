@@ -210,7 +210,7 @@ export function ResetOffsetDialog({
               <button className="btn" onClick={close}>
                 {t("common.close")}
               </button>
-              <button className="btn" disabled={busy || !topic} onClick={() => void preview()}>
+              <button className="btn" disabled={busy || !topic || (mode === "timestamp" ? tsMs === null : mode === "absolute" ? absolute === "" : false)} onClick={() => void preview()}>
                 {t("groups.resetDryRun")}
               </button>
               <button className="btn btn-danger" disabled={busy || !plan || plan.length === 0} onClick={() => void apply()}>

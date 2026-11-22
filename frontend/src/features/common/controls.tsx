@@ -61,16 +61,6 @@ export function Switch({
   );
 }
 
-// Display-only switch look for table cells (no editing happens inline).
-export function SwitchStatic({ checked, title }: { checked: boolean; title?: string }) {
-  return (
-    <span className="ke-switch ke-switch-static" data-checked={checked} title={title}>
-      <span className="ke-switch-track">
-        <span className="ke-switch-thumb" style={{ transform: `translateX(${checked ? 18 : 0}px)` }} />
-      </span>
-    </span>
-  );
-}
 
 export interface SelectOption {
   value: string;
@@ -145,6 +135,9 @@ export function Select({
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // 只收起下拉、阻断到 window：否则 Modal 的 Escape 监听同帧触发，
+        // 连同整个对话框一起关闭，表单输入全丢（0.4.21 评审 P2-1）
+        e.stopPropagation();
         setOpen(false);
         rootRef.current?.querySelector("button")?.focus();
       }

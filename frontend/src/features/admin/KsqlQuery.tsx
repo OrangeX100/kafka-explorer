@@ -75,6 +75,10 @@ export function QueryEditor({ serverId }: { serverId: string }) {
       offCols();
       offRows();
       offDone();
+      // 卸载 ≠ 监听解绑就够了：在途 push 查询（EMIT CHANGES）服务端仍在
+      // 持续推送——不解约则查询孤儿化，占住 ksqlDB 资源直到对端超时
+      // （0.4.21 评审 P2-4）。cancel 失败静默：组件已卸载无处呈现。
+      ksqlDbApi.cancel(idRef.current).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -151,7 +155,11 @@ export function QueryEditor({ serverId }: { serverId: string }) {
 
   const stop = () => {
     if (!running) return;
-    void ksqlDbApi.cancel(idRef.current);
+    // cancel 拒绝不能静默：running 永真 + Run 死锁到可能永 不来的 done
+    ksqlDbApi.cancel(idRef.current).catch((err) => {
+      setRunning(false);
+      setRunError(friendlyError(err));
+    });
   };
 
   return (
@@ -250,17 +258,24 @@ export function CatalogList({ serverId, kind }: { serverId: string; kind: "strea
     void load();
   }, [load]);
 
+  // seq 守卫（0.4.21 评审 P3）：快速点 A 再 B，A 的 DESCRIBE 晚到会顶掉
+  // B 的骨架——B 标题下渲染 A 的字段树；A 失败还会把 B 的加载面板整个关掉
+  const detailSeq = useRef(0);
   const showDetail = async (name: string) => {
+    const seq = ++detailSeq.current;
     setDetail(name);
     setDetailLoading(true);
     setDetailText(null);
     try {
-      setDetailText(await ksqlDbApi.exec(serverId, `DESCRIBE ${name}`));
+      const text = await ksqlDbApi.exec(serverId, `DESCRIBE ${name}`);
+      if (seq !== detailSeq.current) return;
+      setDetailText(text);
     } catch (err) {
+      if (seq !== detailSeq.current) return;
       toast.show(friendlyError(err), "error");
       setDetail(null);
     } finally {
-      setDetailLoading(false);
+      if (seq === detailSeq.current) setDetailLoading(false);
     }
   };
 

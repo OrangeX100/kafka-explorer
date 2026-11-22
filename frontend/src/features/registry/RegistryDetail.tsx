@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { GlidingTabs } from "../common/GlidingTabs.js";
 import { Select } from "../common/controls.js";
@@ -41,14 +41,22 @@ export function SchemaDetail({
   const [versions, setVersions] = useState<SchemaVersion[] | null>(null);
   const [versionsError, setVersionsError] = useState<unknown>(null);
   const [viewing, setViewing] = useState<number>(subject.version);
-  const toast = { show: useToast((s) => s.show) };
+  const toast = useToast((s) => s.show);
 
+  // seq 守卫（0.4.21 历史包袱评审 P2-1）：宿主对 subject 原地切换不
+  // remount，慢的旧 subject 版本响应会覆盖新列表——与 GroupsView/
+  // BrokersView 已修的 loadDetail 同类；列表页 subjectSeq 补了，详情页漏网
+  const verSeq = useRef(0);
   const loadVersions = useCallback(async () => {
+    const seq = ++verSeq.current;
     setVersions(null);
     setVersionsError(null);
     try {
-      setVersions(await registryApi.versions(registryId, subject.name));
+      const rows = await registryApi.versions(registryId, subject.name);
+      if (seq !== verSeq.current) return;
+      setVersions(rows);
     } catch (err) {
+      if (seq !== verSeq.current) return;
       setVersionsError(err);
       setVersions([]);
     }
@@ -66,11 +74,14 @@ export function SchemaDetail({
     if (!(await confirmDialog({ message: msg, danger: true }))) return;
     try {
       await registryApi.deleteVersion(registryId, subject.name, version, permanent);
-      toast.show(t("reg.versionDeleted"), "ok");
+      toast(t("reg.versionDeleted"), "ok");
       await loadVersions();
       if (viewing === version) setViewing(subject.version);
+      // 删的可能是最新版：rail 徽标/详情快照仍指着被删版本继续渲染，
+      // 直到用户重选 subject（0.4.21 评审 P3-7）
+      onCompatChanged?.();
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      toast(friendlyError(err), "error");
     }
   };
 
@@ -97,7 +108,7 @@ export function SchemaDetail({
         <button
           className="btn btn-danger !px-2"
           title={t("reg.deleteSubject")}
-          onClick={() => void removeSubjectFlow(subject, false, onRemove, onDeleted, toast.show)}
+          onClick={() => void removeSubjectFlow(subject, false, onRemove, onDeleted, toast)}
         >
           <Trash2 size={12} />
         </button>
@@ -125,7 +136,10 @@ export function SchemaDetail({
             onDelete={removeVersion}
           />
         )}
-        {tab === "compat" && <CompatTab registryId={registryId} subject={subject} versions={versions} onCompatChanged={onCompatChanged} />}
+        {/* key 重挂载根治跨 subject 状态残留：candidate/checkAnchor 是
+            subject 级草稿，原地切换会让旧 subject 的 schema 对新 subject
+            出判定（0.4.21 评审 P2-2） */}
+        {tab === "compat" && <CompatTab key={subject.name} registryId={registryId} subject={subject} versions={versions} onCompatChanged={onCompatChanged} />}
         {tab === "diff" && <DiffTab versions={versions} latest={subject.version} subjectName={subject.name} />}
       </div>
     </div>

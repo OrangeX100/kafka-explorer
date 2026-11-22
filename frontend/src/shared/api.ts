@@ -180,6 +180,10 @@ export function friendlyError(err: unknown): string {
   const { key, detail } = classifyError(err);
   const title = t(key);
   if (FACT_ONLY_KEYS.has(key)) return title;
+  // 安全语义的 detail 不受 90 字符截断：SSH 主机指纹变更警告（含两条
+  // SHA256 指纹 + 处置指引）曾被截成一行标题，用户不知道如何恢复
+  // （0.4.21 评审 P2-4）。
+  if (/指纹|中间人|重装|fingerprint|man-in-the-middle/.test(detail)) return detail;
   // Backend-written Chinese sentences ("连接名称 "x" 已存在", share guidance)
   // are complete messages on their own — no need to prefix the class title.
   if (/^[一-鿿]/.test(detail) && detail.length <= 90) return detail;

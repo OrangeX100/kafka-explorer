@@ -132,7 +132,7 @@ export function MessagesView({
   const toast = useToast();
   const copy = useCopy();
   // Page window size — the 设置页 pageSize value, honored on every load.
-  const pageSize = useAppSettings((s) => s.settings?.pageSize ?? 100);
+  const pageSize = useAppSettings((s) => s.settings?.pageSize ?? 50); // 50 = 后端默认页大小，启动窗口兜底不再放大首屏（0.4.21 P3）
   const { open: openCtx, menu: ctxMenu } = useContextMenu();
   // Monotonic request guard: switching topic/partition while a browse is in
   // flight must not let the stale response overwrite the newer one (the
@@ -179,6 +179,11 @@ export function MessagesView({
     // only an explicit paging action by the user earns that hint.
     async (c: typeof cursor, goto?: GoToTarget, silent?: boolean) => {
       const seq = ++requestSeq.current;
+      // loading 所有权：被更新的请求取代（seq 失配）时不得吹灭别人的骨架
+      // ——旧响应迟到曾把跳转在途的 loading 关掉，清表后直接渲染假"暂无
+      // 消息"空态（0.4.21 评审 P2-3；runFind 同款条件释放是既有范式）。
+      // catch 的 tail-retry 会 bump seq，owner 随之转移。
+      let owner = seq;
       setLoading(true);
       try {
         const req = buildBrowseReq({ connectionId, topic, partition, pageSize, decodeOn, cursor: c, goto });
@@ -223,11 +228,17 @@ export function MessagesView({
               connectionId, topic, partition: goto.partition, pageSize, decodeOn, cursor: "tail",
             });
             const retrySeq = requestSeq.current;
+            owner = retrySeq; // loading 所有权随 retry 转移（见上方 owner 声明）
             try {
               const result = await messagesApi.browse(req as never);
               if (retrySeq !== requestSeq.current) return;
               setPagingSuspended(false);
               const msgs = result.page.messages ?? [];
+              // 与主路径同构：backward/tail 重试按 offset 降序送达——不排序
+              // 则表格降序渲染、goPrev/goNext 语义翻转、徽标倒挂（0.4.21
+              // 评审 P2-1：此路径缺主路径 :192 的 sort）。升序后 msgs[last]
+              // 即最新行，锚点语义与主路径一致。
+              msgs.sort((a, b) => a.offset - b.offset);
               setMessages(msgs);
               setExhausted(result.exhausted);
               setSelected(null);
@@ -247,10 +258,11 @@ export function MessagesView({
             setRefireTick((t) => t + 1);
           }
         }
-        // UNCONDITIONAL: the catch path bumps requestSeq (invalidating seq)
-        // to run the tail-retry — a conditional release here left loading
-        // stuck true after every failed jump (045 round-4 regression).
-        setLoading(false);
+        // 所有权检查释放：owner === requestSeq 时才吹灯。旧的无条件释放会
+        // 在"被取代的旧响应迟到"时关掉跳转在途的骨架（P2-3）；failed-jump
+        // 的 retry 通过 owner 转移保持释放（045 round-4 的卡 loading 不复现
+        // ——retry 完成时 owner 已是 retrySeq）。
+        if (owner === requestSeq.current) setLoading(false);
       }
     },
     // pageSize/decodeOn in deps: a stale closure kept the old limit alive
@@ -393,12 +405,12 @@ export function MessagesView({
         />
         {isCompacted && exhausted && !pagingSuspended && rowsBelongToPartition && messages.length > 0 && messages.length < pageSize && (
           <div className="flex-none px-3 py-1.5 text-11 text-ink-300 border-b border-ink-700 bg-ink-900" data-testid="compaction-note">
-            压缩主题：旧值已被 Kafka 按 key 物理删除，水位 {detail?.partitionList.find((p) => p.id === partition)?.messageCount ?? "—"} 不等于实际存活记录数——这里显示的是主题里真实存在的消息，并非丢数据。
+            {t("msg.compactedNote", detail?.partitionList.find((p) => p.id === partition)?.messageCount ?? "—")}
           </div>
         )}
         {!isCompacted && exhausted && tailGap > 0 && (
           <div className="flex-none px-3 py-1.5 text-11 text-ink-300 border-b border-ink-700 bg-ink-900" data-testid="gap-note">
-            本分区尾段有 {tailGap} 条不可见记录：事务提交/中止标记等控制记录对所有消费者都不显示，并非丢数据。
+            {t("msg.gapNote", tailGap)}
           </div>
         )}
         </>

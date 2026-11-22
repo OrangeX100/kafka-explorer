@@ -45,6 +45,9 @@ interface SidebarProps {
 // the list (three-pane -> two-pane); the rail's clusters button toggles it
 // back, and « in the list header collapses explicitly.
 export function Sidebar({ onAddConnection, onEditConnection, topView, setTopView }: SidebarProps) {
+  // 稳定 selector（解包迁移，0.4.21 评审 P3）：整店订阅是 keep-mounted
+  // 渲染噪声与 toast-in-deps 风暴的温床；声明必须在 :102 使用点之前
+  const toast = useToast((s) => s.show);
   const { list, loading, refresh } = useConnections();
   const [query, setQuery] = useState("");
   // Single click = select (VS Code file-tree semantics); double click opens.
@@ -99,9 +102,9 @@ export function Sidebar({ onAddConnection, onEditConnection, topView, setTopView
   const exportConnections = async () => {
     try {
       const path = await connectionsApi.exportConnections();
-      if (path) toast.show(t("conn.exportOk"), "ok");
+      if (path) toast(t("conn.exportOk"), "ok");
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      toast(friendlyError(err), "error");
     }
   };
   const importConnections = async () => {
@@ -111,12 +114,12 @@ export function Sidebar({ onAddConnection, onEditConnection, topView, setTopView
       const r = await connectionsApi.importConnections(path);
       await refresh();
       if (r.needPassword && r.needPassword.length > 0) {
-        toast.show(t("conn.importNeedPw", r.imported, r.needPassword.length), "info");
+        toast(t("conn.importNeedPw", r.imported, r.needPassword.length), "info");
       } else {
-        toast.show(t("conn.importOk", r.imported), "ok");
+        toast(t("conn.importOk", r.imported), "ok");
       }
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      toast(friendlyError(err), "error");
     }
   };
   const togglePin = async (id: string, pinned: boolean) => {
@@ -124,7 +127,7 @@ export function Sidebar({ onAddConnection, onEditConnection, topView, setTopView
       await connectionsApi.setPinned(id, pinned);
       await refresh();
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      toast(friendlyError(err), "error");
     }
   };
   // Double-click flow: create the tab, probe the broker immediately, and
@@ -154,11 +157,11 @@ export function Sidebar({ onAddConnection, onEditConnection, topView, setTopView
 };
   const disconnect = (id: string) => {
     // 断开连接 = end the session: close the tab and drop the pooled client.
-    void connectionsApi.disconnect(id).catch((err) => toast.show(friendlyError(err), "error"));
+    void connectionsApi.disconnect(id).catch((err) => toast(friendlyError(err), "error"));
     closeTab(id);
-    toast.show(t("conn.disconnectOk"), "ok");
+    toast(t("conn.disconnectOk"), "ok");
   };
-  const toast = useToast();
+
   const { open: openCtx, menu: ctxMenu } = useContextMenu();
 
   // Rail clusters button: navigates to the clusters view — and once a
@@ -178,9 +181,9 @@ export function Sidebar({ onAddConnection, onEditConnection, topView, setTopView
       await refresh();
       // The connection is gone: its tab (if any) must go with it.
       pruneTabs(useConnections.getState().list.map((c) => c.id));
-      toast.show(t("common.deleted"), "ok");
+      toast(t("common.deleted"), "ok");
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      toast(friendlyError(err), "error");
     }
   };
 

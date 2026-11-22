@@ -1,4 +1,4 @@
-// Theme state: dark default, "system" follows the OS setting. Applied as a
+// Theme state: light default (dark is opt-in), "system" follows the OS setting. Applied as a
 // data-theme attribute on <html>; the palette lives in styles.css
 // ([data-theme="light"] overrides the token block).
 import { create } from "zustand";

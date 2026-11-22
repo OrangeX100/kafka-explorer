@@ -27,7 +27,11 @@ export function ShareGroupsView({ connectionId }: { connectionId: string }) {
   const [detail, setDetail] = useState<ShareGroupDetail | null>(null);
   const [detailTab, setDetailTab] = useState<"offsets" | "members">("offsets");
   const [editingOffset, setEditingOffset] = useState<{ topic: string; partition: number; startOffset: number } | null>(null);
-  const [clearing, setClearing] = useState(false);
+  // 快照目标组（0.4.21 评审 P2-2）：右键"清空 Offset"与对话框打开是同一次
+  // 点击——用布尔 + 活 detail 二跳时，对话框会以旧组的 group/topics 挂载，
+  // detail 落地后 prop 翻转而对话框内选中集不跟随 → 确认时对错误的组删除
+  // 投递进度（数据破坏性）。动作目标必须捕获点击时刻的值。
+  const [clearing, setClearing] = useState<{ group: string } | null>(null);
   // (s) => s.show: stable action identity — a whole-store useToast() here
   // rebuilt loadDetail on every toast and looped refetch+toast forever.
   // 稳定的 action 引用（勿包装成对象：{ show } 每渲染都是新引用，
@@ -66,7 +70,11 @@ export function ShareGroupsView({ connectionId }: { connectionId: string }) {
   );
 
   useEffect(() => {
+    // 切组先清旧详情（与 GroupsView 同款，0.4.21 评审 P3）：新响应在途
+    // 期间不再显示上一组的行
+    if (selected && detail && detail.group !== selected) setDetail(null);
     if (selected) void loadDetail(selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, loadDetail]);
 
   // Backend wraps UNSUPPORTED_VERSION with this guidance sentence; match on
@@ -133,7 +141,7 @@ export function ShareGroupsView({ connectionId }: { connectionId: string }) {
                     separatorBefore: true,
                     onSelect: () => {
                       setSelected(g.group);
-                      setClearing(true);
+                      setClearing({ group: g.group });
                     },
                   },
                   {
@@ -176,7 +184,7 @@ export function ShareGroupsView({ connectionId }: { connectionId: string }) {
                 </span>
               )}
               <div className="flex-1" />
-              <button className="btn btn-danger" onClick={() => setClearing(true)}>
+              <button className="btn btn-danger" onClick={() => setClearing({ group: detail.group })}>
                 {t("share.clearOffsets")}
               </button>
               <button className="btn btn-danger" onClick={() => deleteGroup(detail.group)}>
@@ -322,23 +330,25 @@ export function ShareGroupsView({ connectionId }: { connectionId: string }) {
               />
             )}
 
-            {clearing && (
-              <ClearShareOffsetsDialog
-                connectionId={connectionId}
-                group={detail.group}
-                topics={topicsOf}
-                onClose={() => setClearing(false)}
-                onApplied={() => {
-                  if (selected) void loadDetail(selected);
-                }}
-              />
-            )}
           </div>
         ) : (
           <EmptyState
             icon={<Users size={20} />}
             title={t("sidebar.share")}
             desc={t("share.hint")}
+          />
+        )}
+        {/* 清空对话框在 detail 分支之外：右键动作可能在 detail 为 null 时
+            触发（从未点选任何组），放分支内会变成死按钮 */}
+        {clearing && (
+          <ClearShareOffsetsDialog
+            connectionId={connectionId}
+            group={clearing.group}
+            topics={clearing.group === detail?.group ? topicsOf : []}
+            onClose={() => setClearing(null)}
+            onApplied={() => {
+              if (selected) void loadDetail(selected);
+            }}
           />
         )}
       </div>
