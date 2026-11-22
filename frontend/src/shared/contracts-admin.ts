@@ -219,6 +219,7 @@ export interface AppSettings {
   maxScan: number;
   updateRepo: string;
   autoCheckUpdate: boolean;
+  updateSource: string;
   // ✕ hides to the system tray instead of quitting (default on).
   closeToTray: boolean;
 }

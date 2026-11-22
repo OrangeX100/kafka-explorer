@@ -27,6 +27,10 @@ type Settings struct {
 	MaxScan         int    `json:"maxScan"`         // find scan budget
 	UpdateRepo      string `json:"updateRepo"`      // GitHub "owner/repo" the update check queries
 	AutoCheckUpdate bool   `json:"autoCheckUpdate"` // check once per app boot
+	// UpdateSource: download-route preference for staged updates —
+	// "auto" (direct first, mirrors on stall) | "mirrorFirst" (domestic
+	// accelerators ahead — CN links) | "direct" (pin github.com).
+	UpdateSource string `json:"updateSource"`
 	// CloseToTray: the window ✕ hides to the system tray instead of
 	// quitting. Default true — a management tool keeps its pooled cluster
 	// connections warm while "closed".
@@ -82,6 +86,7 @@ func DefaultSettings() Settings {
 		// user-configured repo (loaded over these defaults below) wins.
 		UpdateRepo:      buildinfo.UpdateRepo,
 		AutoCheckUpdate: true,
+		UpdateSource:    "auto",
 		CloseToTray:     true,
 	}
 }

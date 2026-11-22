@@ -820,5 +820,10 @@
   "quotas.errValue": "Value is required — bytes per second (e.g. 1048576); 0 blocks the operation entirely.",
   "acls.errPrincipalBare": "Incomplete principal — fill the username after \"User:\" (the SASL username).",
   "acls.errResourceName": "Resource name is required — TOPIC: topic name, GROUP: consumer group, PREFIXED: prefix.",
-  "dialog.retryHint": "The dialog stays open — fix the input and retry."
+  "dialog.retryHint": "The dialog stays open — fix the input and retry.",
+  "settings.updateSource": "Download source",
+  "settings.updateSourceHint": "Auto = direct first, mirrors on stall; Mirror-first = domestic accelerators ahead; Direct = GitHub only",
+  "settings.source.auto": "Auto (direct first)",
+  "settings.source.mirrorFirst": "Mirror first",
+  "settings.source.direct": "GitHub direct only"
 }

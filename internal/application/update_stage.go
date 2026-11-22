@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +23,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -69,20 +71,84 @@ var downloadMirrors = []string{
 	"https://gh-proxy.com/",
 }
 
+// Download source preference (Settings.UpdateSource): "auto" keeps the
+// historical direct-first order, "mirrorFirst" puts the domestic
+// accelerators ahead of github.com (user request 2026-11-22: CN links
+// stall on the direct route and the old failover discarded downloaded
+// bytes), "direct" pins github.com. Unknown values clamp to "auto".
+const (
+	DownloadSourceAuto        = "auto"
+	DownloadSourceMirrorFirst = "mirrorFirst"
+	DownloadSourceDirect      = "direct"
+)
+
 // downloadCandidates expands the asset URL into the ordered list of
-// routes to try: direct first, then each mirror prefix. Only GitHub
+// routes to try for the given source preference. Only GitHub
 // release-download URLs get mirrors (the accelerator path form is
 // prefix + full original URL).
-func downloadCandidates(assetURL string) []string {
+func downloadCandidates(assetURL string, source string) []string {
 	const ghPrefix = "https://github.com/"
 	if !strings.HasPrefix(assetURL, ghPrefix) {
 		return []string{assetURL}
 	}
-	out := []string{assetURL}
+	direct := assetURL
+	var mirrored []string
 	for _, m := range downloadMirrors {
-		out = append(out, m+assetURL)
+		mirrored = append(mirrored, m+assetURL)
 	}
-	return out
+	switch source {
+	case DownloadSourceMirrorFirst:
+		return append(append([]string{}, mirrored...), direct)
+	case DownloadSourceDirect:
+		return []string{direct}
+	default: // auto and anything unknown
+		return append([]string{direct}, mirrored...)
+	}
+}
+
+// segState is the cross-route resume ledger for one .part file: which of
+// the fixed segments are already on disk. The segment layout is derived
+// from (total, segN, segLen) — identical for every route — so the next
+// candidate can pick up exactly where the failed one stopped instead of
+// restarting a 50 MB download from byte 0 (user report 2026-11-22). The
+// final SHA-256 digest gate remains the integrity anchor: a corrupted
+// "done" segment fails it and the whole download re-runs.
+type segState struct {
+	URL    string `json:"url"`
+	Total  int64  `json:"total"`
+	SegN   int64  `json:"segN"`
+	SegLen int64  `json:"segLen"`
+	Done   []bool `json:"done"`
+}
+
+func segStatePath(part string) string { return part + ".segstate" }
+
+// loadSegState returns the ledger only when it matches THIS asset and the
+// segment layout this run computes; anything else (foreign URL, size
+// change, corrupted JSON, length drift) means fresh download.
+func loadSegState(path, url string, total, segN, segLen int64) *segState {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var st segState
+	if json.Unmarshal(raw, &st) != nil || st.URL != url || st.Total != total ||
+		st.SegN != segN || st.SegLen != segLen || int64(len(st.Done)) != segN {
+		return nil
+	}
+	return &st
+}
+
+func saveSegState(path string, st *segState) {
+	raw, err := json.Marshal(st)
+	if err != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, raw, 0o600) != nil {
+		return
+	}
+	_ = os.Rename(tmp, path) // same dir: atomic on Windows
 }
 
 // assetURLGuard gates where the staging pipeline may download from.
@@ -156,11 +222,15 @@ func SetAssetURLGuardForTests(g func(string) error) (restore func()) {
 
 // StageUpdate downloads the setup asset into DataDir/updates with
 // progress ticks. cancelled is polled between chunks — closing it is the
-// stop button, and the .part file is removed so a later retry starts
-// over. Direct GitHub downloads that stall or crawl (typical on CN
+// stop button, and the .part file + resume ledger are kept so a later
+// retry continues from where it stopped. Direct GitHub downloads that
+// stall or crawl (typical on CN
 // networks) automatically fall through to the built-in mirrors: the user
 // sees one progress bar and never picks a route.
-func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetSize int64, manifestSHA string, progress func(Progress), cancelled <-chan struct{}) (string, error) {
+func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetSize int64, manifestSHA string, source string, progress func(Progress), cancelled <-chan struct{}) (string, error) {
+	if source != DownloadSourceMirrorFirst && source != DownloadSourceDirect {
+		source = DownloadSourceAuto
+	}
 	if runtime.GOOS != "windows" {
 		return "", fmt.Errorf("%w: 自动更新当前仅支持 Windows", domain.ErrInvalid)
 	}
@@ -186,36 +256,44 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 	// in-flight install simply survives until the next round.
 	if entries, err := os.ReadDir(dir); err == nil {
 		for _, e := range entries {
-			if e.IsDir() || e.Name() == name || e.Name() == name+".part" {
+			if e.IsDir() || e.Name() == name || e.Name() == name+".part" || e.Name() == name+".part.segstate" {
 				continue
 			}
 			base := e.Name()
 			isSetup := strings.HasPrefix(base, stagedSetupPrefix) && strings.HasSuffix(base, ".exe")
 			isPart := strings.HasSuffix(base, ".part")
-			if !isSetup && !isPart {
+			isState := strings.HasSuffix(base, ".segstate")
+			if !isSetup && !isPart && !isState {
 				continue
 			}
 			_ = os.Remove(filepath.Join(dir, base))
 		}
 	}
 
+	// Cross-route resume ledger: kept alongside the .part across route
+	// failovers (and across stop/retry) so a half-finished download
+	// continues instead of restarting from byte 0. Cleaned on success.
+	state := segStatePath(part)
 	var lastErr error
-	for _, route := range downloadCandidates(assetURL) {
+	for _, route := range downloadCandidates(assetURL, source) {
 		// routeErr must NOT shadow the cancellation checks below: the old
 		// code read the (always-nil) updatesDir error here, so a cancel was
 		// treated as success and the TRUNCATED .part got renamed into the
 		// installer. routeErr carries tryRoute's real outcome — including
 		// errCancelled, which tryRoute now ALWAYS returns on cancellation.
-		_, routeErr := s.tryRoute(ctx, route, assetSize, part, manifestSHA, progress, cancelled)
+		_, routeErr := s.tryRoute(ctx, route, assetSize, part, manifestSHA, source, progress, cancelled)
 		if routeErr == errCancelled || ctx.Err() != nil {
-			os.Remove(part)
+			// Stop button: keep the .part + ledger — the next attempt
+			// resumes where this stopped instead of restarting.
 			return "", nil // stop button: not an error
 		}
 		if routeErr == nil {
 			if err := os.Rename(part, dest); err != nil {
 				os.Remove(part)
+				_ = os.Remove(state)
 				return "", fmt.Errorf("暂存安装包失败: %w", err)
 			}
+			_ = os.Remove(state)
 			// Backfill the size when the manifest carried none: tryRoute
 			// learns ContentLength on its own copy of the parameter, so the
 			// final progress tick would otherwise report 0/0.
@@ -227,7 +305,13 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 			progress(Progress{Bytes: assetSize, Total: assetSize})
 			return dest, nil
 		}
-		os.Remove(part)
+		// Failover: KEEP the .part when the ledger exists — the next
+		// candidate resumes its remaining segments. No ledger (fresh
+		// start, size mismatch, single-stream fallback) means nothing
+		// resumable: clean the truncated file as before.
+		if _, stErr := os.Stat(state); stErr != nil {
+			os.Remove(part)
+		}
 		lastErr = routeErr // remember; the next route gets a chance
 	}
 	if lastErr != nil {
@@ -304,20 +388,62 @@ func (s *UpdateService) downloadSegments(routeCtx context.Context, assetURL, par
 		return fmt.Errorf("预分配临时文件失败: %w", err)
 	}
 
+	segLen := (total + segN - 1) / segN
+	// Resume ledger: a previous route's completed segments stay on disk —
+	// pick them up instead of re-downloading (final digest gate anchors
+	// integrity; layout is derived from total/segN/segLen so it matches
+	// across routes).
+	statePath := segStatePath(part)
+	prev := loadSegState(statePath, assetURL, total, segN, segLen)
+	doneSeg := make([]bool, int(segN))
+	// segN is int64; make needs int — safe: segN ≤ segConnections
+	var resumed int64
+	if prev != nil {
+		doneSeg = prev.Done
+		for i := int64(0); i < segN; i++ {
+			if doneSeg[i] {
+				start := i * segLen
+				end := start + segLen - 1
+				if end > total-1 {
+					end = total - 1
+				}
+				resumed += end - start + 1
+			}
+		}
+	}
+	ledger := &segState{URL: assetURL, Total: total, SegN: segN, SegLen: segLen, Done: doneSeg}
+	var ledgerMu sync.Mutex
+	saveLedger := func() {
+		ledgerMu.Lock()
+		defer ledgerMu.Unlock()
+		saveSegState(statePath, ledger)
+	}
+
 	var got atomic.Int64
+	got.Store(resumed)
 	segCtx, segCancel := context.WithCancel(routeCtx)
 	defer segCancel()
 
 	done := make(chan error, segN)
-	segLen := (total + segN - 1) / segN
 	for i := int64(0); i < segN; i++ {
+		if ledger.Done[i] {
+			done <- nil // resumed from the ledger: nothing to fetch
+			continue
+		}
 		start := i * segLen
 		end := start + segLen - 1
 		if end > total-1 {
 			end = total - 1
 		}
 		go func() {
-			done <- downloadOneSegment(segCtx, assetURL, partFile, start, end, &got, cancelled)
+			err := downloadOneSegment(segCtx, assetURL, partFile, start, end, &got, cancelled)
+			if err == nil {
+				ledgerMu.Lock()
+				ledger.Done[i] = true
+				ledgerMu.Unlock()
+				saveLedger()
+			}
+			done <- err
 		}()
 	}
 	// progress ticker: aggregate the segments' shared counter
@@ -549,7 +675,7 @@ var (
 // tryRoute downloads one route into part (no rename). Errors are
 // classified for the fallback chain: start/cancel errors and stalls are
 // retryable on the next route.
-func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize int64, part string, manifestSHA string, progress func(Progress), cancelled <-chan struct{}) (string, error) {
+func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize int64, part string, manifestSHA string, source string, progress func(Progress), cancelled <-chan struct{}) (string, error) {
 	// routeCtx is cancelled by the watchdog (stall/slow-start) and tears
 	// down the in-flight request; the deferred cancel cleans up after a
 	// healthy completion. The watchdog starts BEFORE the request: a dead
@@ -576,11 +702,15 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 			assetSize = segTotal
 		}
 		if segTotal != assetSize {
+			// Manifest/route size disagreement: the layout ledger is void.
 			os.Remove(part)
+			_ = os.Remove(segStatePath(part))
 			return "", fmt.Errorf("下载通道返回的大小与发布信息不一致（%d ≠ %d）", segTotal, assetSize)
 		}
 		if err := s.downloadSegments(routeCtx, assetURL, part, assetSize, routeLabel, progress, cancelled); err != nil {
-			os.Remove(part)
+			// KEEP part + ledger: the next candidate resumes the missing
+			// segments (2026-11-22 — the old unconditional Remove here is
+			// what restarted half-finished downloads from byte 0).
 			switch {
 			case err == errCancelled || ctx.Err() != nil || stopRequested(cancelled):
 				return "", errCancelled
@@ -593,6 +723,8 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 		// fall through to the shared gates below (single-stream tail)
 	} else {
 
+		// Single-stream cannot honor a segment ledger: start clean.
+		_ = os.Remove(segStatePath(part))
 		var got atomic.Int64
 		lastNano := atomic.Int64{}
 		started := time.Now()
@@ -727,7 +859,7 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 	// file through, and a missing checksum is not something to shrug off.
 	want := strings.ToLower(strings.TrimSpace(manifestSHA))
 	if want == "" {
-		sidecar, status := fetchExpectedChecksum(ctx, downloadCandidates(assetURL+".sha256"))
+		sidecar, status := fetchExpectedChecksum(ctx, downloadCandidates(assetURL+".sha256", source))
 		switch status {
 		case checksumOK:
 			want = sidecar

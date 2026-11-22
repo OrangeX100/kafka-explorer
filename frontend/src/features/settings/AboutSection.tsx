@@ -4,7 +4,7 @@ import { systemApi, friendlyError } from "../../shared/api.js";
 import type { AppSettings, AppInfo, UpdateCheck } from "../../shared/contracts-admin.js";
 import { t } from "../../shared/i18n.js";
 import { useCopy } from "../../shared/useCopy.js";
-import { SectionTitle } from "./Section.js";
+import { Row, SectionTitle } from "./Section.js";
 import { newReqID, useUpdate } from "../../state/update.js";
 
 // UpdateSection: the version-update mechanism UI. The repo field
@@ -62,6 +62,7 @@ export function UpdateSection({
       result.assetSize || 0,
       result.assetSha256 ?? "",
       reqID,
+      settings.updateSource || "auto",
     );
   };
 
@@ -98,6 +99,20 @@ export function UpdateSection({
           />
           {t("settings.autoCheckUpdate")}
         </label>
+        <div>
+          <Row label={t("settings.updateSource")}>
+            <select
+              className="field !w-44"
+              value={settings.updateSource || "auto"}
+              onChange={(e) => set("updateSource", e.target.value)}
+            >
+              <option value="auto">{t("settings.source.auto")}</option>
+              <option value="mirrorFirst">{t("settings.source.mirrorFirst")}</option>
+              <option value="direct">{t("settings.source.direct")}</option>
+            </select>
+          </Row>
+          <p className="text-10 text-ink-400">{t("settings.updateSourceHint")}</p>
+        </div>
       </div>
 
       <div className="mt-3 flex items-center gap-3">

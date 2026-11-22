@@ -97,7 +97,7 @@ func TestStageUpdateLegacyNoSidecarDowngrades(t *testing.T) {
 	defer srv.Close()
 
 	svc := NewUpdateService("0.4.2", zap.NewNop())
-	staged, err := svc.StageUpdate(t.Context(), srv.URL+"/asset.exe", total, "", func(Progress) {}, make(chan struct{}))
+	staged, err := svc.StageUpdate(t.Context(), srv.URL+"/asset.exe", total, "", DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
 	if err != nil {
 		t.Fatalf("legacy downgrade must stage successfully, got: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestStageUpdateMalformedSidecarHardFails(t *testing.T) {
 	defer srv.Close()
 
 	svc := NewUpdateService("0.4.2", zap.NewNop())
-	_, err := svc.StageUpdate(t.Context(), srv.URL+"/asset.exe", total, "", func(Progress) {}, make(chan struct{}))
+	_, err := svc.StageUpdate(t.Context(), srv.URL+"/asset.exe", total, "", DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
 	if err == nil {
 		t.Fatal("malformed sidecar must abort the install")
 	}

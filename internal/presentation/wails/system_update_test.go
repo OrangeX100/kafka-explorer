@@ -45,7 +45,7 @@ func TestStageUpdateReentryCancelsPrevious(t *testing.T) {
 	defer fast.Close()
 
 	h := NewSystemHandler(application.NewUpdateService("0.4.2", zap.NewNop()), zap.NewNop())
-	if err := h.StageUpdate(context.Background(), "o/r", slow.URL+"/a.exe", 1<<20, "", "r1"); err != nil {
+	if err := h.StageUpdate(t.Context(), "o/r", slow.URL+"/a.exe", 1<<20, "", "r1", "auto"); err != nil {
 		t.Fatalf("first stage: %v", err)
 	}
 	// Wait until the first request actually reached the server: cancelling
@@ -55,7 +55,7 @@ func TestStageUpdateReentryCancelsPrevious(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("first download never reached the server")
 	}
-	if err := h.StageUpdate(context.Background(), "o/r", fast.URL+"/b.exe", int64(len(payload)), manifestSHA, "r2"); err != nil {
+	if err := h.StageUpdate(t.Context(), "o/r", fast.URL+"/b.exe", int64(len(payload)), manifestSHA, "r2", "auto"); err != nil {
 		t.Fatalf("second stage: %v", err)
 	}
 
@@ -118,7 +118,7 @@ func TestStageUpdateSurvivesCallCtxCancellation(t *testing.T) {
 	})
 
 	callCtx, callCancel := context.WithCancel(context.Background())
-	if err := h.StageUpdate(callCtx, "o/r", srv.URL+"/KafkaExplorer_Setup_0.4.5.exe", int64(len(payload)), manifestSHA, "r1"); err != nil {
+	if err := h.StageUpdate(callCtx, "o/r", srv.URL+"/KafkaExplorer_Setup_0.4.5.exe", int64(len(payload)), manifestSHA, "r1", "auto"); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
 	callCancel() // the wails processor does this on method return

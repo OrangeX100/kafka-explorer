@@ -357,8 +357,8 @@ export const systemApi = {
   // Content reader for files the user just picked (schema uploads, imports).
   readTextFile: (path: string): Promise<string> => systemHandler.ReadTextFile(path) as never,
   checkUpdate: (repo: string): Promise<UpdateCheck> => systemHandler.CheckUpdate(repo) as never,
-  stageUpdate: (repo: string, assetUrl: string, assetSize: number, manifestSha: string, requestId: string): Promise<void> =>
-    systemHandler.StageUpdate(repo, assetUrl, assetSize, manifestSha, requestId) as never,
+  stageUpdate: (repo: string, assetUrl: string, assetSize: number, manifestSha: string, requestId: string, source: string): Promise<void> =>
+    systemHandler.StageUpdate(repo, assetUrl, assetSize, manifestSha, requestId, source) as never,
   cancelUpdate: (): Promise<void> => systemHandler.CancelUpdate() as never,
   // The handler installs what IT staged (path + digest remembered
   // backend-side); the renderer only presses the button (045 hardening).

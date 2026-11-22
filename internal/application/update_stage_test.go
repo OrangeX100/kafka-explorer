@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,7 +23,7 @@ import (
 // anything else is used as-is.
 func TestDownloadCandidates(t *testing.T) {
 	gh := "https://github.com/OrangeX100/kafka-explorer/releases/download/v0.2.0/KafkaExplorer_Setup_0.2.0.exe"
-	got := downloadCandidates(gh)
+	got := downloadCandidates(gh, DownloadSourceAuto)
 	if len(got) != 3 {
 		t.Fatalf("github url: got %d candidates, want 3", len(got))
 	}
@@ -28,10 +31,124 @@ func TestDownloadCandidates(t *testing.T) {
 		t.Fatalf("github candidates wrong: %v", got)
 	}
 	other := "https://mirror.example.com/setup.exe"
-	got = downloadCandidates(other)
+	got = downloadCandidates(other, DownloadSourceAuto)
 	if len(got) != 1 || got[0] != other {
 		t.Fatalf("non-github url must stay single-route: %v", got)
 	}
+	// mirrorFirst（用户要求走国内源）：镜像在前、直连殿后；direct：只直连
+	got = downloadCandidates(gh, DownloadSourceMirrorFirst)
+	if len(got) != 3 || got[0] != "https://ghfast.top/"+gh || got[2] != gh {
+		t.Fatalf("mirrorFirst order wrong: %v", got)
+	}
+	got = downloadCandidates(gh, DownloadSourceDirect)
+	if len(got) != 1 || got[0] != gh {
+		t.Fatalf("direct must pin github only: %v", got)
+	}
+	// unknown clamps to auto
+	got = downloadCandidates(gh, "bogus")
+	if got[0] != gh {
+		t.Fatalf("unknown source must clamp to auto: %v", got)
+	}
+}
+
+// TestStageUpdateResumesAcrossRoutes 锁 2026-11-22 的续传语义：路由 1 中途
+// 断流（前半段已落盘），路由 2 必须只补缺失段——总取字节 ≈ 一段而非整个
+// 文件，且最终 SHA 通过、账本清理干净。
+func TestStageUpdateResumesAcrossRoutes(t *testing.T) {
+	payload := make([]byte, 3*(1<<20)) // 3MB → segMinSize=1MB → 3 段
+	for i := range payload {
+		payload[i] = byte(i % 251)
+	}
+	manifestSHA := fmt.Sprintf("%x", sha256.Sum256(payload))
+
+	// 路由 1：只愿意交付第一段（Range 正常），第二段连接后立即断——
+	// downloadOneSegment 对段内断流重试 segAttempts 次后整路由失败。
+	var route2Fetch int64 = -1
+	route1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rng := r.Header.Get("Range")
+		if rng == "" || strings.Contains(rng, "bytes=1048576-") {
+			// 非段请求（探测/第二段起）直接掐断：制造路由失败
+			panic(http.ErrAbortHandler)
+		}
+		serveRange(w, r, payload)
+	}))
+	defer route1.Close()
+	route2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rng := r.Header.Get("Range")
+		// 段 0 的续取是 bytes=0-1048575；1 字节探测是 bytes=0-0——不计数
+		if strings.HasPrefix(rng, "bytes=0-") && rng != "bytes=0-0" {
+			atomic.AddInt64(&route2Fetch, 1) // 路由 2 不应重取第一段
+		}
+		serveRange(w, r, payload)
+	}))
+	defer route2.Close()
+
+	svc := NewUpdateService("0.2.0", nil)
+	dir := t.TempDir()
+	part := filepath.Join(dir, "KafkaExplorer_Setup_0.2.0.exe.part")
+
+	// 路由 1（失败）+ 路由 2（补完）：候选序直接构造，绕过 downloadCandidates
+	_ = route1
+	_, err1 := svc.tryRoute(context.Background(), route1.URL+"/a.exe", int64(len(payload)), part, manifestSHA, DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
+	if err1 == nil {
+		t.Fatal("route1 must fail (second segment aborted)")
+	}
+	if _, stErr := os.Stat(part + ".segstate"); stErr != nil {
+		t.Fatalf("route1 failure must keep the resume ledger: %v", stErr)
+	}
+	st, stErr := os.Stat(part)
+	if stErr != nil || st.Size() != int64(len(payload)) {
+		t.Fatalf("route1 failure must keep the preallocated .part: %v", stErr)
+	}
+
+	_, err2 := svc.tryRoute(context.Background(), route2.URL+"/a.exe", int64(len(payload)), part, manifestSHA, DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
+	if err2 != nil {
+		t.Fatalf("route2 resume failed: %v", err2)
+	}
+	// tryRoute 不做改名（那是 StageUpdate 路由层的职责）——校验 .part 本体
+	got, err := os.ReadFile(part)
+	if err != nil {
+		t.Fatalf("read part: %v", err)
+	}
+	if sha256.Sum256(got) != sha256.Sum256(payload) {
+		t.Fatal("resumed file digest mismatch")
+	}
+	if route2Fetch != 0 {
+		t.Fatalf("route2 must not re-fetch segment 0 (saw %d requests)", route2Fetch)
+	}
+	// 账本清理是 StageUpdate（rename 时）的职责，tryRoute 留着它正确——
+	// 这里只验账本记录了全段完成
+	if raw, rerr := os.ReadFile(part + ".segstate"); rerr != nil {
+		t.Fatalf("success should leave the ledger for the StageUpdate rename: %v", rerr)
+	} else if !strings.Contains(string(raw), `"done":[true,true,true]`) {
+		t.Fatalf("ledger should record all segments done: %s", raw)
+	}
+}
+
+// serveRange answers Range requests for buf with 206/Content-Range —
+// the minimal contract probeRangeSupport/downloadOneSegment rely on.
+func serveRange(w http.ResponseWriter, r *http.Request, buf []byte) {
+	rng := r.Header.Get("Range")
+	start, end := int64(0), int64(len(buf)-1)
+	if strings.HasPrefix(rng, "bytes=") {
+		parts := strings.SplitN(strings.TrimPrefix(rng, "bytes="), "-", 2)
+		if v, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+			start = v
+		}
+		if len(parts) == 2 && parts[1] != "" {
+			if v, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+				end = v
+			}
+		}
+	}
+	if start > end || start >= int64(len(buf)) {
+		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(buf)))
+	w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
+	w.WriteHeader(http.StatusPartialContent)
+	_, _ = w.Write(buf[start : end+1])
 }
 
 // tryRoute must abandon a route that never sends the first byte within
@@ -50,7 +167,7 @@ func TestTryRouteAbandonsDeadRoute(t *testing.T) {
 	s := &UpdateService{}
 	cancelled := make(chan struct{})
 	started := time.Now()
-	_, err := s.tryRoute(context.Background(), srv.URL+"/asset.exe", 4, "unused.part", "",
+	_, err := s.tryRoute(context.Background(), srv.URL+"/asset.exe", 4, "unused.part", "", DownloadSourceAuto,
 		func(Progress) {}, cancelled)
 	if err == nil {
 		t.Fatal("dead route was not abandoned")
@@ -82,7 +199,7 @@ func TestTryRouteCompletes(t *testing.T) {
 
 	s := &UpdateService{}
 	part := t.TempDir() + "/part"
-	_, err := s.tryRoute(context.Background(), srv.URL+"/asset.exe", int64(len(body)), part, "",
+	_, err := s.tryRoute(context.Background(), srv.URL+"/asset.exe", int64(len(body)), part, "", DownloadSourceAuto,
 		func(Progress) {}, make(chan struct{}))
 	if err != nil {
 		t.Fatalf("healthy route failed: %v", err)
@@ -122,7 +239,7 @@ func TestStageUpdateHousekeepingOnlyTouchesOurArtifacts(t *testing.T) {
 	defer os.Remove(keep)
 
 	svc := &UpdateService{}
-	staged, err := svc.StageUpdate(t.Context(), srv.URL+"/KafkaExplorer_Setup_0.0.0-test.exe", int64(len(payload)), manifestSHA, func(Progress) {}, make(chan struct{}))
+	staged, err := svc.StageUpdate(t.Context(), srv.URL+"/KafkaExplorer_Setup_0.0.0-test.exe", int64(len(payload)), manifestSHA, DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
 	if err != nil {
 		t.Fatalf("stage: %v", err)
 	}

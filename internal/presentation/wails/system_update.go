@@ -43,7 +43,10 @@ var stagedAssetNameRe = regexp.MustCompile(`^KafkaExplorer_Setup_[^/\\<>:"|?*]+\
 // tags the progress events so the frontend filters its own stream.
 // manifestSha is the digest embedded in latest.json (preferred — it rode
 // the metadata download already); empty falls back to the .sha256 sidecar.
-func (h *SystemHandler) StageUpdate(ctx context.Context, repo string, assetURL string, assetSize int64, manifestSha, requestID string) error {
+// source: the Settings.UpdateSource preference rides the call (the
+// frontend owns its settings store) — "auto" | "mirrorFirst" | "direct";
+// unknown values clamp to auto server-side.
+func (h *SystemHandler) StageUpdate(ctx context.Context, repo string, assetURL string, assetSize int64, manifestSha, requestID, source string) error {
 	if runtime.GOOS != "windows" {
 		return fmt.Errorf("自动更新当前仅支持 Windows")
 	}
@@ -76,7 +79,7 @@ func (h *SystemHandler) StageUpdate(ctx context.Context, repo string, assetURL s
 			}
 			h.mu.Unlock()
 		}()
-		staged, err := h.update.StageUpdate(runCtx, assetURL, assetSize, manifestSha, func(p application.Progress) {
+		staged, err := h.update.StageUpdate(runCtx, assetURL, assetSize, manifestSha, source, func(p application.Progress) {
 			if h.emit != nil {
 				h.emit("system:update:progress", map[string]any{
 					"id": requestID, "bytes": p.Bytes, "total": p.Total,

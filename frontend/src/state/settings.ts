@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   maxScan: 100000,
   updateRepo: "", // empty = the release-baked source (buildinfo.UpdateRepo)
   autoCheckUpdate: true,
+  updateSource: "auto", // auto | mirrorFirst | direct (update download routes)
   closeToTray: true,
 };
 

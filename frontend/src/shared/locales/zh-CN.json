@@ -820,5 +820,10 @@
   "quotas.errValue": "数值不能为空——填每秒字节数（如 1048576），0 表示完全禁止该操作。",
   "acls.errPrincipalBare": "主体不完整——「User:」冒号后要填用户名（SASL 认证用户名）。",
   "acls.errResourceName": "资源名称不能为空——TOPIC 填主题名，GROUP 填消费者组名，PREFIXED 填前缀。",
-  "dialog.retryHint": "对话框保持打开，修正内容后可直接重试。"
+  "dialog.retryHint": "对话框保持打开，修正内容后可直接重试。",
+  "settings.updateSource": "下载源",
+  "settings.updateSourceHint": "自动=直连优先、卡顿自动切国内加速；国内镜像优先=直接走加速通道；仅直连=不用第三方加速",
+  "settings.source.auto": "自动（直连优先）",
+  "settings.source.mirrorFirst": "国内镜像优先",
+  "settings.source.direct": "仅直连 GitHub"
 }
