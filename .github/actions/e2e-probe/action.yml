@@ -92,6 +92,39 @@ runs:
         fi
         echo "CDP ready on 127.0.0.1:9223"
 
+    # Purge leaked e2e-* topics from the shared cluster BEFORE probes:
+    # a day of CI rounds leaks enough topics to push the list past 50/page
+    # and UNSCOPED row clicks hang on invisible page-2 rows (2026-11-22
+    # evidence: 6min hangs ×3 after crossing the threshold). Honest skip
+    # without the password — local runs purge via scripts/cleanup-e2e-topics.py.
+    - name: Purge leaked e2e topics
+      shell: bash
+      env:
+        CN_SSH_HOST: 110.40.185.78
+        CN_SSH_PORT: "22"
+        CN_SSH_USER: root
+        CN_SSH_PASSWORD: ${{ secrets.CN_MIRROR_SSH_PASSWORD }}
+      run: |
+        python -m pip install --quiet paramiko
+        python - <<'PY'
+        import json, os, paramiko
+        pw_path = "C:/Users/51293/bin/hosts.json"
+        pw = os.environ["CN_SSH_PASSWORD"]
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(os.environ["CN_SSH_HOST"], port=int(os.environ["CN_SSH_PORT"]),
+                    username=os.environ["CN_SSH_USER"], password=pw, timeout=20)
+        def run(c, t=120):
+            return ssh.exec_command(c, timeout=t)[1].read().decode()
+        names = run("docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9096 --list").split()
+        leaked = [n for n in names if n.startswith("e2e-")]
+        print("leaked topics:", len(leaked))
+        for n in leaked:
+            run(f"docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9096 --delete --topic {n}")
+        print("purged")
+        ssh.close()
+        PY
+
     - name: Run Playwright UI probes
       shell: bash
       env:

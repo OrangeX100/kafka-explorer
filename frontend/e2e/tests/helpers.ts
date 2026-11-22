@@ -495,7 +495,16 @@ export async function createTopic(page: Page, name: string, partitions: number) 
 
 /** Select a topic row (single click opens the topic detail). */
 export async function openTopic(page: Page, name: string) {
-  await page.locator('[data-testid="topic-row"]').filter({ hasText: name }).first().click();
+  // Filter-box scoping (createTopic same pattern): leaked topics push the
+  // list past 50/page and UNSCOPED clicks hang forever on an invisible
+  // page-2 row — the action timeout is UNBOUNDED here, so the drift eats
+  // the whole test budget (2026-11-22: goto 3×6min hangs, cluster >50
+  // topics from a day of CI rounds).
+  const filterBox = page.getByPlaceholder("filter…").locator("visible=true").first();
+  await filterBox.fill(name);
+  await page.waitForTimeout(800);
+  await page.locator('[data-testid="topic-row"]').filter({ hasText: name }).locator("visible=true").first().click({ timeout: 8_000 });
+  await filterBox.fill("");
   // toolbar renders once the detail loads — 最早 button is a stable marker
   await expect(page.getByRole("button", { name: "最早" })).toBeVisible({ timeout: 15_000 });
 }
