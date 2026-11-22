@@ -25,6 +25,8 @@ import {
 const SR_URL = process.env.KE_E2E_SR_URL || "";
 const SKIP_REGISTRY = !SR_URL;
 const SKIP_REASON_SR = "需 KE_E2E_SR_URL=Schema Registry 地址（secret，不再硬编码）";
+// 同 pipeline.spec：文件级 test.skip（{ skip } options 会被静默忽略）
+test.skip(SKIP_REGISTRY, SKIP_REASON_SR);
 const REG = `${RUN_ID}-sr`;
 
 let page: Page | null = null;
@@ -94,7 +96,7 @@ test.afterAll(async () => {
   await disconnectApp();
 });
 
-test("Registry CRUD：新建→健康绿→subjects 加载→软删除", { skip: SKIP_REGISTRY && SKIP_REASON_SR } as never, () =>
+test("Registry CRUD：新建→健康绿→subjects 加载→软删除", () =>
   run(async (p) => {
     test.setTimeout(180_000);
     await toRegistry(p);
@@ -118,7 +120,7 @@ test("Registry CRUD：新建→健康绿→subjects 加载→软删除", { skip:
     await expect(row).toHaveCount(0, { timeout: 10_000 });
   }));
 
-test("版本历史 + 对比 tab：真实 subject 的版本表与双版本 diff", { skip: SKIP_REGISTRY && SKIP_REASON_SR } as never, () =>
+test("版本历史 + 对比 tab：真实 subject 的版本表与双版本 diff", () =>
   run(async (p) => {
     test.setTimeout(120_000);
     await toRegistry(p);
@@ -162,7 +164,7 @@ test("版本历史 + 对比 tab：真实 subject 的版本表与双版本 diff",
     }
   }));
 
-test("本地 Schema：新建→列表可见→编辑入口→删除", { skip: SKIP_REGISTRY && SKIP_REASON_SR } as never, () =>
+test("本地 Schema：新建→列表可见→编辑入口→删除", () =>
   run(async (p) => {
     test.setTimeout(120_000);
     await toRegistry(p);

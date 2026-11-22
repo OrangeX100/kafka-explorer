@@ -24,6 +24,9 @@ import {
 const HOST = process.env.KE_E2E_HOST || "";
 const SKIP_PIPELINE = !HOST;
 const SKIP_REASON = "需 KE_E2E_HOST=测试服务器地址（secret，不再硬编码）";
+// 0.4.21 实证：{ skip } 不是合法的 per-test options（被静默忽略，as never
+// 连 TS 也骗过）——文件级 test.skip 是唯一可靠的形态
+test.skip(SKIP_PIPELINE, SKIP_REASON);
 const CONNECT_URL = `http://${HOST}:8088`;
 const KSQL_URL = `http://${HOST}:8088`;
 const CREG = `${RUN_ID}-connect`;
@@ -69,7 +72,7 @@ test.afterAll(async () => {
   await disconnectApp();
 });
 
-test("Connect：新建集群→行出现→测试/连接器面板→删除", { skip: SKIP_PIPELINE && SKIP_REASON } as never, () =>
+test("Connect：新建集群→行出现→测试/连接器面板→删除", () =>
   run(async (p) => {
     test.setTimeout(180_000);
     await p.locator('[data-tip="Connect"]').click();
@@ -96,7 +99,7 @@ test("Connect：新建集群→行出现→测试/连接器面板→删除", { s
     await expect(row).toHaveCount(0, { timeout: 10_000 });
   }));
 
-test("ksqlDB：新建服务→查询页渲染→SHOW TOPICS 真执行→删除", { skip: SKIP_PIPELINE && SKIP_REASON } as never, () =>
+test("ksqlDB：新建服务→查询页渲染→SHOW TOPICS 真执行→删除", () =>
   run(async (p) => {
     test.setTimeout(180_000);
     await p.locator('[data-tip="ksqlDB"]').click();
