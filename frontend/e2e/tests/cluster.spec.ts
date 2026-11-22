@@ -395,14 +395,20 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
   await openTopic(page, GOTO_TOPIC);
   console.log("[gt]", "topic opened", Date.now());
 
-  // deterministic offsets: 3 records to each partition, verified per ack
+  // deterministic offsets: 3 records to each partition, verified per ack;
+  // per-cycle breadcrumb — CI wedges landed INSIDE the produce loop twice
+  // (silence between topic-opened and seeded), a per-# print pins which one
   for (let i = 0; i < 3; i++) {
+    console.log("[gt]", `produce p0#${i}`, Date.now());
     const ack = await produceMessage(page, `goto-p0-${i}`, "0");
+    console.log("[gt]", `acked p0#${i} off=${ack.offset}`, Date.now());
     expect(ack.partition).toBe(0);
     expect(ack.offset).toBe(i);
   }
   for (let i = 0; i < 3; i++) {
+    console.log("[gt]", `produce p1#${i}`, Date.now());
     const ack = await produceMessage(page, `goto-p1-${i}`, "1");
+    console.log("[gt]", `acked p1#${i} off=${ack.offset}`, Date.now());
     expect(ack.partition).toBe(1);
     expect(ack.offset).toBe(i);
   }
