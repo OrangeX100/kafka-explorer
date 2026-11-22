@@ -14,12 +14,18 @@ Gitee 附件下载强制登录（2026-11-22 实证）——这不是更新器的
 """
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-ver = os.environ["GITHUB_REF_NAME"].lstrip("v")
+ref = os.environ["GITHUB_REF_NAME"]
+# 同 cn_mirror_sync 的入口校验：semver 之外的名字一律拒绝（防御纵深，
+# 0.4.21 外部评审 P1）
+if not re.fullmatch(r"v\d+\.\d+\.\d+", ref):
+    raise SystemExit(f"refusing non-semver tag: {ref!r}")
+ver = ref[1:]
 tok = os.environ["GITEE_TOKEN"]
 base = "https://gitee.com/api/v5/repos/OrangeX100/kafka-explorer"
 q = f"access_token={tok}"

@@ -209,10 +209,12 @@ export function MessagesView({
           // Timestamp jump: onJump parked the cursor at "tail", which the
           // position badge renders as 最新一页 — a lie once the rows land on
           // the timestamp window (045 CDP round). Sync the cursor to the
-          // window's LOWEST offset (the sort is DESCENDING on a tail-shaped
-          // request, so msgs[0] is the newest and msgs[last] is the anchor);
-          // paging and refresh then resolve to exactly this window.
-          setCursor({ offset: msgs[msgs.length - 1].offset });
+          // window's LOWEST offset so refresh/paging resolve to exactly this
+          // window. msgs is ALREADY ascending (sorted at :192) — the old
+          // msgs[last] grab (with a stale DESCENDING comment) anchored the
+          // TOP of the window, so a refresh started from the NEXT window
+          // instead of reloading this one (0.4.21 external review P2).
+          setCursor({ offset: msgs[0].offset });
         }
       } catch (err) {
         if (seq === requestSeq.current) {

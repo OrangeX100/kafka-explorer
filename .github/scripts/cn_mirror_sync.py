@@ -11,6 +11,7 @@ nginx 目录里留下半个文件——updater 的国内通道对该版本持续
 """
 import hashlib
 import os
+import re
 import time
 
 import paramiko
@@ -28,7 +29,14 @@ def local_sha256(path: str) -> str:
 
 
 def main() -> None:
-    ver = os.environ["GITHUB_REF_NAME"].lstrip("v")
+    ref = os.environ["GITHUB_REF_NAME"]
+    # 入口 semver 校验（0.4.21 外部评审 P1）：tag 名未经校验就拼进
+    # ssh.exec_command——git 允许 v1.2.3$(id) 这类名字，能 push tag 即能
+    # 以 root 在镜像机执行任意命令。workflow 层已有 Validate tag shape，
+    # 这里是防御纵深。
+    if not re.fullmatch(r"v\d+\.\d+\.\d+", ref):
+        raise SystemExit(f"refusing non-semver tag: {ref!r}")
+    ver = ref[1:]
     host = os.environ["CN_SSH_HOST"]
     port = int(os.environ["CN_SSH_PORT"])
     files = [

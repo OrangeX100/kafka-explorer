@@ -437,6 +437,12 @@ func (s *MessageIOService) ImportFromFile(ctx context.Context, in domain.ImportF
 		if rec.Partition != nil && *rec.Partition == -1 {
 			rec.Partition = nil // 同上：仅 -1 归一为 auto
 		}
+		if rec.Partition != nil && *rec.Partition < -1 {
+			res.Failed++
+			res.FailedLines = append(res.FailedLines, domain.ImportLineError{Line: i + 1, Error: importPartitionGuard(i+1, *rec.Partition, maxPartition).Error()})
+			emit()
+			continue
+		}
 		if rec.Partition != nil && *rec.Partition > maxPartition {
 			res.Failed++
 			res.FailedLines = append(res.FailedLines, domain.ImportLineError{Line: i + 1, Error: importPartitionGuard(i+1, *rec.Partition, maxPartition).Error()})
