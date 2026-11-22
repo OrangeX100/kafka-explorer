@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kmsg"
@@ -92,12 +93,30 @@ func (c *Client) TopicDetail(ctx context.Context, topic string) (domain.TopicDet
 	// Configs go through raw kmsg: kadm.Config drops ReadOnly/IsDefault/
 	// Documentation, which the config panel needs (read-only marking was
 	// wrongly derived from ConfigSource before — default != read-only).
+	t0 := time.Now()
+	var dMeta, dEnd, dStart, dConf time.Duration
 	wg.Add(4)
-	go func() { defer wg.Done(); details, errMeta = c.adm.ListTopics(ctx, topic) }()
-	go func() { defer wg.Done(); ends, errEnd = c.adm.ListEndOffsets(ctx, topic) }()
-	go func() { defer wg.Done(); starts, errStart = c.adm.ListStartOffsets(ctx, topic) }()
 	go func() {
 		defer wg.Done()
+		g0 := time.Now()
+		details, errMeta = c.adm.ListTopics(ctx, topic)
+		dMeta = time.Since(g0)
+	}()
+	go func() {
+		defer wg.Done()
+		g0 := time.Now()
+		ends, errEnd = c.adm.ListEndOffsets(ctx, topic)
+		dEnd = time.Since(g0)
+	}()
+	go func() {
+		defer wg.Done()
+		g0 := time.Now()
+		starts, errStart = c.adm.ListStartOffsets(ctx, topic)
+		dStart = time.Since(g0)
+	}()
+	go func() {
+		defer wg.Done()
+		g0 := time.Now()
 		req := kmsg.NewPtrDescribeConfigsRequest()
 		req.IncludeSynonyms = true      // for the default-value display in the edit dialog
 		req.IncludeDocumentation = true // English-mode description fallback
@@ -105,8 +124,10 @@ func (c *Client) TopicDetail(ctx context.Context, topic string) (domain.TopicDet
 			{ResourceType: kmsg.ConfigResourceTypeTopic, ResourceName: topic},
 		}
 		rawConfigs, errConf = req.RequestWith(ctx, c.kgo)
+		dConf = time.Since(g0)
 	}()
 	wg.Wait()
+	timingLog("TopicDetail %s total=%v meta=%v end=%v start=%v conf=%v", topic, time.Since(t0), dMeta, dEnd, dStart, dConf)
 
 	if errMeta != nil {
 		return domain.TopicDetail{}, mapErr(errMeta)
