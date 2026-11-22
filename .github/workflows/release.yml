@@ -7,10 +7,14 @@
 # VersionInfoVersion by the sync scripts' semver parsing).
 name: release
 
-# 与 ci.yml 共用 e2e-cluster 组（见 ci.yml 的注释——探针打同一共享集群，
-# 串行排队防 browse 延迟尖峰叠加，0.4.21 评审 P2-1）
+# 独立组（0.4.21 实测教训）：与 ci.yml 共组时，GitHub 的 concurrency
+# 语义是"同组 pending 的 run 会被后来排队的新 run 替换"（cancel-in-
+# progress 只保护运行中的）——v0.4.21 tag 的 release run 曾排队时被
+# develop push 的 CI 顶掉，发布静默消失。独立组后 tag run 永不被顶；
+# 与 CI 并发打集群的延迟尖峰由探针侧杠杆兜底（自适应退避/goto 重入/
+# 90s 预算，见 cluster.spec）。
 concurrency:
-  group: e2e-cluster
+  group: e2e-cluster-release
   cancel-in-progress: false
 
 on:
