@@ -30,7 +30,9 @@ export function ShareGroupsView({ connectionId }: { connectionId: string }) {
   const [clearing, setClearing] = useState(false);
   // (s) => s.show: stable action identity — a whole-store useToast() here
   // rebuilt loadDetail on every toast and looped refetch+toast forever.
-  const toast = { show: useToast((s) => s.show) };
+  // 稳定的 action 引用（勿包装成对象：{ show } 每渲染都是新引用，
+// 曾让 loadDetail 依赖链每次渲染重建 → 详情请求无限重取风暴）
+  const toast = useToast((s) => s.show);
   const { open: openCtx, menu: ctxMenu } = useContextMenu();
   const copy = useCopy();
 
@@ -57,7 +59,7 @@ export function ShareGroupsView({ connectionId }: { connectionId: string }) {
         if (seq !== requestSeq.current) return; // a newer selection won
         setDetail(d);
       } catch (err) {
-        if (seq === requestSeq.current) toast.show(friendlyError(err), "error");
+        if (seq === requestSeq.current) toast(friendlyError(err), "error");
       }
     },
     [connectionId, toast]
@@ -77,12 +79,12 @@ export function ShareGroupsView({ connectionId }: { connectionId: string }) {
       void adminApi
         .deleteGroup(connectionId, group)
         .then(() => {
-          toast.show(t("groups.deleteOk", group), "ok");
+          toast(t("groups.deleteOk", group), "ok");
           setSelected(null);
           setDetail(null);
           void load();
         })
-        .catch((e) => toast.show(friendlyError(e), "error"));
+        .catch((e) => toast(friendlyError(e), "error"));
     });
   };
 

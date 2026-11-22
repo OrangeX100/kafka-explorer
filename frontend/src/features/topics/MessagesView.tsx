@@ -84,6 +84,11 @@ export function MessagesView({
   const { widths: colWidths, startResize, resetCol } = useMessageColumnWidths();
   const updateSettings = useAppSettings((s) => s.update);
   const setPageSize = (n: number) => {
+    // 跳转在途时让路：直发的 tail 重载会用 seq 压掉跳转请求，再把 cursor
+    // 强制回 tail —— refire 补燃最终落在目标分区尾部而非用户要求的窗口
+    // （2026-11-22 评审 F1）。交给跳转 finally 的 refire 用同步后的锚点
+    // 窗口 + 新页大小重载。
+    if (pendingGoto.current) return;
     const cur = useAppSettings.getState().settings;
     if (!cur) return;
     const next = { ...cur, pageSize: n };
@@ -363,7 +368,9 @@ export function MessagesView({
           setFindPattern={setFindPattern}
           useRegex={useRegex}
           setUseRegex={setUseRegex}
-          scanInfo={scanInfo}
+          // 扫描数只描述 find 结果页：重新锚定（跳转/翻页）后 pagingSuspended
+          // 复位，陈旧的 "已扫描 N" 标注随表格内容一起退场（0.4.20 P3）
+          scanInfo={pagingSuspended ? scanInfo : null}
           decodeOn={decodeOn}
           setDecodeOn={(v) => {
             setDecodeOn(v);

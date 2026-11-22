@@ -5,7 +5,7 @@ import type { AppSettings, AppInfo, UpdateCheck } from "../../shared/contracts-a
 import { t } from "../../shared/i18n.js";
 import { useCopy } from "../../shared/useCopy.js";
 import { Row, SectionTitle } from "./Section.js";
-import { Select } from "../common/controls.js";
+import { Select, Switch } from "../common/controls.js";
 import { newReqID, useUpdate } from "../../state/update.js";
 
 // UpdateSection: the version-update mechanism UI. The repo field
@@ -93,11 +93,7 @@ export function UpdateSection({
       <SectionTitle icon={<Tag size={13} />} text={t("settings.updates")} />
       <div className="space-y-2.5">
         <label className="flex items-center gap-2 text-xs text-ink-200">
-          <input
-            type="checkbox"
-            checked={settings.autoCheckUpdate}
-            onChange={(e) => set("autoCheckUpdate", e.target.checked)}
-          />
+          <Switch checked={settings.autoCheckUpdate} onChange={(v) => set("autoCheckUpdate", v)} />
           {t("settings.autoCheckUpdate")}
         </label>
         <Row label={t("settings.updateSource")}>

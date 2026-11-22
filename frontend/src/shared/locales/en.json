@@ -637,6 +637,7 @@
   "settings.backupExportOk": "All config exported (passwords not included)",
   "settings.backupHint": "One file backs up connections, registries, connect clusters, ksqlDB servers, local schemas and preferences; passwords are not included.",
   "settings.backupImport": "Import all config",
+  "settings.backupImportConfirm": "Importing a backup overwrites the current connections, registries, Connect clusters, ksqlDB servers and local schemas. Continue?",
   "settings.backupImportConnect": "{0} connect clusters",
   "settings.backupImportConns": "{0} connections",
   "settings.backupImportKsql": "{0} ksqlDB servers",

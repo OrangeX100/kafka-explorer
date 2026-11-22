@@ -7,6 +7,7 @@ import { formatNumber } from "../../shared/format.js";
 import type { OffsetResetPlan } from "../../shared/contracts.js";
 import { friendlyError } from "../../shared/api.js";
 import { Select } from "../common/controls.js";
+import { DateTimePicker } from "../common/DateTimePicker.js";
 
 interface Props {
   connectionId: string;
@@ -40,7 +41,8 @@ export function ResetOffsetDialog({
   const [topic, setTopic] = useState(topics[0] ?? "");
   const [mode, setMode] = useState<OffsetResetTargetMode>(initialMode ?? "earliest");
   const [absolute, setAbsolute] = useState(initialAbsolute !== undefined ? String(initialAbsolute) : "");
-  const [timestamp, setTimestamp] = useState("");
+  // epoch ms straight from DateTimePicker — no datetime-local string parse
+  const [tsMs, setTsMs] = useState<number | null>(null);
   const [partitionsText, setPartitionsText] = useState(initialPartition !== undefined ? String(initialPartition) : "");
   const [plan, setPlan] = useState<OffsetResetPlan[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,7 +61,7 @@ export function ResetOffsetDialog({
   useEffect(() => {
     previewSeq.current++;
     setPlan(null);
-  }, [topic, mode, absolute, timestamp, partitionsText]);
+  }, [topic, mode, absolute, tsMs, partitionsText]);
 
   const buildTarget = (dryRun: boolean) => {
     const partitions = partitionsText
@@ -74,7 +76,7 @@ export function ResetOffsetDialog({
       partitions,
       mode,
       absolute: mode === "absolute" ? Number(absolute) : undefined,
-      timestamp: mode === "timestamp" ? Date.parse(timestamp) || undefined : undefined,
+      timestamp: mode === "timestamp" ? (tsMs ?? undefined) : undefined,
       dryRun,
     };
   };
@@ -174,12 +176,8 @@ export function ResetOffsetDialog({
           {mode === "timestamp" && (
             <label className="block">
               <span className="mb-1 block text-11 text-ink-300">{t("groups.modeTimestamp")}</span>
-              <input
-                className="field"
-                type="datetime-local"
-                value={timestamp}
-                onChange={(e) => setTimestamp(e.target.value)}
-              />
+              {/* 统一 DateTimePicker；null 不进 buildTarget（?? undefined 省略） */}
+              <DateTimePicker value={tsMs} onChange={setTsMs} />
             </label>
           )}
 

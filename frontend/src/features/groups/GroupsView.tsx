@@ -27,7 +27,9 @@ export function GroupsView({ connectionId }: { connectionId: string }) {
   const [detailTab, setDetailTab] = useState<"offsets" | "members">("offsets");
   // (s) => s.show: stable action identity — a whole-store useToast() here
   // rebuilt loadDetail on every toast and looped refetch+toast forever.
-  const toast = { show: useToast((s) => s.show) };
+  // 稳定的 action 引用（勿包装成对象：{ show } 每渲染都是新引用，
+// 曾让 loadDetail 依赖链每次渲染重建 → 详情请求无限重取风暴）
+  const toast = useToast((s) => s.show);
   const { open: openCtx, menu: ctxMenu } = useContextMenu();
   const copy = useCopy();
 
@@ -54,14 +56,18 @@ export function GroupsView({ connectionId }: { connectionId: string }) {
         if (seq !== requestSeq.current) return; // a newer selection won
         setDetail(d);
       } catch (err) {
-        if (seq === requestSeq.current) toast.show(friendlyError(err), "error");
+        if (seq === requestSeq.current) toast(friendlyError(err), "error");
       }
     },
     [connectionId, toast]
   );
 
   useEffect(() => {
+    // 切组先清旧详情：新响应在途期间表格短暂显示上一组的行（配上新组名，
+    // 评审 0.4.20 P3）。手动刷新（同组 reloadDetail）不经过这里，无闪烁。
+    if (selected && detail && detail.group !== selected) setDetail(null);
     if (selected) void loadDetail(selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, loadDetail]);
 
   return (
@@ -117,10 +123,10 @@ export function GroupsView({ connectionId }: { connectionId: string }) {
                         void adminApi
                           .deleteGroup(connectionId, g.group)
                           .then(() => {
-                            toast.show(t("groups.deleteOk", g.group), "ok");
+                            toast(t("groups.deleteOk", g.group), "ok");
                             void load();
                           })
-                          .catch((e2) => toast.show(friendlyError(e2), "error"));
+                          .catch((e2) => toast(friendlyError(e2), "error"));
                       });
                     },
                   },
@@ -172,12 +178,12 @@ export function GroupsView({ connectionId }: { connectionId: string }) {
                     void adminApi
                     .deleteGroup(connectionId, detail.group)
                     .then(() => {
-                      toast.show(t("groups.deleteOk", detail.group), "ok");
+                      toast(t("groups.deleteOk", detail.group), "ok");
                       setSelected(null);
                       setDetail(null);
                       void load();
                     })
-                    .catch((e) => toast.show(friendlyError(e), "error"));
+                    .catch((e) => toast(friendlyError(e), "error"));
                   });
                 }}
               >

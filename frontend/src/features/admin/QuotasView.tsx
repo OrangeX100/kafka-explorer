@@ -256,13 +256,16 @@ function QuotaKeyRow({
       { label: t("quotas.deleteKey"), danger: true, separatorBefore: true, onSelect: () => void deleteKey() },
     ]);
 
-  const alter = async (newValue: number | null) => {
+  const alter = async (newValue: number | null): Promise<boolean> => {
     setBusy(true);
     try {
       await adminApi.alterQuota(connectionId, entity, quotaKey, newValue);
       onChanged();
+      return true;
     } catch (err) {
+      // 失败不上抛也不吞掉成功语义：调用方据返回值决定是否弹成功
       toast.show(friendlyError(err), "error");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -276,8 +279,9 @@ function QuotaKeyRow({
       toast.show(t("error.invalid"), "error");
       return;
     }
-    await alter(num);
-    toast.show(t("quotas.saved", entityLabel, quotaKey, String(num)), "ok");
+    // 仅成功弹成功提示——失败已由 alter 弹错误，谎报成功会误导用户
+    // 以为写入生效（2026-11-22 审计 P1-2）
+    if (await alter(num)) toast.show(t("quotas.saved", entityLabel, quotaKey, String(num)), "ok");
   };
 
   const deleteKey = async () => {
@@ -286,8 +290,7 @@ function QuotaKeyRow({
       danger: true,
     });
     if (!ok) return;
-    await alter(null);
-    toast.show(t("quotas.deletedKey", quotaKey), "ok");
+    if (await alter(null)) toast.show(t("quotas.deletedKey", quotaKey), "ok");
   };
 
   const deleteEntity = async () => {

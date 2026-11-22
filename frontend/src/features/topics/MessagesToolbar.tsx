@@ -12,9 +12,8 @@ import { t } from "../../shared/i18n.js";
 import { formatNumber } from "../../shared/format.js";
 import type { GoToTarget } from "./GoToDialog.js";
 import type { TopicDetail } from "../../shared/contracts.js";
-import { Select } from "../common/controls.js";
+import { Select, Switch } from "../common/controls.js";
 
-const PAGE_SIZE = 100;
 
 interface MessagesToolbarProps {
   detail: TopicDetail | null;
@@ -173,7 +172,7 @@ export function MessagesToolbar({
           onKeyDown={(e) => e.key === "Enter" && void runFind()}
         />
         <label className="flex items-center gap-1 text-11 text-ink-300">
-          <input type="checkbox" checked={useRegex} onChange={(e) => setUseRegex(e.target.checked)} />
+          <Switch checked={useRegex} onChange={setUseRegex} />
           {t("msg.regex")}
         </label>
         <button className="btn" disabled={!findPattern || loading} onClick={() => void runFind()}>
@@ -201,7 +200,7 @@ export function MessagesToolbar({
         </button>
         <span className="mx-1 h-4 w-px bg-ink-600" />
         <label className="flex items-center gap-1 text-11 text-ink-300" title={t("msg.decodeAuto")}>
-          <input type="checkbox" checked={decodeOn} onChange={(e) => { setDecodeOn(e.target.checked); localStorage.setItem("ke.decode", e.target.checked ? "1" : "0"); }} />
+          <Switch checked={decodeOn} onChange={(v) => { setDecodeOn(v); localStorage.setItem("ke.decode", v ? "1" : "0"); }} />
           {t("msg.decoded")}
         </label>
         <div className="flex-1" />
@@ -225,4 +224,3 @@ export function MessagesToolbar({
   );
 }
 
-export { PAGE_SIZE };

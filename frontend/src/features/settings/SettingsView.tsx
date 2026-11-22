@@ -11,6 +11,7 @@ import type { AppSettings } from "../../shared/contracts-admin.js";
 import { Row, SectionTitle } from "./Section.js";
 import { AboutSection, UpdateSection } from "./AboutSection.js";
 import { Select } from "../common/controls.js";
+import { confirmDialog } from "../common/ConfirmDialog.js";
 
 // SettingsView: user preferences persisted server-side (SQLite settings
 // table) with a boot-time localStorage cache on the frontend. Sections:
@@ -104,6 +105,8 @@ export function SettingsView() {
     }
   };
   const importAll = async () => {
+    // Import overwrites every stored entity class — irreversible; ask first.
+    if (!(await confirmDialog({ message: t("settings.backupImportConfirm"), danger: true }))) return;
     try {
       const path = await systemApi.pickOpenFile(t("settings.backupImportPick"), "*.json");
       if (!path) return; // cancelled
@@ -300,11 +303,7 @@ export function SettingsView() {
             />
           </Row>
           <label className="flex items-center gap-2 text-xs text-ink-200">
-            <input
-              type="checkbox"
-              checked={settings.showInternal}
-              onChange={(e) => set("showInternal", e.target.checked)}
-            />
+            <Switch checked={settings.showInternal} onChange={(v) => set("showInternal", v)} />
             {t("settings.showInternal")}
           </label>
         </div>

@@ -75,7 +75,10 @@ export function Modal({ title, danger, width = 440, onClose, lockClose, children
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase]);
+    // lockClose must be a dep: onKey closes over close()/lockClose, and a
+    // dialog that flips lockClose mid-life (busy gate) otherwise keeps the
+    // stale false — Escape dismisses through the lock mid-operation.
+  }, [phase, lockClose]);
 
   return (
     <div

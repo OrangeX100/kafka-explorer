@@ -3,6 +3,7 @@ import { t } from "../../shared/i18n.js";
 import { Modal } from "../common/Modal.js";
 import type { PartitionSummary } from "../../shared/contracts.js";
 import { Select } from "../common/controls.js";
+import { DateTimePicker } from "../common/DateTimePicker.js";
 
 export interface GoToTarget {
   partition: number;
@@ -30,7 +31,9 @@ export function GoToDialog({
   const [partition, setPartition] = useState(defaultPartition);
   const [mode, setMode] = useState<"offset" | "timestamp">("offset");
   const [offset, setOffset] = useState("");
-  const [tsValue, setTsValue] = useState("");
+  // epoch ms straight from DateTimePicker — no string round-trip through
+  // datetime-local (locale-dependent parse, the 0.4.19 review's P2 finding)
+  const [tsMs, setTsMs] = useState<number | null>(null);
   const closeRef = { current: onClose };
 
   const jump = () => {
@@ -39,9 +42,8 @@ export function GoToDialog({
       if (!Number.isFinite(off) || off < 0) return;
       onJump({ partition, offset: off });
     } else {
-      const ms = Date.parse(tsValue);
-      if (Number.isNaN(ms)) return;
-      onJump({ partition, timestamp: ms });
+      if (tsMs === null) return;
+      onJump({ partition, timestamp: tsMs });
     }
     closeRef.current();
   };
@@ -83,20 +85,15 @@ export function GoToDialog({
             ) : (
               <label className="block">
                 <span className="mb-1 block text-11 text-ink-300">{t("msg.colTimestamp")}</span>
-                <input
-                  className="field"
-                  type="datetime-local"
-                  value={tsValue}
-                  onChange={(e) => setTsValue(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && tsValue !== "" && jump()}
-                />
+                {/* 统一 DateTimePicker（面板内确定提交），Enter 直跳不再适用 */}
+                <DateTimePicker value={tsMs} onChange={setTsMs} />
               </label>
             )}
             <div className="mt-3 flex justify-end gap-2 border-t border-ink-700 pt-3">
               <button className="btn" onClick={close}>{t("common.close")}</button>
               <button
                 className="btn btn-accent"
-                disabled={mode === "offset" ? offset === "" : tsValue === ""}
+                disabled={mode === "offset" ? offset === "" : tsMs === null}
                 onClick={jump}
               >
                 {t("msg.gotoGo")}

@@ -14,6 +14,11 @@ import type { KsqlExecResult } from "../../shared/contracts-admin.js";
 
 const reqID = () => `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
+// Hard grid cap: `SELECT * FROM … EMIT CHANGES` streams forever — without a
+// cap the renderer accumulates rows until OOM / freeze. rowCount from the
+// done event still reports the true count, so history stays honest.
+const MAX_GRID_ROWS = 5000;
+
 // A finished (or stopped) query kept in the editor's history.
 interface HistoryEntry {
   sql: string;
@@ -48,8 +53,12 @@ export function QueryEditor({ serverId }: { serverId: string }) {
       const data = (ev as { data?: { id: string; rows: unknown[][]; final: boolean } })?.data;
       if (!data || data.id !== idRef.current) return;
       setRows((cur) => {
+        if (cur.length >= MAX_GRID_ROWS) return cur; // capped — see MAX_GRID_ROWS
         const next = [...cur];
-        for (const r of data.rows) next.push(r.map((v) => (v === null ? "∅" : String(v))));
+        for (const r of data.rows) {
+          if (next.length >= MAX_GRID_ROWS) break;
+          next.push(r.map((v) => (v === null ? "∅" : String(v))));
+        }
         return next;
       });
     });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { connectApi, friendlyError } from "../../shared/api.js";
 import { useToast } from "../../state/stores.js";
 import { t } from "../../shared/i18n.js";
@@ -35,7 +35,7 @@ export function ConnectView() {
   const [creatingConnector, setCreatingConnector] = useState(false);
   // name of the connector whose detail modal is open (null = closed)
   const [detailName, setDetailName] = useState<string | null>(null);
-  const toast = { show: useToast((s) => s.show) };
+  const toast = useToast((s) => s.show);
 
   const load = useCallback(async () => {
     setClusters(null);
@@ -57,12 +57,20 @@ export function ConnectView() {
   // silent: keep the current rows mounted and swap in place — the skeleton
   // unmount/remount was a visible flash on every lifecycle action. Full
   // (skeleton) reload is only for cluster switches and manual retries.
+  // seq guard: a slow response for cluster A must not land over cluster B's
+  // rows when the user switches mid-flight (the in-flight A fetch resolves
+  // last and would overwrite B's state without this).
+  const connectorsSeq = useRef(0);
   const loadConnectors = useCallback(async (id: string, silent = false) => {
+    const seq = ++connectorsSeq.current;
     if (!silent) setConnectors(null);
     setConnectorsError(null);
     try {
-      setConnectors((await connectApi.connectors(id)) ?? []);
+      const rows = (await connectApi.connectors(id)) ?? [];
+      if (seq !== connectorsSeq.current) return; // superseded by a newer load
+      setConnectors(rows);
     } catch (err) {
+      if (seq !== connectorsSeq.current) return;
       setConnectorsError(err);
       if (!silent) setConnectors([]);
     }
@@ -78,10 +86,10 @@ export function ConnectView() {
     if (!activeId) return;
     try {
       await connectApi.lifecycle(activeId, name, op);
-      toast.show(t(op === "restart" ? "connect.restartedOk" : op === "pause" ? "connect.pausedOk" : "connect.resumedOk", name), "ok");
+      toast(t(op === "restart" ? "connect.restartedOk" : op === "pause" ? "connect.pausedOk" : "connect.resumedOk", name), "ok");
       await loadConnectors(activeId, true);
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      toast(friendlyError(err), "error");
     }
   };
 
@@ -91,10 +99,10 @@ export function ConnectView() {
     try {
       await connectApi.removeConnector(activeId, name);
       if (detailName === name) setDetailName(null);
-      toast.show(t("connect.deletedOk", name), "ok");
+      toast(t("connect.deletedOk", name), "ok");
       await loadConnectors(activeId);
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      toast(friendlyError(err), "error");
     }
   };
 
@@ -103,11 +111,11 @@ export function ConnectView() {
     if (!(await confirmDialog({ message: t("connect.deleteClusterConfirm", c.name), danger: true }))) return;
     try {
       await connectApi.remove(c.id);
-      toast.show(t("connect.deletedOk", c.name), "ok");
+      toast(t("connect.deletedOk", c.name), "ok");
       if (activeId === c.id) setActiveId(null);
       await load();
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      toast(friendlyError(err), "error");
     }
   };
 
@@ -249,14 +257,14 @@ function ConnectClusterDialog({ onClose, onSaved }: { onClose: () => void; onSav
   const [password, setPassword] = useState("");
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<string | null>(null);
-  const toast = { show: useToast((s) => s.show) };
+  const toast = useToast((s) => s.show);
 
   const save = async () => {
     try {
       await connectApi.save({ cluster: { id: "", name, url, username }, password });
       onSaved();
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      toast(friendlyError(err), "error");
     }
   };
 

@@ -4,6 +4,7 @@ import { useToast } from "../../state/stores.js";
 import { t } from "../../shared/i18n.js";
 import { formatNumber } from "../../shared/format.js";
 import { Modal } from "../common/Modal.js";
+import { Switch } from "../common/controls.js";
 import { friendlyError } from "../../shared/api.js";
 // ShareOffsetDialog: single-partition start-offset edit. Show the log end as
 // the upper reference and offer quick fill; the group must be Empty or the
@@ -56,7 +57,7 @@ export function ShareOffsetDialog({
         <label className="flex flex-col gap-1">
           <span className="text-ink-300">{t("share.startOffsetLabel")}</span>
           <input
-            className="input font-mono"
+            className="field font-mono"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
@@ -136,12 +137,7 @@ export function ClearShareOffsetsDialog({
         <div className="flex max-h-52 flex-col gap-1 overflow-y-auto">
           {topics.map((topic) => (
             <label key={topic} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 hover:bg-ink-800">
-              <input
-                type="checkbox"
-                checked={selected.includes(topic)}
-                onChange={() => toggle(topic)}
-                className="accent-[var(--ke-accent)]"
-              />
+              <Switch checked={selected.includes(topic)} onChange={() => toggle(topic)} />
               <span className="font-mono">{topic}</span>
             </label>
           ))}

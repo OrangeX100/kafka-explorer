@@ -55,7 +55,7 @@ export function CompatTab({
   // The level is read from the registry itself: the subject list snapshot
   // may be stale ("" = no override → the registry default applies).
   const [level, setLevelState] = useState<string>("NONE");
-  const toast = { show: useToast((s) => s.show) };
+  const toast = useToast((s) => s.show);
 
   useEffect(() => {
     let alive = true;
@@ -72,6 +72,12 @@ export function CompatTab({
     };
   }, [registryId, subject.name, subject.compatibility]);
 
+  // candidate/checkAnchor 变更后旧判定失效：留在屏上的兼容性结论描述的
+  // 是用户已编辑掉的 schema（0.4.20 评审 P3）
+  useEffect(() => {
+    setCheck(null);
+  }, [candidate, checkAnchor, subject.name]);
+
   const anchorOptions = [
     { value: "latest", label: t("reg.checkAgainstLatest") },
     ...(versions ?? []).map((v) => ({ value: String(v.version), label: `${t("reg.colVersion")} ${v.version}` })),
@@ -84,7 +90,7 @@ export function CompatTab({
       const anchor = checkAnchor === "latest" ? 0 : Number(checkAnchor);
       setCheck(await registryApi.compatibilityVersion(registryId, subject.name, anchor, candidate, subject.schemaType));
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      toast(friendlyError(err), "error");
     } finally {
       setBusy(false);
     }
@@ -104,11 +110,11 @@ export function CompatTab({
     try {
       await registryApi.setSubjectConfig(registryId, subject.name, next);
       setLevelState(next); // the registry confirmed the write
-      toast.show(t("reg.configSaved"), "ok");
+      toast(t("reg.configSaved"), "ok");
       onCompatChanged?.(); // refresh the parent's subject snapshot (badges)
     } catch (err) {
       setLevelState(levelRef.current); // keep the registry's last known value
-      toast.show(friendlyError(err), "error");
+      toast(friendlyError(err), "error");
     }
   };
 

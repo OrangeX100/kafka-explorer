@@ -7,7 +7,7 @@ import { Modal } from "../common/Modal.js";
 import type { PartitionSummary } from "../../shared/contracts.js";
 import type { ImportFileResult } from "../../shared/contracts-admin.js";
 import { friendlyError } from "../../shared/api.js";
-import { Select } from "../common/controls.js";
+import { Select, Switch } from "../common/controls.js";
 
 // GenerateDialog: batch-produce synthetic messages with a Go template.
 export function GenerateDialog({
@@ -188,7 +188,7 @@ export function ExportDialog({
             </div>
             {format === "jsonl" && (
               <label className="flex items-center gap-1.5 text-11 text-ink-300">
-                <input type="checkbox" checked={decoded} onChange={(e) => setDecoded(e.target.checked)} />
+                <Switch checked={decoded} onChange={setDecoded} />
                 {t("msg.exportDecoded")}
                 <span className="text-10 text-ink-400">{t("msg.exportDecodedHint")}</span>
               </label>
