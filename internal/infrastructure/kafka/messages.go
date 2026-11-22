@@ -46,10 +46,13 @@ func (c *Client) BrowsePage(ctx context.Context, req domain.BrowseRequest) (doma
 // ends. Reuse avoids a dial+metadata round-trip per page (measured
 // 200-400ms); the client lives for the connection's lifetime.
 func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, limit int, partition int32) (domain.BrowsePage, error) {
+	anchorT0 := time.Now()
 	anchor, err := c.resolveAnchor(ctx, req, partition, limit)
 	if err != nil {
 		return domain.BrowsePage{}, err
 	}
+	timingLog("Browse %s-%d anchorResolve=%v anchor=%d", req.Topic, partition, time.Since(anchorT0), anchor)
+	browseT0 := time.Now()
 
 	pageCtx, cancel := context.WithTimeout(ctx, defaultPollTimeout)
 	defer cancel()
@@ -58,11 +61,13 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 	// another partition would otherwise be served as this partition's data
 	// (the "click A, see B" bug). The pool holds browseMu until the page
 	// is fully polled.
+	clientT0 := time.Now()
 	pc, unlock, err := c.BrowseClientFor(req.Topic, partition, anchor)
 	if err != nil {
 		return domain.BrowsePage{}, err
 	}
 	defer unlock()
+	timingLog("Browse %s-%d client=%v", req.Topic, partition, time.Since(clientT0))
 
 	// First-wave return: a GUI page does not need to be full. Polling until
 	// the limit filled made sparse partitions wait out the whole timeout
@@ -98,9 +103,13 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 	var records []*kgo.Record
 	var fetchErr error
 	dataLoss := false
+	pollRounds := 0
 	for len(records) < limit && fetchErr == nil {
+		roundT0 := time.Now()
 		fetches := pc.PollRecords(pageCtx, limit-len(records))
+		pollRounds++
 		fetched := fetches.Records()
+		timingLog("Browse %s-%d round=%d got=%d took=%v", req.Topic, partition, pollRounds, len(fetched), time.Since(roundT0))
 		fetches.EachError(func(_ string, _ int32, err error) {
 			// ErrDataLoss: a time-offset resolved position is older than the
 			// compacted/trimmed log start — kgo already repositioned to the
@@ -158,8 +167,20 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 				if end, has := ends[partition]; has && maxOff+1 >= end {
 					break // the log end is inside this page — nothing more to poll
 				}
-			} else if start, has := starts[partition]; has && minOff <= start {
-				break // the log start is inside this page
+			} else {
+				if start, has := starts[partition]; has && minOff <= start {
+					break // the log start is inside this page
+				}
+				// Compacted logs leave a HEAD GAP past the log start: segment
+				// deletion advances logStart only to a segment boundary, so
+				// records between it and the first survivor are gone and
+				// minOff <= start never fires (_schemas: start=47, first
+				// record=54 — measured 2026-11-22). The trailing empty poll
+				// then eats the WHOLE 4s pageCtx on every visit. The log end
+				// is the other far edge — same rule as forward.
+				if end, has := ends[partition]; has && maxOff+1 >= end {
+					break
+				}
 			}
 		}
 	}
@@ -261,12 +282,14 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 			}
 		}
 	}
+	timingLog("Browse DONE total=%v rounds=%d records=%d exhausted=%v", time.Since(browseT0), pollRounds, len(records), page.Exhausted)
 	return page, nil
 }
 
 // browseAllPartitions returns one window spread across every partition,
 // sorted by offset. No cursor (P1 contract above).
 func (c *Client) browseAllPartitions(ctx context.Context, req domain.BrowseRequest, limit int) (domain.BrowsePage, error) {
+	allT0 := time.Now()
 	starts, ends, err := c.partitionBounds(ctx, req.Topic)
 	if err != nil {
 		return domain.BrowsePage{}, err
@@ -327,6 +350,7 @@ func (c *Client) browseAllPartitions(ctx context.Context, req domain.BrowseReque
 	for _, r := range records {
 		page.Messages = append(page.Messages, toMessage(r))
 	}
+	timingLog("BrowseAll DONE total=%v records=%d exhausted=%v", time.Since(allT0), len(page.Messages), page.Exhausted)
 	return page, nil
 }
 
