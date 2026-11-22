@@ -59,7 +59,7 @@ runs:
         # created the WebView2 environment but never opened its window —
         # the CDP port never came up. This comment documents the CI-side
         # pin; the Taskfile is the single source both paths share.
-        CGO_ENABLED=0 go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version=0.4.17 -X kafkaexplorer/internal/buildinfo.Commit=${GITHUB_SHA:0:7} -X kafkaexplorer/internal/buildinfo.UpdateRepo=OrangeX100/kafka-explorer -X kafkaexplorer/internal/buildinfo.DebugFeatures=cdp" -o bin/kafka-explorer-cdp.exe .
+        CGO_ENABLED=0 go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version=0.4.18 -X kafkaexplorer/internal/buildinfo.Commit=${GITHUB_SHA:0:7} -X kafkaexplorer/internal/buildinfo.UpdateRepo=OrangeX100/kafka-explorer -X kafkaexplorer/internal/buildinfo.DebugFeatures=cdp" -o bin/kafka-explorer-cdp.exe .
 
     # Keep the RUNNER display awake: WebView2's render pipeline freezes
     # when the interactive session's monitor suspends — round-11 evidence:
