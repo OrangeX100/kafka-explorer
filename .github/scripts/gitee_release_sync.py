@@ -17,13 +17,16 @@ q = f"access_token={tok}"
 def api(url, data=None, headers=None):
     req = urllib.request.Request(url, data=data, headers=headers or {})
     try:
-        return json.loads(urllib.request.urlopen(req, timeout=60).read())
+        raw = urllib.request.urlopen(req, timeout=60).read()
+        # Gitee 对不存在的 tag 返回字面量 null 体（2026-11-22 实证）——
+        # 归一为 {} 走创建路径
+        return json.loads(raw) if raw.strip() else {}
     except Exception as e:  # noqa: BLE001 — 统一降级为可读错误
         return {"_err": str(e)}
 
 
 rel = api(f"{base}/releases/tags/v{ver}?{q}")
-if "id" not in rel:
+if not isinstance(rel, dict) or "id" not in rel:
     body = json.dumps({
         "access_token": tok, "tag_name": f"v{ver}",
         "name": f"Kafka Explorer {ver}", "target_commitish": "master",
@@ -31,7 +34,9 @@ if "id" not in rel:
     })
     rel = api(f"{base}/releases", data=body.encode(),
               headers={"Content-Type": "application/json"})
-rid = rel["id"]
+rid = rel.get("id")
+if not rid:
+    raise SystemExit(f"Gitee release 创建/查询失败: {rel}")
 print("release id:", rid)
 
 CRLF = chr(13) + chr(10)
