@@ -29,6 +29,8 @@ jobs:
           kafka: ${{ secrets.KE_E2E_KAFKA }}
           update-flow: "1"
           cn-ssh-password: ${{ secrets.CN_MIRROR_SSH_PASSWORD }}
+          cn-ssh-host: ${{ secrets.CN_SSH_HOST }}
+          cn-ssh-user: ${{ secrets.CN_SSH_USER }}
           # The gate runs BEFORE gh release create flips --latest, so the
           # probe stamp == published latest and the honest update verdict is
           # "已是最新" — accept that state here (release.yml P2-4 review);
@@ -158,13 +160,21 @@ jobs:
             "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe.sha256" \
             "latest.json"
 
+      # Mirror syncs are best-effort: the GitHub release and its assets are
+      # the source of truth and are already published by the step above. An
+      # SSH reset / Gitee rate limit must not turn a SUCCESSFUL release red —
+      # and a red release job cannot cleanly re-run anyway (re-run restarts
+      # the whole job and `gh release create` fails on the existing tag).
+      # Failure lands in the step summary as a visible warning instead.
       - name: Sync CN mirror (Tencent server)
+        id: cn-sync
         shell: bash
+        continue-on-error: true
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
-          CN_SSH_HOST: 110.40.185.78
+          CN_SSH_HOST: ${{ secrets.CN_SSH_HOST }}
           CN_SSH_PORT: "22"
-          CN_SSH_USER: root
+          CN_SSH_USER: ${{ secrets.CN_SSH_USER }}
           CN_SSH_PASSWORD: ${{ secrets.CN_MIRROR_SSH_PASSWORD }}
         run: |
           python -m pip install --quiet paramiko
@@ -174,10 +184,26 @@ jobs:
       # attachments are login-walled for anonymous download (verified
       # 2026-11-22), the updater uses the CN nginx route instead.
       - name: Sync Gitee release
+        id: gitee-sync
         shell: bash
+        continue-on-error: true
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: python .github/scripts/gitee_release_sync.py
-          PY
-          PY
+
+      - name: Report mirror sync status
+        if: always()
+        shell: bash
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          {
+            echo "### Mirror sync"
+            cn="✅ synced"
+            gitee="✅ synced"
+            [ "${{ steps.cn-sync.outcome }}" = "failure" ] && cn="⚠️ FAILED — CN fallback download for ${GITHUB_REF_NAME} is stale/missing"
+            [ "${{ steps.gitee-sync.outcome }}" = "failure" ] && gitee="⚠️ FAILED — Gitee release page for ${GITHUB_REF_NAME} is stale/missing"
+            echo "- CN mirror: $cn"
+            echo "- Gitee release: $gitee"
+          } >> "$GITHUB_STEP_SUMMARY"

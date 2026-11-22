@@ -679,7 +679,9 @@ export async function ensureForeground() {
   // and the runner entered a permanent freeze (2026-11-21: [wi]/[gt]
   // breadcrumbs printing then ~5min of silence, tests failing in rotation
   // across rounds while the same sequence passed locally in 35s).
-  if (process.env.CI) return;
+  // GITHUB_ACTIONS guard (0.4.20 review P3-2): local CI=true must not
+  // silently kill the foreground keeper.
+  if (process.env.GITHUB_ACTIONS) return;
   const { execSync } = await import("node:child_process");
   const { fileURLToPath } = await import("node:url");
   // resolve the .ps1 relative to this module (e2e/tests/ → e2e/tools/)

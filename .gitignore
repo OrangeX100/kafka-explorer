@@ -26,3 +26,4 @@ scripts/av-whitelist.ps1
 frontend/test-results/
 test-results/  # playwright 从仓库根误跑时的漏出点
 frontend/playwright-report/
+__pycache__/

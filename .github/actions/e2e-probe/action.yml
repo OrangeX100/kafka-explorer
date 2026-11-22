@@ -22,6 +22,14 @@ inputs:
     description: "Password for the CN static mirror server — enables the pre-probe purge of leaked e2e-* topics (shared cluster pagination drift). Empty = purge honestly skips."
     required: false
     default: ""
+  cn-ssh-host:
+    description: "CN server host — previously hardcoded in this file, which published root@IP to a public repo (0.4.20 review P2-5). Empty = purge honestly skips."
+    required: false
+    default: ""
+  cn-ssh-user:
+    description: "CN server ssh user — rides secrets like the host/password. Empty = purge honestly skips."
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -109,29 +117,54 @@ runs:
       continue-on-error: true
       shell: bash
       env:
-        CN_SSH_HOST: 110.40.185.78
+        CN_SSH_HOST: ${{ inputs.cn-ssh-host }}
         CN_SSH_PORT: "22"
-        CN_SSH_USER: root
+        CN_SSH_USER: ${{ inputs.cn-ssh-user }}
         CN_SSH_PASSWORD: ${{ inputs.cn-ssh-password }}
       run: |
         python -m pip install --quiet paramiko
         python - <<'PY'
         import os, paramiko
         pw = os.environ.get("CN_SSH_PASSWORD", "")
-        if not pw:
-            print("CN_SSH_PASSWORD 未提供——泄漏主题预清理诚实跳过")
+        host = os.environ.get("CN_SSH_HOST", "")
+        user = os.environ.get("CN_SSH_USER", "")
+        if not (pw and host and user):
+            print("CN_SSH_* 未提供齐全——泄漏主题预清理诚实跳过")
             raise SystemExit(0)
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(os.environ["CN_SSH_HOST"], port=int(os.environ["CN_SSH_PORT"]),
-                    username=os.environ["CN_SSH_USER"], password=pw, timeout=20)
+        ssh.connect(host, port=int(os.environ["CN_SSH_PORT"]),
+                    username=user, password=pw, timeout=20)
         def run(c, t=120):
             return ssh.exec_command(c, timeout=t)[1].read().decode()
-        names = run("docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9096 --list").split()
-        leaked = [n for n in names if n.startswith("e2e-")]
-        print("leaked topics:", len(leaked))
-        for n in leaked:
+        list_cmd = "docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9096 --list"
+        names = run(list_cmd).split()
+        # 只删陈旧主题：RUN_ID 内嵌 base36 毫秒时间戳（helpers.ts:24），
+        # >2h 才删——防 main+develop 双 run 并发时互删对方在用主题
+        # （2026-11-22 实证互踩）。无时间戳后缀/解析失败一律跳过。
+        import time as _t
+        now_ms = int(_t.time() * 1000)
+        stale = []
+        for n in names:
+            # RUN_ID 是第二段：e2e-<base36毫秒时间戳>-<后缀>（helpers.ts:24）
+            parts = n.split("-")
+            if len(parts) < 2 or parts[0] != "e2e":
+                continue
+            try:
+                ts = int(parts[1], 36)
+            except ValueError:
+                stale.append(n)  # 解析失败的老泄漏：删
+                continue
+            if now_ms - ts > 2 * 3600 * 1000:
+                stale.append(n)
+        print("stale topics:", len(stale), "of", len([n for n in names if n.startswith('e2e-')]))
+        for n in stale:
             run(f"docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9096 --delete --topic {n}")
+        # 删除校验（0.4.20 review P2-4）：--delete 成功 ≠ 已消失（控制器
+        # 异步）。残留打 ::warning（继续不阻塞探针），防漏删静默回归。
+        left = [n for n in run(list_cmd).split() if n in stale]
+        if left:
+            print("::warning::purge 后仍残留 %d 个 e2e-* 主题（控制器异步删除或删除失败）: %s" % (len(left), ",".join(left[:10])))
         print("purged")
         ssh.close()
         PY

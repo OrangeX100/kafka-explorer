@@ -202,11 +202,11 @@ test("messages-paging：最早/最新/上一页/下一页→表内容与徽章�
   // — .first() across tabs picks hidden ones and clicks hang forever
   const perPage = page
     .locator('button[role="combobox"]')
-    .filter({ hasText: "/ 页" })
+    .filter({ hasText: /\/\s*(页|per page)/ }) // en 态文案 "25 / per page"（0.4.20 P3-3）
     .locator("visible=true")
     .first();
   const originalPerPage = ((await perPage.textContent()) ?? "50 / 页").trim();
-  await keSelect(page, perPage, "25 / 页");
+  await keSelect(page, perPage, "25 /");
 
   // seed 30 records through the real produce dialog (25/页 → two pages);
   // every acked offset must be exactly i — a lost/duplicated produce fails
@@ -345,16 +345,17 @@ test("watermark-invariant：_schemas 徽章水位 ≥ 渲染行数，差值必�
           const badge = [...document.querySelectorAll('button[role="combobox"]')]
             .filter(vis)
             .map((b) => b.textContent ?? "")
-            .find((t) => t.includes("分区 ") && t.includes("("));
+            .find((t) => (t.includes("分区 ") || t.includes("Partition ")) && t.includes("("));
           const perPage = [...document.querySelectorAll('button[role="combobox"]')]
             .filter(vis)
             .map((b) => b.textContent ?? "")
-            .find((t) => t.includes("/ 页"));
+            .find((t) => t.includes("/ 页") || t.includes("/ per page"));
           const rows = [...document.querySelectorAll("table tbody tr")].filter(vis).length;
           const note = [...document.querySelectorAll('[data-testid="compaction-note"],[data-testid="gap-note"]')].filter(vis).length;
-          const m = /分区 \d+ \(([\d,]+)\)/.exec(badge ?? "");
-          const pm = /(\d+)\s*\/\s*页/.exec(perPage ?? "");
-          return m ? { watermark: Number(m[1].replace(/,/g, "")), pageSize: pm ? Number(pm[1]) : 100, rows, note } : null;
+          const m = /(?:分区|Partition)\s+\d+\s*\(([\d,]+)\)/.exec(badge ?? "");
+          const pm = /(\d+)\s*\/\s*(?:页|per\s+page)/.exec(perPage ?? "");
+          // 兜底 50 = 默认页大小（旧兜底 100 会把"整页尾窗"阈值放大一倍）
+          return m ? { watermark: Number(m[1].replace(/,/g, "")), pageSize: pm ? Number(pm[1]) : 50, rows, note } : null;
         });
         if (!s) return "no-badge"; // detail 未就绪（与无横幅分支区分定位）
         console.log("[wi]", JSON.stringify(s));

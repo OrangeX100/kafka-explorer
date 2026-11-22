@@ -10,6 +10,16 @@ on:
     branches: [main, develop]
     tags: ["v*"]
 
+# Serialize mirror runs: a develop push (T1) and the follow-up main push (T2)
+# trigger concurrent runs, and each run does a bare --force push. Without this
+# group, a run that checked out BEFORE T2 but pushed AFTER another run's push
+# would overwrite the newer refs with stale ones — the mirror silently rolls
+# back until the next push (0.4.20 review P2-1). Queued runs re-checkout, so
+# the last one to run always carries the newest refs.
+concurrency:
+  group: gitee-mirror
+  cancel-in-progress: false
+
 jobs:
   mirror:
     runs-on: ubuntu-latest

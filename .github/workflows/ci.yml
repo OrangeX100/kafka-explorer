@@ -63,4 +63,6 @@ jobs:
         with:
           kafka: ${{ secrets.KE_E2E_KAFKA }}
           cn-ssh-password: ${{ secrets.CN_MIRROR_SSH_PASSWORD }}
+          cn-ssh-host: ${{ secrets.CN_SSH_HOST }}
+          cn-ssh-user: ${{ secrets.CN_SSH_USER }}
           update-flow: "1"
