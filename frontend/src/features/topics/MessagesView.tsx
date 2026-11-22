@@ -424,7 +424,13 @@ export function MessagesView({
       /* table + detail split */
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full table-fixed border-collapse text-xs">
+          {/* detail 就绪信号：watermark 探针用它区分“config 未加载导致的
+              暂无横幅”（继续等）与“就绪后仍无横幅”（真缺陷信号）——
+              isCompacted/横幅判定全部依赖 detail.config（0.4.20 P3） */}
+          <table
+            className="w-full table-fixed border-collapse text-xs"
+            data-detail-ready={detail ? "1" : "0"}
+          >
             <MessageTableHead widths={colWidths} startResize={startResize} resetCol={resetCol} />
             {/* NO keyed tbody + anim-fade here: the per-window key remounted
                 the whole tbody on every page flip, and for one frame the old
@@ -541,7 +547,15 @@ export function MessagesView({
               // effect fire the ONE request (single-path rework — the old
               // onJump-issued request raced its own finally on slow render
               // pipelines and left the table empty, 2026-11-21 CI 3/3).
+              // 0.4.20 flaky 根治：先物理清掉旧分区行再落请求——CI 慢管线
+              // 曾让 p0 旧行稳定停留 120s+（跳转响应落地被什么路径压掉都
+              // 好，表格内容先归零，骨架接管直到目标分区行落地）。旧行属
+              // 旧分区，跳转后保留它们本身就是错误展示。
               pendingGotoTarget.current = target;
+              setSelected(null);
+              setExhausted(false);
+              setMessages([]);
+              setLoading(true);
               setPartition(target.partition);
             }
             setCursor(target.offset !== undefined ? { offset: target.offset } : "tail");

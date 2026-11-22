@@ -352,10 +352,13 @@ test("watermark-invariant：_schemas 徽章水位 ≥ 渲染行数，差值必�
             .find((t) => t.includes("/ 页") || t.includes("/ per page"));
           const rows = [...document.querySelectorAll("table tbody tr")].filter(vis).length;
           const note = [...document.querySelectorAll('[data-testid="compaction-note"],[data-testid="gap-note"]')].filter(vis).length;
+          // detail 就绪信号（MessagesView 表格 data-detail-ready）：横幅判定
+          // 全部依赖 detail.config——未就绪时"无横幅"没有结论资格
+          const ready = document.querySelector("table[data-detail-ready]")?.getAttribute("data-detail-ready") === "1";
           const m = /(?:分区|Partition)\s+\d+\s*\(([\d,]+)\)/.exec(badge ?? "");
           const pm = /(\d+)\s*\/\s*(?:页|per\s+page)/.exec(perPage ?? "");
           // 兜底 50 = 默认页大小（旧兜底 100 会把"整页尾窗"阈值放大一倍）
-          return m ? { watermark: Number(m[1].replace(/,/g, "")), pageSize: pm ? Number(pm[1]) : 50, rows, note } : null;
+          return m ? { watermark: Number(m[1].replace(/,/g, "")), pageSize: pm ? Number(pm[1]) : 50, rows, note, ready } : null;
         });
         if (!s) return "no-badge"; // detail 未就绪（与无横幅分支区分定位）
         console.log("[wi]", JSON.stringify(s));
@@ -366,9 +369,10 @@ test("watermark-invariant：_schemas 徽章水位 ≥ 渲染行数，差值必�
         // （P1 评审：旧谓词把该态 pending 到死；messages-paging 崩溃残留
         // 25/页时更是必炸）
         if (s.rows === s.pageSize && s.rows < s.watermark) return "ok";
-        // 不足整页且无横幅 = browse/detail 竞态瞬态或真缺陷——瞬态会随
-        // 后续轮询满足，真缺陷保持此态直到超时（超时报错含 [wi] 日志定位）
-        if (s.rows < s.watermark && s.note === 0) return "no-note";
+        // 不足整页且无横幅分两态（0.4.20 flaky 根治）：config 未就绪 =
+        // 横幅判定没资格下结论，继续等（应用慢）；就绪后仍无横幅 = 真缺
+        // 陷信号。超时错误的最后 received 值直接区分两者，不再同值裸超时
+        if (s.rows < s.watermark && s.note === 0) return s.ready ? "no-note" : "config-loading";
         return "ok";
       },
       // CI 首载瞬态实证超 30s（2026-11-21 e2e job：rows=1 pending 到
