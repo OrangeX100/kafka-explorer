@@ -57,6 +57,20 @@ runs:
         # pin; the Taskfile is the single source both paths share.
         CGO_ENABLED=0 go build -trimpath -ldflags "-H=windowsgui -X kafkaexplorer/internal/buildinfo.Version=0.4.17 -X kafkaexplorer/internal/buildinfo.Commit=${GITHUB_SHA:0:7} -X kafkaexplorer/internal/buildinfo.UpdateRepo=OrangeX100/kafka-explorer -X kafkaexplorer/internal/buildinfo.DebugFeatures=cdp" -o bin/kafka-explorer-cdp.exe .
 
+    # Keep the RUNNER display awake: WebView2's render pipeline freezes
+    # when the interactive session's monitor suspends — round-11 evidence:
+    # every Playwright protocol call (click/expect/evaluate) hung silently
+    # for the full test budget on 4 consecutive runs, timing-correlated
+    # with boot toast triggers, while all local runs passed. These are
+    # session-level OS settings (fire-and-forget, never block node).
+    - name: Disable runner display sleep
+      shell: powershell
+      run: |
+        powercfg /change monitor-timeout-ac 0
+        powercfg /change standby-timeout-ac 0
+        powercfg /change hibernate-timeout-ac 0
+        Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name ScreenSaveActive -Value '0'
+
     - name: Launch app with CDP port
       shell: bash
       run: |
