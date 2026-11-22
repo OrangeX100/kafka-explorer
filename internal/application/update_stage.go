@@ -71,6 +71,28 @@ var downloadMirrors = []string{
 	"https://gh-proxy.com/",
 }
 
+// cnMirrorOrigin is OUR OWN Tencent-server static mirror (nginx, port
+// 18080; set up 2026-11-22 after gh-proxy 403'd mid-download and every
+// public accelerator proved ephemeral — 8 of 9 instances dead or
+// rate-limited in one evening's probe). Domestic users get ~520KB/s
+// direct instead of praying to free mirrors. The URL is constructed
+// INTERNALLY from the guarded github assetURL's base name — never
+// renderer-supplied — and the release workflow is the only writer of
+// that path (SSH credentials live in Actions secrets). The final
+// SHA-256 digest gate still anchors integrity against the
+// github-fetched manifest, so transport (plain HTTP) cannot tamper.
+const cnMirrorOrigin = "http://110.40.185.78:18080"
+
+// cnCandidateURL maps a guarded github release URL to the CN server
+// mirror path (same file name under /releases/).
+func cnCandidateURL(assetURL string) string {
+	i := strings.LastIndex(assetURL, "/")
+	if i < 0 || !strings.HasPrefix(assetURL, "https://github.com/") {
+		return ""
+	}
+	return cnMirrorOrigin + "/releases/" + assetURL[i+1:]
+}
+
 // Download source preference (Settings.UpdateSource): "auto" keeps the
 // historical direct-first order, "mirrorFirst" puts the domestic
 // accelerators ahead of github.com (user request 2026-11-22: CN links
@@ -92,16 +114,24 @@ func downloadCandidates(assetURL string, source string) []string {
 		return []string{assetURL}
 	}
 	direct := assetURL
+	cn := cnCandidateURL(assetURL)
 	var mirrored []string
 	for _, m := range downloadMirrors {
 		mirrored = append(mirrored, m+assetURL)
 	}
 	switch source {
 	case DownloadSourceMirrorFirst:
+		// domestic-first: own server, accelerators, direct last
+		if cn != "" {
+			return append(append([]string{cn}, mirrored...), direct)
+		}
 		return append(append([]string{}, mirrored...), direct)
 	case DownloadSourceDirect:
 		return []string{direct}
-	default: // auto and anything unknown
+	default: // auto and anything unknown: direct, then OUR server, then accelerators
+		if cn != "" {
+			return append(append([]string{direct, cn}, mirrored...))
+		}
 		return append([]string{direct}, mirrored...)
 	}
 }

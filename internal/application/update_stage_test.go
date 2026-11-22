@@ -23,11 +23,12 @@ import (
 // anything else is used as-is.
 func TestDownloadCandidates(t *testing.T) {
 	gh := "https://github.com/OrangeX100/kafka-explorer/releases/download/v0.2.0/KafkaExplorer_Setup_0.2.0.exe"
+	cn := "http://110.40.185.78:18080/releases/KafkaExplorer_Setup_0.2.0.exe"
 	got := downloadCandidates(gh, DownloadSourceAuto)
-	if len(got) != 3 {
-		t.Fatalf("github url: got %d candidates, want 3", len(got))
+	if len(got) != 4 {
+		t.Fatalf("github url: got %d candidates, want 4 (direct+cn+2 mirrors)", len(got))
 	}
-	if got[0] != gh || got[1] != "https://ghfast.top/"+gh || got[2] != "https://gh-proxy.com/"+gh {
+	if got[0] != gh || got[1] != cn || got[2] != "https://ghfast.top/"+gh || got[3] != "https://gh-proxy.com/"+gh {
 		t.Fatalf("github candidates wrong: %v", got)
 	}
 	other := "https://mirror.example.com/setup.exe"
@@ -35,18 +36,19 @@ func TestDownloadCandidates(t *testing.T) {
 	if len(got) != 1 || got[0] != other {
 		t.Fatalf("non-github url must stay single-route: %v", got)
 	}
-	// mirrorFirst（用户要求走国内源）：镜像在前、直连殿后；direct：只直连
+	// mirrorFirst（用户要求走国内源）：自有服务器最前、镜像居中、直连殿后
 	got = downloadCandidates(gh, DownloadSourceMirrorFirst)
-	if len(got) != 3 || got[0] != "https://ghfast.top/"+gh || got[2] != gh {
+	if len(got) != 4 || got[0] != cn || got[3] != gh {
 		t.Fatalf("mirrorFirst order wrong: %v", got)
 	}
+	// direct：只直连（排除自有服务器与第三方加速）
 	got = downloadCandidates(gh, DownloadSourceDirect)
 	if len(got) != 1 || got[0] != gh {
 		t.Fatalf("direct must pin github only: %v", got)
 	}
 	// unknown clamps to auto
 	got = downloadCandidates(gh, "bogus")
-	if got[0] != gh {
+	if got[0] != gh || got[1] != cn {
 		t.Fatalf("unknown source must clamp to auto: %v", got)
 	}
 }

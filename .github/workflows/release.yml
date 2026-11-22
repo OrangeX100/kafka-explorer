@@ -156,3 +156,34 @@ jobs:
             "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe" \
             "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe.sha256" \
             "latest.json"
+
+      # CN static mirror: sync the installer + manifest to OUR OWN Tencent
+      # server (nginx :18080, /var/www/kafka-explorer/releases) — the
+      # updater's domestic-first route (review 2026-11-22: public gh-proxy
+      # instances die/rate-limit; Gitee attachments are login-walled).
+      # Credentials ride Actions secrets and never touch the repo.
+      - name: Sync CN mirror (Tencent server)
+        shell: bash
+        env:
+          CN_SSH_HOST: 110.40.185.78
+          CN_SSH_PORT: "22"
+          CN_SSH_USER: root
+          CN_SSH_PASSWORD: ${{ secrets.CN_MIRROR_SSH_PASSWORD }}
+        run: |
+          python -m pip install --quiet paramiko
+          python - <<'PY'
+          import os, paramiko
+          ssh = paramiko.SSHClient()
+          ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+          ssh.connect(os.environ["CN_SSH_HOST"], port=int(os.environ["CN_SSH_PORT"]), username=os.environ["CN_SSH_USER"], password=os.environ["CN_SSH_PASSWORD"], timeout=20)
+          run = lambda c: ssh.exec_command(c, timeout=120)[1].read().decode()
+          print("mkdir:", run("mkdir -p /var/www/kafka-explorer/releases"))
+          sftp = ssh.open_sftp()
+          ver = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          for f in [f"KafkaExplorer_Setup_{ver}.exe", f"KafkaExplorer_Setup_{ver}.exe.sha256", "latest.json"]:
+              sftp.put(f, f"/var/www/kafka-explorer/releases/{f}")
+              print("uploaded", f)
+          sftp.close()
+          print("hash:", run(f"sha256sum /var/www/kafka-explorer/releases/KafkaExplorer_Setup_{ver}.exe"))
+          ssh.close()
+          PY
