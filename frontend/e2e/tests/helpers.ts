@@ -9,8 +9,9 @@ import { join as joinPath, dirname } from "node:path";
 // editing, they are the reason the code looks the way it does.
 
 export const CDP_URL = process.env.CDP_HTTP_URL || "http://127.0.0.1:9223";
-/** host:port of a reachable Kafka broker (e.g. 110.40.185.78:9092).
- *  Cluster specs skip entirely when unset. */
+/** host:port of a reachable Kafka broker (rides repo secrets — never
+ *  hardcode the address here, it is a public repo). Cluster specs skip
+ *  entirely when unset. */
 export const KAFKA = process.env.KE_E2E_KAFKA || "";
 /** Set (plus a binary built with VERSION below the published latest) to
  *  exercise the full update chain: discover → download → cancel → idle. */
@@ -47,7 +48,7 @@ export async function connectApp(): Promise<Page> {
   currentPage = page;
   // ke.locale persists across CDP sessions — a previous crashed run can
   // leave the UI in English and every zh-CN text assertion would lie.
-  // Set the locale, then reload so the app re-reads it at boot. A wedged
+  // Set the locale BEFORE app boot reads it (ke.locale) — NO reload here:
   // target hangs evaluate()/reload() FOREVER — race a watchdog so callers
   // can fall through to restartApp().
   const withWatchdog = async <T>(p: Promise<T>, ms: number): Promise<T> => {
@@ -548,7 +549,7 @@ export async function positionBadge(page: Page): Promise<string> {
       (s) =>
         typeof s.checkVisibility === "function" &&
         s.checkVisibility() &&
-        /^(最新一页|最早一页|搜索结果 · 翻页已停用|offset [\d,]+–[\d,]+|offset \d+)$/.test(s.textContent?.trim() ?? ""),
+        /^(最新一页|最早一页|搜索结果 · 翻页已停用|Newest page|Oldest page|Search results · paging disabled|offset [\d,]+–[\d,]+|offset \d+)$/.test(s.textContent?.trim() ?? ""),
     );
     return spans[0]?.textContent?.trim() ?? "";
   });

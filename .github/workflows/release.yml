@@ -7,6 +7,12 @@
 # VersionInfoVersion by the sync scripts' semver parsing).
 name: release
 
+# 与 ci.yml 共用 e2e-cluster 组（见 ci.yml 的注释——探针打同一共享集群，
+# 串行排队防 browse 延迟尖峰叠加，0.4.21 评审 P2-1）
+concurrency:
+  group: e2e-cluster
+  cancel-in-progress: false
+
 on:
   push:
     tags: ["v*"]
@@ -20,6 +26,11 @@ jobs:
   e2e:
     runs-on: windows-latest
     steps:
+      # tag 形状把关（0.4.21 评审 P3-4）：误推 vtest 不再触发全套发布/
+      # 镜像/远端写入脏名
+      - name: Validate tag shape
+        shell: bash
+        run: '[[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag 必须形如 vMAJOR.MINOR.PATCH，实际 $GITHUB_REF_NAME"; exit 1; }'
       - uses: actions/checkout@v4
       - uses: ./.github/actions/e2e-probe
         with:
@@ -36,6 +47,27 @@ jobs:
           # "已是最新" — accept that state here (release.yml P2-4 review);
           # develop CI keeps stamp < latest and drives the download chain.
           update-gate: "1"
+
+      # 覆盖下限门禁（0.4.21 评审 P2-3）：KE_E2E_KAFKA secret 失效时集群
+      # 探针全 skip 而门禁仍绿——"探针不过不发版"缺"探针必须真跑了"的
+      # 一半。release 硬性要求 cluster.spec 零 skip。
+      - name: Enforce probe coverage floor
+        shell: bash
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("frontend/test-results/junit.xml").getroot()
+          bad = []
+          for suite in root.iter("testsuite"):
+              name = suite.get("name", "")
+              skipped = int(suite.get("skipped", 0))
+              if name.startswith("cluster.spec") and skipped > 0:
+                  bad.append(f"{name}: skipped={skipped}")
+          if bad:
+              print("::error::release 门禁要求集群探针必须真跑：%s" % "; ".join(bad))
+              raise SystemExit(1)
+          print("coverage floor ok: cluster probes ran for real")
+          PY
 
   release:
     needs: [e2e]
@@ -152,13 +184,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "Kafka Explorer ${GITHUB_REF_NAME#v}" \
-            --notes "See the repository README for the full capability list. SHA-256 is in the .sha256 sidecar." \
-            --latest \
-            "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe" \
-            "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe.sha256" \
-            "latest.json"
+          # 幂等（0.4.21 评审 P3-2）：gh release create 半途失败后重跑会因
+          # tag 已存在卡死——存在即复用，资产用 --clobber 覆盖
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --clobber \
+              "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe" \
+              "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe.sha256" \
+              "latest.json"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "Kafka Explorer ${GITHUB_REF_NAME#v}" \
+              --notes "See the repository README for the full capability list. SHA-256 is in the .sha256 sidecar." \
+              --latest \
+              "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe" \
+              "KafkaExplorer_Setup_${GITHUB_REF_NAME#v}.exe.sha256" \
+              "latest.json"
+          fi
 
       # Mirror syncs are best-effort: the GitHub release and its assets are
       # the source of truth and are already published by the step above. An
@@ -177,7 +218,7 @@ jobs:
           CN_SSH_USER: ${{ secrets.CN_SSH_USER }}
           CN_SSH_PASSWORD: ${{ secrets.CN_MIRROR_SSH_PASSWORD }}
         run: |
-          python -m pip install --quiet paramiko
+          python -m pip install --quiet paramiko==3.11.0  # 钉版：该步骤运行在持有 CN_SSH_* secrets 的 env（0.4.21 P3-7）
           python .github/scripts/cn_mirror_sync.py
 
       # Gitee release sync (dual publishing): human fallback mirror —
@@ -190,6 +231,7 @@ jobs:
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}  # 读 GH 端已中文化的正文 PATCH 到 Gitee
         run: python .github/scripts/gitee_release_sync.py
 
       - name: Report mirror sync status
@@ -200,8 +242,12 @@ jobs:
         run: |
           {
             echo "### Mirror sync"
-            cn="✅ synced"
-            gitee="✅ synced"
+            # 默认 ❔ not run：构建失败的 run 里两步骤根本没跑，旧默认值
+            # 曾谎报 ✅ synced（0.4.21 评审 P3-1）
+            cn="❔ not run"
+            gitee="❔ not run"
+            [ "${{ steps.cn-sync.outcome }}" = "success" ] && cn="✅ synced"
+            [ "${{ steps.gitee-sync.outcome }}" = "success" ] && gitee="✅ synced"
             [ "${{ steps.cn-sync.outcome }}" = "failure" ] && cn="⚠️ FAILED — CN fallback download for ${GITHUB_REF_NAME} is stale/missing"
             [ "${{ steps.gitee-sync.outcome }}" = "failure" ] && gitee="⚠️ FAILED — Gitee release page for ${GITHUB_REF_NAME} is stale/missing"
             echo "- CN mirror: $cn"

@@ -18,12 +18,16 @@ HOSTS = "C:/Users/51293/bin/hosts.json"
 
 
 def ssh(cmd: str) -> str:
-    pw = json.load(open(HOSTS, encoding="utf-8"))["hosts"]["tencent-server"]["password"]
+    hosts = json.load(open(HOSTS, encoding="utf-8"))["hosts"]["tencent-server"]
+    pw = hosts["password"]
+    # host/user 也从 hosts.json 读——公仓库不再明文携带地址（0.4.21 P2-2）
+    host = hosts.get("host", "")
+    user = hosts.get("user", "")
     script = "\n".join([
         "import paramiko, sys",
         "ssh = paramiko.SSHClient()",
         "ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())",
-        'ssh.connect("110.40.185.78", username="root", password=' + json.dumps(pw) + ', timeout=10)',
+        "ssh.connect(" + json.dumps(host) + ", username=" + json.dumps(user) + ", password=" + json.dumps(pw) + ", timeout=10)",
         "_, o, _ = ssh.exec_command(" + json.dumps(cmd) + ", timeout=120)",
         "sys.stdout.write(o.read().decode('utf-8','replace'))",
         "ssh.close()",

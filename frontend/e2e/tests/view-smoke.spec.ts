@@ -91,6 +91,9 @@ test.describe("工作区七栏（需真集群）", () => {
   test.skip(!KAFKA, "需 KE_E2E_KAFKA=host:port 真集群");
 
   test.beforeAll(async () => {
+    // 自证的 WAN 健康路径 35-50s > 45s 默认 hook 预算——负载尖峰下整组
+    // 标红（0.4.21 评审 P2-6）
+    test.setTimeout(120_000);
     await ensureConnection(page, CONN, KAFKA);
     await openConnection(page, CONN);
   });

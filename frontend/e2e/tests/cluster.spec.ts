@@ -249,8 +249,16 @@ test("messages-paging：最早/最新/上一页/下一页→表内容与徽章�
   };
   const waitForWindow = async (first: number, last: number) => {
     const key = `${first}-${last}`;
-    const deadline = Date.now() + 30_000;
+    // 90s 截止（0.4.21 评审 P2-5）：30s 低于本套件自证的 CI browse 落地
+    // 尖峰（>45s），首跑 "window never settled" 多为预算不足非真缺陷
+    const deadline = Date.now() + 90_000;
     let lastSeen = "";
+    // 自适应重锚退避 2.5→5→10→15s（封顶）：固定 2.5s 小于实测 browse 延迟
+    // 时，重点击 requestSeq++ 会取消上一发 fetch——把"加载中"变成永久
+    // 取消循环（"last seen 25-29" 的机制层根因，0.4.20 release 实证）。
+    let backoffIdx = 0;
+    const BACKOFF = [2_500, 5_000, 10_000, 15_000];
+    let reanchored = 0;
     while (Date.now() < deadline) {
       const rs = await messageRows(page);
       lastSeen = rs.length ? `${rs[0].offset}-${rs[rs.length - 1].offset}` : "empty";
@@ -261,8 +269,6 @@ test("messages-paging：最早/最新/上一页/下一页→表内容与徽章�
       if (rs.length > 0) {
         const btn = reanchorTo[key];
         if (!btn) break;
-        // 重锚间隔 2.5s：WAN browse 常超短周期——重点击 requestSeq++ 会取消
-        // 上一发 fetch，把"加载中"变成永久取消循环（2026-11-21 评审）。
         // catch 只吞 disabled（exhausted 是正确语义）；target-lost 必须上抛
         // 让 run() 的重连重试有机会接管。
         await page
@@ -273,8 +279,10 @@ test("messages-paging：最早/最新/上一页/下一页→表内容与徽章�
           .catch((err) => {
             if (isTargetLost(err)) throw err;
           });
+        reanchored++;
+        if (reanchored > 6) break; // 连续重锚无效 = 真问题，早失败省预算
       }
-      await page.waitForTimeout(2_500);
+      await page.waitForTimeout(BACKOFF[Math.min(backoffIdx++, BACKOFF.length - 1)]);
     }
     throw new Error(`window never settled on ${key} (last seen ${lastSeen})`);
   };
@@ -450,10 +458,25 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
   // and skeleton-phase "empty" samples of the SAME slow landing). The
   // diagnostic received value carries the full row dump on failure —
   // ground truth beats taxonomy (2026-11-21).
+  //
+  // 重入杠杆（0.4.21 评审 P2-5）：跳转请求被极端慢管线吞掉时（0.4.20
+  // release 实测 120s 一直 empty）poll 只能烧满预算等 retry。连续 empty
+  // ≥45s 后做一次有界重入——openTopic 幂等可重入，触发前端重载链路。
+  let emptySince = 0;
+  let reentered = false;
   await expect
     .poll(async () => {
       const rs = await messageRows(page);
-      if (rs.length === 0) return "empty";
+      if (rs.length === 0) {
+        if (!reentered && emptySince > 0 && Date.now() - emptySince > 45_000) {
+          reentered = true;
+          console.log("[gt]", "empty 45s — bounded openTopic re-entry", Date.now());
+          await openTopic(page, GOTO_TOPIC);
+        }
+        if (emptySince === 0) emptySince = Date.now();
+        return "empty";
+      }
+      emptySince = 0;
       if (!rs.every((r) => r.partition === 1)) {
         return `mixed:${rs.map((r) => `p${r.partition}:${r.offset}`).join(",")}`;
       }

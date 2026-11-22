@@ -51,10 +51,21 @@ def main() -> None:
         part = remote + ".part"
         for attempt in range(1, RETRIES + 1):
             try:
+                # 每次尝试重建连接（0.4.21 评审 P2-4）：为 SSH 抖动而生的
+                # 重试曾把 3 轮全耗在已被重置的 transport 上秒抛
+                try:
+                    ssh.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh.connect(host, port=port, username=os.environ["CN_SSH_USER"],
+                            password=os.environ["CN_SSH_PASSWORD"], timeout=20)
+                run_local = lambda c: ssh.exec_command(c, timeout=120)[1].read().decode()
                 sftp = ssh.open_sftp()
                 try:
                     sftp.put(local, part)
-                    out = run(f"sha256sum {part}").split()
+                    out = run_local(f"sha256sum {part}").split()
                     if not out or out[0] != digests[f]:
                         raise RuntimeError(
                             f"server hash mismatch: got {out[:1]} want {digests[f]}")
@@ -69,8 +80,10 @@ def main() -> None:
                     raise
                 print(f"retry {attempt}/{RETRIES} for {f}: {e}")
                 time.sleep(2 * attempt)
-    # 兜底清扫：历史遗留或中断留下的 .part（本次已不存在则无操作）
-    print("cleanup:", run(f"rm -f {REMOTE_DIR}/*.part"))
+    # 兜底清扫：历史遗留或中断留下的 .part（本次已不存在则无操作）——
+    # 用最后一次重建的连接（外层 run lambda 指向首连，可能已死）
+    run_final = lambda c: ssh.exec_command(c, timeout=120)[1].read().decode()  # noqa: E731
+    print("cleanup:", run_final(f"rm -f {REMOTE_DIR}/*.part"))
     ssh.close()
 
 

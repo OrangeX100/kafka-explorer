@@ -1,6 +1,17 @@
 name: CI
+
+# 与 release.yml 共用 e2e-cluster 组：两个 workflow 的探针作业打同一个
+# 共享测试集群，并发时 browse 延迟尖峰叠加（0.4.20 两条 flaky 的放大器，
+# 0.4.21 评审 P2-1）。串行排队，后跑的重新 checkout 必带新引用。
+concurrency:
+  group: e2e-cluster
+  cancel-in-progress: false
+
 on:
   pull_request:
+    # opened/synchronize 每次推提交都会跑；这里去掉 synchronize 与 push
+    # 轮的双跑（同 commit 合入时 PR 轮 + push 轮曾双倍打集群，P3-9）
+    types: [opened, reopened]
   push:
     branches: [main, develop]
 

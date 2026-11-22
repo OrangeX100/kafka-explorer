@@ -1,6 +1,7 @@
-# Reusable UI-probe job body: builds a CDP-enabled debug binary (0.4.11
-# stamp — BELOW the published latest so the update-flow probe drives the
-# REAL production feed), launches it with the double-gated debug port, and
+# Reusable UI-probe job body: builds a CDP-enabled debug binary with the
+# probe-base stamp (随版迁移，见 probe_contract_test.go——不写具体版本
+# 字面量，set_version.py 只重写 ldflags 那一行) — BELOW the published
+# latest so the update-flow probe drives the REAL production feed, launches it with the double-gated debug port, and
 # runs the Playwright suite. Cluster probes run only when the `kafka` input
 # points at a reachable broker; the rest run everywhere.
 name: e2e-probe
@@ -122,7 +123,7 @@ runs:
         CN_SSH_USER: ${{ inputs.cn-ssh-user }}
         CN_SSH_PASSWORD: ${{ inputs.cn-ssh-password }}
       run: |
-        python -m pip install --quiet paramiko
+        python -m pip install --quiet paramiko==3.11.0  # 钉版：该步骤运行在持有 CN_SSH_* secrets 的 env（0.4.21 P3-7）
         python - <<'PY'
         import os, paramiko
         pw = os.environ.get("CN_SSH_PASSWORD", "")

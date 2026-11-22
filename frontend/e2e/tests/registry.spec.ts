@@ -21,7 +21,10 @@ import {
 // app side only (the remote SR is untouched) — cleanup removes our
 // ephemeral entry; the shared 腾讯云测试 entry is never touched.
 
-const SR_URL = process.env.KE_E2E_SR_URL || "http://110.40.185.78:8081";
+// 0.4.21 评审 P2-2：同 pipeline.spec——地址走 secret env，缺失诚实 skip
+const SR_URL = process.env.KE_E2E_SR_URL || "";
+const SKIP_REGISTRY = !SR_URL;
+const SKIP_REASON_SR = "需 KE_E2E_SR_URL=Schema Registry 地址（secret，不再硬编码）";
 const REG = `${RUN_ID}-sr`;
 
 let page: Page | null = null;
@@ -91,7 +94,7 @@ test.afterAll(async () => {
   await disconnectApp();
 });
 
-test("Registry CRUD：新建→健康绿→subjects 加载→软删除", () =>
+test("Registry CRUD：新建→健康绿→subjects 加载→软删除", { skip: SKIP_REGISTRY && SKIP_REASON_SR } as never, () =>
   run(async (p) => {
     test.setTimeout(180_000);
     await toRegistry(p);
@@ -115,7 +118,7 @@ test("Registry CRUD：新建→健康绿→subjects 加载→软删除", () =>
     await expect(row).toHaveCount(0, { timeout: 10_000 });
   }));
 
-test("版本历史 + 对比 tab：真实 subject 的版本表与双版本 diff", () =>
+test("版本历史 + 对比 tab：真实 subject 的版本表与双版本 diff", { skip: SKIP_REGISTRY && SKIP_REASON_SR } as never, () =>
   run(async (p) => {
     test.setTimeout(120_000);
     await toRegistry(p);
@@ -159,7 +162,7 @@ test("版本历史 + 对比 tab：真实 subject 的版本表与双版本 diff",
     }
   }));
 
-test("本地 Schema：新建→列表可见→编辑入口→删除", () =>
+test("本地 Schema：新建→列表可见→编辑入口→删除", { skip: SKIP_REGISTRY && SKIP_REASON_SR } as never, () =>
   run(async (p) => {
     test.setTimeout(120_000);
     await toRegistry(p);
