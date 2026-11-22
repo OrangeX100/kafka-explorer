@@ -93,6 +93,22 @@ func cnCandidateURL(assetURL string) string {
 	return cnMirrorOrigin + "/releases/" + assetURL[i+1:]
 }
 
+// stripCNCandidates keeps the cn server OUT of manifest/sidecar fetches:
+// the github-fetched manifest is the integrity ANCHOR of the whole update
+// chain — whoever controlled the CN host could otherwise serve a fake
+// manifest paired with a fake digest and pass every gate. The CN server
+// only ever delivers installer BYTES that the github-side manifest
+// already digests.
+func stripCNCandidates(cands []string) []string {
+	out := make([]string, 0, len(cands))
+	for _, c := range cands {
+		if !strings.HasPrefix(c, cnMirrorOrigin+"/") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // Download source preference (Settings.UpdateSource): "auto" keeps the
 // historical direct-first order, "mirrorFirst" puts the domestic
 // accelerators ahead of github.com (user request 2026-11-22: CN links
@@ -130,7 +146,7 @@ func downloadCandidates(assetURL string, source string) []string {
 		return []string{direct}
 	default: // auto and anything unknown: direct, then OUR server, then accelerators
 		if cn != "" {
-			return append(append([]string{direct, cn}, mirrored...))
+			return append([]string{direct, cn}, mirrored...)
 		}
 		return append([]string{direct}, mirrored...)
 	}
@@ -889,7 +905,7 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 	// file through, and a missing checksum is not something to shrug off.
 	want := strings.ToLower(strings.TrimSpace(manifestSHA))
 	if want == "" {
-		sidecar, status := fetchExpectedChecksum(ctx, downloadCandidates(assetURL+".sha256", source))
+		sidecar, status := fetchExpectedChecksum(ctx, stripCNCandidates(downloadCandidates(assetURL+".sha256", source)))
 		switch status {
 		case checksumOK:
 			want = sidecar

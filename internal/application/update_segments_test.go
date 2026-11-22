@@ -61,7 +61,7 @@ func TestTryRouteSegmentedDownload(t *testing.T) {
 	}())
 
 	svc := &UpdateService{}
-staged, err := svc.StageUpdate(t.Context(), srv.URL+"/KafkaExplorer_Setup_0.4.9.exe", int64(len(data)), manifestSHA, DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
+	staged, err := svc.StageUpdate(t.Context(), srv.URL+"/KafkaExplorer_Setup_0.4.9.exe", int64(len(data)), manifestSHA, DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
 	if err != nil {
 		t.Fatalf("segmented stage failed: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestTryRouteSingleStreamFallback(t *testing.T) {
 	defer srv.Close()
 
 	svc := &UpdateService{}
-staged, err := svc.StageUpdate(t.Context(), srv.URL+"/KafkaExplorer_Setup_0.4.9.exe", int64(len(payload)), manifestSHA, DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
+	staged, err := svc.StageUpdate(t.Context(), srv.URL+"/KafkaExplorer_Setup_0.4.9.exe", int64(len(payload)), manifestSHA, DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
 	if err != nil {
 		t.Fatalf("single-stream fallback failed: %v", err)
 	}

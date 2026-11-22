@@ -122,7 +122,7 @@ func releaseManifestURL(repo string) string {
 // answers instantly) and parses it into an UpdateCheck.
 func (s *UpdateService) checkViaManifest(ctx context.Context, repo string) (UpdateCheck, error) {
 	var lastErr error
-	for _, u := range downloadCandidates(releaseManifestURL(repo), DownloadSourceAuto) {
+	for _, u := range stripCNCandidates(downloadCandidates(releaseManifestURL(repo), DownloadSourceAuto)) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return UpdateCheck{}, err
