@@ -5,6 +5,7 @@ import type { AppSettings, AppInfo, UpdateCheck } from "../../shared/contracts-a
 import { t } from "../../shared/i18n.js";
 import { useCopy } from "../../shared/useCopy.js";
 import { Row, SectionTitle } from "./Section.js";
+import { Select } from "../common/controls.js";
 import { newReqID, useUpdate } from "../../state/update.js";
 
 // UpdateSection: the version-update mechanism UI. The repo field
@@ -99,20 +100,19 @@ export function UpdateSection({
           />
           {t("settings.autoCheckUpdate")}
         </label>
-        <div>
-          <Row label={t("settings.updateSource")}>
-            <select
-              className="field !w-44"
-              value={settings.updateSource || "auto"}
-              onChange={(e) => set("updateSource", e.target.value)}
-            >
-              <option value="auto">{t("settings.source.auto")}</option>
-              <option value="mirrorFirst">{t("settings.source.mirrorFirst")}</option>
-              <option value="direct">{t("settings.source.direct")}</option>
-            </select>
-          </Row>
-          <p className="text-10 text-ink-400">{t("settings.updateSourceHint")}</p>
-        </div>
+        <Row label={t("settings.updateSource")}>
+          <Select
+            className="!w-44"
+            value={settings.updateSource || "auto"}
+            options={[
+              { value: "auto", label: t("settings.source.auto") },
+              { value: "mirrorFirst", label: t("settings.source.mirrorFirst") },
+              { value: "direct", label: t("settings.source.direct") },
+            ]}
+            onChange={(v) => set("updateSource", v)}
+          />
+        </Row>
+        <p className="text-10 text-ink-400">{t("settings.updateSourceHint")}</p>
       </div>
 
       <div className="mt-3 flex items-center gap-3">
