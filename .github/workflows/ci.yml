@@ -62,4 +62,5 @@ jobs:
       - uses: ./.github/actions/e2e-probe
         with:
           kafka: ${{ secrets.KE_E2E_KAFKA }}
+          cn-ssh-password: ${{ secrets.CN_MIRROR_SSH_PASSWORD }}
           update-flow: "1"

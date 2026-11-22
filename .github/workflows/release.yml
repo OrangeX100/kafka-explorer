@@ -28,6 +28,7 @@ jobs:
           # a SECRET so the address stays private on a public repo
           kafka: ${{ secrets.KE_E2E_KAFKA }}
           update-flow: "1"
+          cn-ssh-password: ${{ secrets.CN_MIRROR_SSH_PASSWORD }}
           # The gate runs BEFORE gh release create flips --latest, so the
           # probe stamp == published latest and the honest update verdict is
           # "已是最新" — accept that state here (release.yml P2-4 review);

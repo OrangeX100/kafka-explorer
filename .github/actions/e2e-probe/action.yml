@@ -18,6 +18,10 @@ inputs:
     description: "Set '1' in RELEASE gates: the probe stamp equals published latest there (gh release create runs after e2e), so the honest '已是最新' verdict passes instead of skipping. Never set in develop CI — a mis-stamped build must stay visible."
     required: false
     default: ""
+  cn-ssh-password:
+    description: "Password for the CN static mirror server — enables the pre-probe purge of leaked e2e-* topics (shared cluster pagination drift). Empty = purge honestly skips."
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -103,13 +107,15 @@ runs:
         CN_SSH_HOST: 110.40.185.78
         CN_SSH_PORT: "22"
         CN_SSH_USER: root
-        CN_SSH_PASSWORD: ${{ secrets.CN_MIRROR_SSH_PASSWORD }}
+        CN_SSH_PASSWORD: ${{ inputs.cn-ssh-password }}
       run: |
         python -m pip install --quiet paramiko
         python - <<'PY'
-        import json, os, paramiko
-        pw_path = "C:/Users/51293/bin/hosts.json"
-        pw = os.environ["CN_SSH_PASSWORD"]
+        import os, paramiko
+        pw = os.environ.get("CN_SSH_PASSWORD", "")
+        if not pw:
+            print("CN_SSH_PASSWORD 未提供——泄漏主题预清理诚实跳过")
+            raise SystemExit(0)
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(os.environ["CN_SSH_HOST"], port=int(os.environ["CN_SSH_PORT"]),

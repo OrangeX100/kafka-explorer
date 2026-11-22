@@ -30,4 +30,4 @@ jobs:
           git remote add gitee "https://OrangeX100:${GITEE_TOKEN}@gitee.com/OrangeX100/kafka-explorer.git"
           git push gitee --force origin/main:master
           git push gitee --force origin/develop:develop
-          git push gitee --force origin "refs/tags/v*:refs/tags/v*"
+          git push gitee --force "refs/tags/v*:refs/tags/v*"
