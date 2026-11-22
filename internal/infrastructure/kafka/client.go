@@ -314,6 +314,20 @@ func mapErr(err error) error {
 			return fmt.Errorf("%w: 消费组不存在：%s", domain.ErrNotFound, ke.Message)
 		case kerr.NonEmptyGroup.Code:
 			return fmt.Errorf("%w: 消费组仍有活跃成员，无法执行该操作：%s", domain.ErrConflict, ke.Message)
+		// 0.4.20 评审补码：浏览/跳转、生产、配置、消费组六类用户可触发的
+		// broker 拒绝——此前裸英文错误码直达 UI。
+		case kerr.OffsetOutOfRange.Code:
+			return fmt.Errorf("%w: 偏移超出日志范围（该区间可能已被清理或跳转越界）：%s", domain.ErrInvalid, ke.Message)
+		case kerr.RecordListTooLarge.Code:
+			return fmt.Errorf("%w: 消息批次超过 broker 上限（message.max.bytes），请减小单条大小或启用压缩：%s", domain.ErrInvalid, ke.Message)
+		case kerr.InvalidConfig.Code:
+			return fmt.Errorf("%w: 配置项或值不合法：%s", domain.ErrInvalid, ke.Message)
+		case kerr.PolicyViolation.Code:
+			return fmt.Errorf("%w: 被集群侧策略（policy）拒绝：%s", domain.ErrConflict, ke.Message)
+		case kerr.RebalanceInProgress.Code:
+			return fmt.Errorf("%w: 消费组正在重平衡，请稍后重试：%s", domain.ErrConflict, ke.Message)
+		case kerr.CoordinatorNotAvailable.Code:
+			return fmt.Errorf("%w: 消费组协调器不可用，请稍后重试：%s", domain.ErrUnavailable, ke.Message)
 		}
 	}
 	var de *net.DNSError

@@ -103,6 +103,11 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 	var records []*kgo.Record
 	var fetchErr error
 	dataLoss := false
+	// A zero-record round with the page deadline already expired cannot
+	// distinguish "nothing left" from "the deadline ate an in-flight round" —
+	// only the latter leaves records un-fetched INSIDE the designed window,
+	// so the exhausted decision below must stay conservative when it fires.
+	deadlineTruncated := false
 	pollRounds := 0
 	for len(records) < limit && fetchErr == nil {
 		roundT0 := time.Now()
@@ -139,6 +144,7 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 			// empty "no messages" page. On dataLoss keep polling; the page
 			// deadline is the backstop (045 round-4 regression review).
 			if !dataLoss {
+				deadlineTruncated = pageCtx.Err() != nil
 				break
 			}
 			if pageCtx.Err() != nil {
@@ -234,7 +240,13 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 		// conservative (legacy true); backward without them relies on row
 		// derivation paging to self-heal — no cursor, both buttons live.
 		if forward {
-			if ends, ok := c.cachedEnds(req.Topic); ok {
+			if deadlineTruncated {
+				// The deadline ate the tail of the designed window — records
+				// may still exist in [lastOffset+1, anchor+limit). Marking
+				// exhausted here would disable 下一页 mid-log (2026-11-22
+				// review P2-1: big-message tail page, second poll returns 0
+				// after expiry). Conservative: leave 下一页 enabled.
+			} else if ends, ok := c.cachedEnds(req.Topic); ok {
 				if end, has := ends[partition]; has {
 					// 2026-11-22 review: the forward mirror of the backward
 					// fix — a trailing invisible record (txn control marker)
@@ -267,13 +279,21 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 			// those records: 2026-11-22 review) — or the log end itself for
 			// anchorless tail browses.
 			if end, has := ends[partition]; has {
-				windowEnd := end
+				// 2026-11-22 review F4: with an explicit offset anchor the
+				// window's upper edge IS that offset (widened below for
+				// forward-consumed overrun). Without one — timestamp jump or
+				// anchorless tail — the fetch still consumes FORWARD from the
+				// resolved anchor, so the designed window is [anchor,
+				// anchor+limit). The old default (windowEnd = log end) marked
+				// EVERY mid-log short page exhausted, dead-ending both paging
+				// buttons after a timestamp backward jump.
+				windowEnd := anchor + int64(limit) //nolint:gosec // limit clamped ≤1000
 				if req.StartOffset != nil {
 					windowEnd = *req.StartOffset
-					for _, r := range records {
-						if r.Offset+1 > windowEnd {
-							windowEnd = r.Offset + 1
-						}
+				}
+				for _, r := range records {
+					if r.Offset+1 > windowEnd {
+						windowEnd = r.Offset + 1
 					}
 				}
 				if windowEnd >= end {

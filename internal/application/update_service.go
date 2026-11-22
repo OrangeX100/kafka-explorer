@@ -52,6 +52,11 @@ type UpdateService struct {
 	// baseURL: https://api.github.com in production; tests point it at a
 	// local fixture to exercise the conditional-request flow deterministically.
 	baseURL string
+	// cnBaseURL: origin of OUR OWN CN static mirror (trusted manifest
+	// source, sole writer = release workflow). Empty in tests → the cn
+	// route is skipped and manifest fetch stays on the fixture(s), keeping
+	// unit tests off the real internet.
+	cnBaseURL string
 	// Conditional-request cache: GitHub does NOT count a 304 (If-None-Match
 	// hit) against the unauthenticated 60 req/hour limit, so repeated
 	// "check update" clicks stay free while a release is unchanged. Keyed
@@ -66,7 +71,7 @@ type conditionalCache struct {
 }
 
 func NewUpdateService(currentVersion string, log *zap.Logger) *UpdateService {
-	return &UpdateService{
+	svc := &UpdateService{
 		current: currentVersion,
 		// Bounded: an unreachable update server must never hang the caller
 		// (the settings page shows a friendly timeout, not a frozen button).
@@ -75,6 +80,12 @@ func NewUpdateService(currentVersion string, log *zap.Logger) *UpdateService {
 		baseURL: "https://api.github.com",
 		log:     log,
 	}
+	// Production trusts the CN server as a manifest source (release
+	// workflow is the sole writer — review P2-1 anchor design). Tests
+	// leave it empty: the cn route is skipped, keeping unit tests off the
+	// real internet.
+	svc.cnBaseURL = cnMirrorOrigin
+	return svc
 }
 
 // SHA256File hex-digests a local file. Exported for the wails layer: the
@@ -122,7 +133,23 @@ func releaseManifestURL(repo string) string {
 // answers instantly) and parses it into an UpdateCheck.
 func (s *UpdateService) checkViaManifest(ctx context.Context, repo string) (UpdateCheck, error) {
 	var lastErr error
-	for _, u := range stripCNCandidates(downloadCandidates(releaseManifestURL(repo), DownloadSourceAuto)) {
+	// Manifest integrity anchor (review 2026-11-22 P2-1): the digest that
+	// gates the installer download comes FROM the manifest, so the manifest
+	// itself must only travel channels we control — github.com direct and
+	// OUR OWN CN server (release workflow is the sole writer; tests blank
+	// cnBaseURL so unit tests stay off the real internet). Third-party
+	// accelerators stay on the ASSET byte route only, where the trusted
+	// manifest's digest still anchors them; serving the manifest through
+	// ghfast/gh-proxy would let their operators pair a fake manifest with
+	// a fake asset and pass every gate.
+	manifestRoutes := []string{releaseManifestURL(repo)}
+	if s.cnBaseURL != "" {
+		manifestRoutes = append(manifestRoutes,
+			strings.TrimSuffix(s.cnBaseURL, "/")+"/releases/latest.json")
+	}
+	manifestRoutes = append(manifestRoutes,
+		stripCNCandidates(downloadCandidates(releaseManifestURL(repo), DownloadSourceAuto))[1:]...)
+	for _, u := range manifestRoutes {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return UpdateCheck{}, err

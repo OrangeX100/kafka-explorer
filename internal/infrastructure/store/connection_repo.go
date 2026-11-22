@@ -177,6 +177,21 @@ func (r *ConnectionRepo) SetPinned(ctx context.Context, id string, pinned bool) 
 	return nil
 }
 
+// SetTunnelHostKey persists the TOFU fingerprint as a single-column UPDATE.
+// The whole-row Save it replaces ran mid-handshake on a snapshot taken
+// before the dial — a user edit landing while the connection was opening
+// would be silently reverted by that stale snapshot (0.4.20 review P2).
+func (r *ConnectionRepo) SetTunnelHostKey(ctx context.Context, id string, hostKey string) error {
+	res, err := r.db.ExecContext(ctx, `UPDATE connections SET tunnel_host_key = ? WHERE id = ?`, nullIfEmpty(hostKey), id)
+	if err != nil {
+		return fmt.Errorf("set tunnel host key %s: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("connection %s: %w", id, domain.ErrNotFound)
+	}
+	return nil
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1

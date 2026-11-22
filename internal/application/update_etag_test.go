@@ -69,6 +69,10 @@ func TestUpdateCheckFallbackToAPIAndEtag(t *testing.T) {
 	// Static world: the manifest routes all 404 → Check falls back to API.
 	svc := NewUpdateService("0.2.0", nil)
 	svc.baseURL = api.URL
+	// cn manifest 路由指向确定性不可达地址——单测永远不触达真实 CN
+	// 服务器，也不污染 fixture 的调用计数（2026-11-22：真 0.4.19 数据
+	// 泄漏进断言的教训）
+	svc.cnBaseURL = "http://127.0.0.1:1"
 
 	first, err := svc.Check(t.Context(), "owner/repo")
 	if err != nil {
@@ -95,6 +99,10 @@ func TestUpdateCheckRateLimitMessage(t *testing.T) {
 
 	svc := NewUpdateService("0.2.0", nil)
 	svc.baseURL = api.URL
+	// cn manifest 路由指向确定性不可达地址——单测永远不触达真实 CN
+	// 服务器，也不污染 fixture 的调用计数（2026-11-22：真 0.4.19 数据
+	// 泄漏进断言的教训）
+	svc.cnBaseURL = "http://127.0.0.1:1"
 	_, err := svc.Check(t.Context(), "owner/repo")
 	if err == nil {
 		t.Fatal("expected rate-limit error")

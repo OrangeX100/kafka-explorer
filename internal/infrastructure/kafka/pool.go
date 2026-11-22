@@ -99,10 +99,11 @@ func (p *Pool) acquire(ctx context.Context, connectionID string) (*entry, error)
 		}
 		// TOFU: the first successful handshake's fingerprint is persisted on
 		// the connection row; later mismatches fail inside the handshake.
+		// Single-column update — the whole-row Save here wrote a snapshot
+		// taken before the dial, silently reverting any fields the user
+		// edited while the connection was opening (0.4.20 review P2).
 		tm = NewTunnelManager(conn.Tunnel, tunnelSecret, func(fp string) error {
-			updated := conn
-			updated.Tunnel.HostKey = fp
-			return p.repo.Save(ctx, updated)
+			return p.repo.SetTunnelHostKey(ctx, conn.ID, fp)
 		})
 	}
 	c, err := Open(ctx, conn, password, tm)

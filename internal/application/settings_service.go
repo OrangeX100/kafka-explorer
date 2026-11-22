@@ -160,6 +160,12 @@ func (s *SettingsService) Save(ctx context.Context, in Settings) (Settings, erro
 	if in.UpdateRepo != "" && !updateRepoRe.MatchString(in.UpdateRepo) {
 		in.UpdateRepo = ""
 	}
+	// UpdateSource 三值白名单：备份导入/手改存储携带任意字符串会原样返回
+	// 给前端 select（显示乱值）。非法值归 auto（与 StageUpdate 入口钳制
+	// 同一集合）。
+	if in.UpdateSource != "auto" && in.UpdateSource != "mirrorFirst" && in.UpdateSource != "direct" {
+		in.UpdateSource = "auto"
+	}
 	raw, err := json.Marshal(in)
 	if err != nil {
 		return in, err

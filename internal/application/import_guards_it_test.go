@@ -25,6 +25,9 @@ func (r *itRepo) Get(_ context.Context, id string) (domain.Connection, error) {
 func (r *itRepo) Save(context.Context, domain.Connection) error { return nil }
 func (r *itRepo) Delete(context.Context, string) error          { return nil }
 func (r *itRepo) SetPinned(context.Context, string, bool) error { return nil }
+func (r *itRepo) SetTunnelHostKey(context.Context, string, string) error {
+	return nil
+}
 
 type itSecrets struct{}
 

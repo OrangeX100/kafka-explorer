@@ -129,7 +129,14 @@ func (s *BackupService) ExportAll(ctx context.Context, pickSave func(ctx context
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(path, payload, 0o600); err != nil {
+	// tmp+rename：写中途失败（断电/磁盘满）不会把旧备份截成半文件——
+	// 同目录 rename 原子生效（0.4.20 评审 P3）
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, payload, 0o600); err != nil {
+		return "", fmt.Errorf("写入导出文件: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
 		return "", fmt.Errorf("写入导出文件: %w", err)
 	}
 	return path, nil

@@ -14,7 +14,8 @@ import (
 var timingMu sync.Mutex
 
 func timingLog(format string, args ...any) {
-	if os.Getenv("KE_TIMING") == "" {
+	// == "1"：注释声明 KE_TIMING=1 开启，旧判断 == "" 让 =0 也开启
+	if os.Getenv("KE_TIMING") != "1" {
 		return
 	}
 	timingMu.Lock()

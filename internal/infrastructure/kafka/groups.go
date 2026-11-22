@@ -144,6 +144,11 @@ func (c *Client) ResetOffset(ctx context.Context, t domain.OffsetResetTarget) ([
 	if t.Mode == "absolute" && t.Absolute == nil {
 		return nil, fmt.Errorf("%w: absolute mode needs an offset", domain.ErrInvalid)
 	}
+	// 负 offset 提交等于删除该分区的 commit（与 timestamp 模式的 -1 同一
+	// 危险，见下方跳过逻辑）——入口直接拒绝。
+	if t.Mode == "absolute" && *t.Absolute < 0 {
+		return nil, fmt.Errorf("%w: absolute offset must be >= 0", domain.ErrInvalid)
+	}
 	if t.Mode == "timestamp" && t.Timestamp == nil {
 		return nil, fmt.Errorf("%w: timestamp mode needs a timestamp", domain.ErrInvalid)
 	}

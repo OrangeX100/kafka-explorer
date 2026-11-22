@@ -172,7 +172,7 @@ func segStatePath(part string) string { return part + ".segstate" }
 // loadSegState returns the ledger only when it matches THIS asset and the
 // segment layout this run computes; anything else (foreign URL, size
 // change, corrupted JSON, length drift) means fresh download.
-func loadSegState(path, url string, total, segN, segLen int64) *segState {
+func loadSegState(path, url string, total, segN, segLen int64, partSize int64) *segState {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -180,6 +180,13 @@ func loadSegState(path, url string, total, segN, segLen int64) *segState {
 	var st segState
 	if json.Unmarshal(raw, &st) != nil || st.URL != url || st.Total != total ||
 		st.SegN != segN || st.SegLen != segLen || int64(len(st.Done)) != segN {
+		return nil
+	}
+	// Crash window: Truncate(total) preallocates the file, so a "done"
+	// ledger over a MISSING/truncated part (crash before the bytes landed)
+	// would skip every segment and fail the digest. Trust the ledger only
+	// when the part file is already at full size.
+	if st, err := os.Stat(path[:len(path)-len(".segstate")]); err != nil || st.Size() != total {
 		return nil
 	}
 	return &st
@@ -309,7 +316,10 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 			isSetup := strings.HasPrefix(base, stagedSetupPrefix) && strings.HasSuffix(base, ".exe")
 			isPart := strings.HasSuffix(base, ".part")
 			isState := strings.HasSuffix(base, ".segstate")
-			if !isSetup && !isPart && !isState {
+			// saveSegState 崩在 WriteFile 与 Rename 之间的孤儿（.tmp 后缀
+			// 不匹配上面两条，会无限积累）
+			isStateTmp := strings.HasSuffix(base, ".segstate.tmp")
+			if !isSetup && !isPart && !isState && !isStateTmp {
 				continue
 			}
 			_ = os.Remove(filepath.Join(dir, base))
@@ -440,7 +450,11 @@ func (s *UpdateService) downloadSegments(routeCtx context.Context, assetURL, par
 	// integrity; layout is derived from total/segN/segLen so it matches
 	// across routes).
 	statePath := segStatePath(part)
-	prev := loadSegState(statePath, assetURL, total, segN, segLen)
+	var partSz int64
+	if st, err := os.Stat(part); err == nil {
+		partSz = st.Size()
+	}
+	prev := loadSegState(statePath, assetURL, total, segN, segLen, partSz)
 	doneSeg := make([]bool, int(segN))
 	// segN is int64; make needs int — safe: segN ≤ segConnections
 	var resumed int64
@@ -930,7 +944,14 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 		return "", fmt.Errorf("读取已下载文件失败: %w", err)
 	}
 	if digest != want {
+		// The ledger MUST die with the part: a poisoned ledger (mirror
+		// delivered same-size stale bytes, or a crash between Truncate and
+		// the bytes landing) would make every route/retry skip download via
+		// "all segments done" and fail the SHA gate again — a permanent
+		// immediate-failure loop with a misleading attribution
+		// (review 2026-11-22 P1-1/P2-2).
 		os.Remove(part)
+		_ = os.Remove(segStatePath(part))
 		return "", fmt.Errorf("安装包校验失败（SHA-256 不匹配），文件可能不完整或被篡改。请到发布页手动下载，或稍后重试")
 	}
 	return part, nil

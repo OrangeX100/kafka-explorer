@@ -10,7 +10,10 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"kafkaexplorer/internal/buildinfo"
@@ -23,7 +26,38 @@ var assets embed.FS
 //go:embed engine/KafkaExplorer_Engine.exe
 var engineExe []byte
 
+// runUnattended serves the update waiter: it launches this front-end with
+// legacy Inno flags (/VERYSILENT…) that the GUI never parsed — so "silent
+// install" actually opened the interactive wizard, and ANY close path
+// exited 0, which the waiter misread as success (review 2026-11-22 P1-1).
+// In unattended mode we skip the GUI entirely: install to the default dir
+// with no UI, exit non-zero on failure so the waiter's exit-code check is
+// truthful, and let the waiter handle the app relaunch.
+func runUnattended() bool {
+	for _, a := range os.Args[1:] {
+		if a == "/VERYSILENT" || a == "/SILENT" || a == "/S" {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
+	if runUnattended() {
+		svc := newSetupService(engineExe)
+		if err := svc.Install(svc.DefaultDir()); err != nil {
+			// Diagnosable trace next to the waiter's err.log (TEMP).
+			f, err := os.OpenFile(filepath.Join(os.TempDir(), "KafkaExplorer_Setup_silent.log"),
+				os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			if err == nil {
+				fmt.Fprintf(f, "%s silent install failed: %v\n", time.Now().Format("2006-01-02 15:04:05"), err)
+				f.Close()
+			}
+			os.Exit(1)
+		}
+		return
+	}
+
 	winOptions := application.WindowsOptions{}
 	// UI-probe affordance, same double-gate as internal/app/bootstrap: a
 	// cdp-stamped probe build + KE_DEBUG_CDP=1 opens the debug port so the
