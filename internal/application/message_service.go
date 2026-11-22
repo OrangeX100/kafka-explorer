@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"time"
 
 	"kafkaexplorer/internal/application/decode"
 	"kafkaexplorer/internal/domain"
@@ -78,12 +79,22 @@ func (s *MessageService) Browse(ctx context.Context, req domain.BrowseRequest) (
 	if fetcher != nil {
 		registry = decodeAdapter{req.ConnectionID, fetcher}
 	}
+	// 页级解码总预算（0.4.21 评审 P2-8）：decode 发生在 browseMu 之外但
+	// 同样挂住本次调用——registry 半死时每个首见 schema id 各花满 10s
+	// HTTP，一页多 id 即分钟级"浏览很慢"。2s 封顶，超时后剩余消息如实
+	// 标注而不是静默空 Decoded。
+	decCtx, decCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer decCancel()
 	for i := range page.Messages {
 		raw, decErr := base64DecodeBytes(page.Messages[i].Value)
 		if decErr != nil {
 			continue
 		}
-		result := decode.DecodeValue(ctx, raw, req.Decode, registry)
+		if err := decCtx.Err(); err != nil {
+			page.Messages[i].Decoded = &domain.DecodeResult{Error: "解码超时（Schema Registry 响应过慢）"}
+			continue
+		}
+		result := decode.DecodeValue(decCtx, raw, req.Decode, registry)
 		page.Messages[i].Decoded = &result
 	}
 	return BrowseResult{Page: page, NextOffset: page.NextAnchor, Exhausted: page.Exhausted}, nil

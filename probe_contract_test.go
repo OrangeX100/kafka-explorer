@@ -93,7 +93,7 @@ func lastReleasedVersion(t *testing.T) (newest, second string) {
 		// its entire first CI round that way (checkout defaults to
 		// fetch-depth: 1 / fetch-tags: false → ZERO tags on the runner).
 		t.Fatalf("release tag 不足两个，无法确定探针基准——契约必须红而不是静默跳过。" +
-			"CI: checkout 已配 fetch-tags: true（ci.yml gate）；本地: git fetch --tags")
+			"CI: checkout 已配 fetch-depth: 0（ci.yml gate）；本地: git fetch --tags")
 	}
 	return seen[0], seen[1]
 }

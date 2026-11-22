@@ -205,7 +205,7 @@ func Bootstrap(assets embed.FS) (*application.App, func(), error) {
 		}
 		schemaMu.Lock()
 		if len(schemaCache) >= schemaCacheCap {
-			// FIFO 逐出最早写入的 entry（不做 LRU——读多写少场景 FIFO 足够）
+			// 随机逐出（map range 无序——注释曾谎称 FIFO；读多写少场景逐出策略不敏感）
 			for k := range schemaCache {
 				delete(schemaCache, k)
 				break

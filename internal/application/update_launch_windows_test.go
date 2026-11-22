@@ -236,8 +236,9 @@ func TestWaiterScriptFailurePathPinsExitCode(t *testing.T) {
 	}
 
 	// Failure signature: err.log names the exit code AND the staged setup
-	// file SURVIVES (kept for retry).
-	deadline := time.Now().Add(20 * time.Second)
+	// file SURVIVES (kept for retry). 45s：全量包跑时满载 CPU 上 PowerShell
+	// 冷启动 + fixture 构建可超 20s（0.4.21 实测全绿单跑、全量偶发超时）
+	deadline := time.Now().Add(45 * time.Second)
 	logged := false
 	for time.Now().Before(deadline) {
 		if raw, err := os.ReadFile(logFile); err == nil && len(raw) > 0 {
@@ -251,5 +252,17 @@ func TestWaiterScriptFailurePathPinsExitCode(t *testing.T) {
 	}
 	if _, err := os.Stat(fakeSetup); err != nil {
 		t.Fatal("REGRESSION: failing installer deleted the staged setup — retry impossible")
+	}
+	// The DETACHED waiter (and the AV scanning the just-built fixture exe)
+	// can hold the file past our assertions — t.TempDir's RemoveAll then
+	// fails the whole test with "Access is denied" even though every
+	// assertion passed. Wait until the handle frees up (best-effort).
+	for i := 0; i < 20; i++ {
+		f, err := os.OpenFile(fakeSetup, os.O_RDWR, 0)
+		if err == nil {
+			f.Close()
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 }

@@ -128,28 +128,37 @@ func releaseManifestURL(repo string) string {
 	return fmt.Sprintf("https://github.com/%s/releases/latest/download/latest.json", repo)
 }
 
-// checkViaManifest downloads latest.json through the mirror candidates
-// (direct → ghfast → gh-proxy; a few hundred bytes, any reachable route
-// answers instantly) and parses it into an UpdateCheck.
+// manifestRoutesFor returns the ONLY channels the update manifest may
+// travel: github.com direct and our own CN server. Manifest integrity
+// anchor (review 2026-11-22 P2-1): the digest that gates the installer
+// download comes FROM the manifest, so the manifest itself must only
+// travel channels we control (release workflow is the sole writer; tests
+// blank cnBaseURL so unit tests stay off the real internet). Third-party
+// accelerators stay on the ASSET byte route only, where the trusted
+// manifest's digest still anchors them; serving the manifest through
+// ghfast/gh-proxy would let their operators pair a fake manifest with a
+// fake asset and pass every gate. Extracted so the contract test can pin
+// the exact route set (0.4.21 review P1-1 — the accelerator append that
+// contradicted this contract lived here).
+func manifestRoutesFor(repo, cnBaseURL string) []string {
+	routes := []string{releaseManifestURL(repo)}
+	if cnBaseURL != "" {
+		routes = append(routes,
+			strings.TrimSuffix(cnBaseURL, "/")+"/releases/latest.json")
+	}
+	return routes
+}
+
+// checkViaManifest downloads latest.json through the integrity-anchor
+// routes (github direct → CN self-hosted) and parses it into an UpdateCheck.
+// 0.4.21 评审 P1-1：这里曾 append stripCNCandidates(downloadCandidates(
+// …))[1:] ——负向过滤只剥了 CN，[1:] 反而丢掉 github 直连、把 ghfast/
+// gh-proxy 加回 manifest 路由，与本注释和 0.4.20 提交说明相反。完整
+// 性锚只走 manifestRoutesFor 的两个受控通道；加速器仅参与已被该 manifest
+// 摘要锚定的安装包字节路由。
 func (s *UpdateService) checkViaManifest(ctx context.Context, repo string) (UpdateCheck, error) {
 	var lastErr error
-	// Manifest integrity anchor (review 2026-11-22 P2-1): the digest that
-	// gates the installer download comes FROM the manifest, so the manifest
-	// itself must only travel channels we control — github.com direct and
-	// OUR OWN CN server (release workflow is the sole writer; tests blank
-	// cnBaseURL so unit tests stay off the real internet). Third-party
-	// accelerators stay on the ASSET byte route only, where the trusted
-	// manifest's digest still anchors them; serving the manifest through
-	// ghfast/gh-proxy would let their operators pair a fake manifest with
-	// a fake asset and pass every gate.
-	manifestRoutes := []string{releaseManifestURL(repo)}
-	if s.cnBaseURL != "" {
-		manifestRoutes = append(manifestRoutes,
-			strings.TrimSuffix(s.cnBaseURL, "/")+"/releases/latest.json")
-	}
-	manifestRoutes = append(manifestRoutes,
-		stripCNCandidates(downloadCandidates(releaseManifestURL(repo), DownloadSourceAuto))[1:]...)
-	for _, u := range manifestRoutes {
+	for _, u := range manifestRoutesFor(repo, s.cnBaseURL) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return UpdateCheck{}, err

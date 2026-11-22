@@ -30,6 +30,11 @@ import (
 	"kafkaexplorer/internal/fsutil"
 )
 
+// sshDialTimeout bounds the broker-channel open in handleLocalConn: a
+// blackholed broker behind the jump host otherwise hangs ~127s in the jump
+// host's kernel SYN retries, outside any of our deadlines (0.4.21 review P2-6).
+const sshDialTimeout = 15 * time.Second
+
 // fingerprintSHA256 renders a public key the way OpenSSH's known_hosts
 // fingerprint column does.
 func fingerprintSHA256(key gossh.PublicKey) string {
@@ -216,16 +221,43 @@ func (t *TunnelManager) acceptLoop(f *localForward) {
 }
 
 // handleLocalConn pipes one accepted TCP connection through an SSH
-// direct-tcpip channel to the broker target.
+// direct-tcpip channel to the broker target. The channel open is bounded:
+// client.Dial lets the JUMP HOST dial the broker — a blackholed broker IP
+// used to hang here through the jump host's kernel SYN retries (~127s on
+// Linux), unaffectable by any kgo/page deadline on our side (0.4.21
+// review P2-6).
 func (t *TunnelManager) handleLocalConn(local net.Conn, target string) {
 	client, err := t.ensureSSH()
 	if err != nil {
 		local.Close()
 		return
 	}
-	remote, err := client.Dial("tcp", target)
-	if err != nil {
+	type dialResult struct {
+		conn net.Conn
+		err  error
+	}
+	ch := make(chan dialResult, 1)
+	go func() {
+		conn, err := client.Dial("tcp", target)
+		ch <- dialResult{conn, err}
+	}()
+	var remote net.Conn
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			local.Close()
+			return
+		}
+		remote = res.conn
+	case <-time.After(sshDialTimeout):
+		// Timed out waiting for the jump host: close the local leg so the
+		// kgo-side read fails immediately instead of hanging past its own
+		// deadlines; the goroutine's channel open (if it ever completes)
+		// is closed here.
 		local.Close()
+		if res := <-ch; res.conn != nil {
+			res.conn.Close()
+		}
 		return
 	}
 	done := make(chan struct{}, 2)
@@ -240,7 +272,7 @@ func (t *TunnelManager) handleLocalConn(local net.Conn, target string) {
 // DialKafka is the kgo dialer: every broker address is remapped onto its
 // local forwarder. TLS (if configured) applies on top of the returned conn
 // by franz-go itself, so the tunnel stays transparent to the SASL/TLS stack.
-func (t *TunnelManager) DialKafka(_ context.Context, network, address string) (net.Conn, error) {
+func (t *TunnelManager) DialKafka(ctx context.Context, network, address string) (net.Conn, error) {
 	if network != "tcp" {
 		return nil, fmt.Errorf("不支持的网络的类型 %q（Kafka 连接应为 tcp）", network)
 	}
@@ -256,7 +288,9 @@ func (t *TunnelManager) DialKafka(_ context.Context, network, address string) (n
 		return nil, err
 	}
 	var d net.Dialer
-	return d.DialContext(context.Background(), "tcp", localAddr)
+	// 尊重调用方 ctx：kgo 的页/请求截止要能取消本地拨号（旧代码丢 ctx 用
+	// context.Background()，取消传导在这里断链——评审 P2-6 同族）
+	return d.DialContext(ctx, "tcp", localAddr)
 }
 
 // Close tears down all forwarders and the SSH session.

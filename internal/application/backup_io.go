@@ -384,6 +384,8 @@ func stripConnections(all []domain.Connection) []domain.Connection {
 		// would let a re-import silently re-bind to the original row's
 		// credential (or break on a machine where it does not exist).
 		c.Tunnel.SecretRef = ""
+		// 机器本地信任状态：跨机导入首连重新 TOFU，不随备份走（评审 P2-7）
+		c.Tunnel.HostKey = ""
 		c.CreatedAt = nil
 		c.UpdatedAt = nil
 		out = append(out, c)

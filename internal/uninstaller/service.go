@@ -168,6 +168,23 @@ func appRunning() bool {
 	return false
 }
 
+// waitForInnoUninstallerDone polls the Inno uninstaller's real worker
+// process: unins000.exe copies ITSELF to TEMP and the spawned copy does
+// the actual deleting while the original exits immediately — "launcher
+// exited" is not "uninstall finished" (documented Inno behavior; 0.4.21
+// review P2-1, same fix as cmd/setup's runPrevUninstaller). Best-effort:
+// a stuck uninstaller times out instead of hanging the user forever.
+func waitForInnoUninstallerDone(budget time.Duration) {
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq unins000.exe", "/NH").Output()
+		if err == nil && !strings.Contains(string(out), "unins000.exe") {
+			return
+		}
+		time.Sleep(700 * time.Millisecond)
+	}
+}
+
 // Uninstall runs the real Inno uninstaller silently (files, shortcuts and
 // the ARP entry), optionally wipes the data dir, and schedules this
 // wrapper exe's own deletion — it is locked while running, so a detached
@@ -211,6 +228,12 @@ func (s *Service) Uninstall(deleteData bool) error {
 	// so it cannot idle out its whole deadline on read errors.
 	close(watcher.stop)
 	os.Remove(logPath)
+	// unins000.exe copies ITSELF to TEMP and the spawned copy does the real
+	// work while the original exits — "launcher exited" ≠ "files deleted".
+	// Wiping APPDATA (or self-deleting the install dir) while the TEMP copy
+	// is still unlinking files raced it (0.4.21 review P2-1). Best-effort
+	// wait; a stuck uninstaller must not hang the user's uninstall forever.
+	waitForInnoUninstallerDone(2 * time.Minute)
 
 	if deleteData {
 		appdata := os.Getenv("APPDATA")

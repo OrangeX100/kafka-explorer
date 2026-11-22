@@ -55,6 +55,9 @@ func (s *ConnectionService) ExportConnections(ctx context.Context, pickSave func
 		c.ID = ""
 		c.SecretRef = ""
 		c.Tunnel.SecretRef = ""
+		// HostKey 是机器本地信任状态（TOFU 首连指纹）：跨机搬迁后比对必败，
+		// 误报 MITM；清空让新机首连重新信任（0.4.21 评审 P2-7）
+		c.Tunnel.HostKey = ""
 		c.CreatedAt = nil
 		c.UpdatedAt = nil
 		stripped = append(stripped, c)

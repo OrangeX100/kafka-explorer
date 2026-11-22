@@ -54,6 +54,10 @@ type Client struct {
 	// round-trips per page into 0 while staying fresh for a GUI session.
 	boundsMu    sync.Mutex
 	boundsCache map[string]boundsEntry
+	// boundsInflight: per-topic singleflight for concurrent cache misses —
+	// later callers join the in-flight fetch instead of each issuing their
+	// own 2×30s retry storms (0.4.21 review P2-5).
+	boundsInflight map[string]chan boundsResult
 	// tunnel owns the SSH session + per-broker forwarders when the
 	// connection routes through a jump host; nil otherwise. Shared with
 	// every browse page client via the copied opts (same dialer closure).
@@ -64,6 +68,12 @@ type boundsEntry struct {
 	starts  map[int32]int64
 	ends    map[int32]int64
 	expires time.Time
+}
+
+type boundsResult struct {
+	starts map[int32]int64
+	ends   map[int32]int64
+	err    error
 }
 
 // Open dials the cluster. It does not retry: the caller surfaces failures.

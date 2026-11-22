@@ -55,6 +55,12 @@ func main() {
 			}
 			os.Exit(1)
 		}
+		// Synchronously drain the install's leftover files (the extracted
+		// 32MB engine above all): the background removeEventually goroutine
+		// dies with this process, and the update flow's housekeeping does
+		// NOT recognize the engine's name — it would leak forever in
+		// %APPDATA%\KafkaExplorer\updates (0.4.21 review P2-2).
+		svc.DrainCleanupSync(15 * time.Second)
 		return
 	}
 

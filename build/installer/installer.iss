@@ -31,6 +31,9 @@ VersionInfoCopyright=Copyright (C) 2026 Kafka Explorer contributors
 VersionInfoProductName={#AppName}
 OutputDir=..\..\bin\installer
 OutputBaseFilename=KafkaExplorer_Setup_{#Version}
+; 全局互斥：AV 升级链的 escalation 曾对同一安装目录并发跑第二个 Inno
+; 实例（此前注释断言的 Inno 自动互斥并不存在——0.4.21 评审 Go 外围 P2-3）
+SetupMutexName=KafkaExplorerSetupMutex
 SetupIconFile=..\windows\kafka_icon.ico
 WizardImageFile=wizard_sidebar.png
 WizardSmallImageFile=wizard_small.png

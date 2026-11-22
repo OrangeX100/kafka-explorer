@@ -86,7 +86,10 @@ func (r *ConnectionRepo) Save(ctx context.Context, c domain.Connection) error {
 			tunnel_auth=excluded.tunnel_auth, tunnel_key_path=excluded.tunnel_key_path,
 			-- the ref clears when the user disables the tunnel or switches auth
 			tunnel_secret_ref=excluded.tunnel_secret_ref,
-			tunnel_host_key=excluded.tunnel_host_key`,
+			-- TOFU 指纹空值=表单未携带（连接后落库的新指纹晚于表单快照）：
+			-- 空值保留既有指纹，显式新值才覆盖——否则表单保存会静默重开
+			-- TOFU 信任窗口（0.4.21 评审 P2-7）
+			tunnel_host_key=COALESCE(excluded.tunnel_host_key, connections.tunnel_host_key)`,
 		c.ID, c.Name, c.Bootstrap, string(c.Security), nullIfEmpty(c.Username), nullIfEmpty(c.SecretRef),
 		tlsOn, nullIfEmpty(c.TLS.CACertPath), nullIfEmpty(c.TLS.ClientCertPath), nullIfEmpty(c.TLS.ClientKeyPath),
 		insecure, createdAt, updatedAt, boolToInt(c.Pinned),

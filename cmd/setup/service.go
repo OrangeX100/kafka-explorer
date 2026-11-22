@@ -60,6 +60,14 @@ type setupService struct {
 	emit      func(topic string, data ...any) // wails events, wired by main
 	mu        sync.Mutex
 	running   bool
+	// pendingCleanup: files each successful install left behind (Inno log,
+	// escalation artifacts, the extracted 32MB engine). The interactive
+	// path deletes them via `go removeEventually` — fine under app.Run().
+	// The UNATTENDED path exits immediately after Install, killing that
+	// goroutine and leaking the engine into %APPDATA%\KafkaExplorer\updates
+	// forever (0.4.21 review P2-2); runUnattended drains this list
+	// synchronously before exiting.
+	pendingCleanup [][]string
 }
 
 func newSetupService(engineExe []byte) *setupService {
@@ -245,6 +253,26 @@ func (s *setupService) install(dir string, preUninstall func(string) error, run 
 	return run(dir)
 }
 
+// waitForInnoUninstallerDone waits out the Inno uninstaller's two-stage
+// lifetime: unins000.exe copies ITSELF to a TEMP staging dir and the
+// spawned copy does the real work while the original exits immediately
+// (documented Inno behavior — the runOnce exit code describes only the
+// launcher). Polling the process name is the official guidance; without
+// it the upgrade treated "launcher exited" as "uninstall finished" and
+// raced the still-deleting TEMP copy writing the same install dir / ARP
+// keys (0.4.21 review P2-1). Best-effort: on timeout we proceed rather
+// than block the install forever.
+func waitForInnoUninstallerDone(budget time.Duration) {
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq unins000.exe", "/NH").Output()
+		if err == nil && !strings.Contains(string(out), "unins000.exe") {
+			return
+		}
+		time.Sleep(700 * time.Millisecond)
+	}
+}
+
 // runPrevUninstaller silently runs dir\unins000.exe when the target
 // directory already holds an installation; a fresh install (no file)
 // is a no-op. The first run of a freshly written unins000.exe is the
@@ -277,6 +305,8 @@ func runPrevUninstaller(dir string) error {
 	if err != nil {
 		return fmt.Errorf("准备升级时卸载旧版本未完成：旧文件可能正被杀毒软件短暂占用。请稍候几秒重试；若反复失败，请暂时退出杀毒软件实时防护后再试。")
 	}
+	// The launcher exited; the TEMP copy may still be deleting files.
+	waitForInnoUninstallerDone(2 * time.Minute)
 	return nil
 }
 
@@ -357,6 +387,11 @@ func (s *setupService) runEngine(dir string) (installErr error) {
 		if wroteEngine {
 			doomed = append(doomed, engine)
 		}
+		// 记入 pendingCleanup：静默路径退出前要同步清（后台协程会被
+		// 进程退出杀死，见 setupService.pendingCleanup 注释）
+		s.mu.Lock()
+		s.pendingCleanup = append(s.pendingCleanup, doomed)
+		s.mu.Unlock()
 		go removeEventually(doomed)
 	}()
 	// Fast path: spawn the engine directly. Works on machines without a
@@ -384,9 +419,13 @@ func (s *setupService) runEngine(dir string) (installErr error) {
 			// escalating now would start a SECOND concurrent Inno instance
 			// against the same install dir (its mutex makes one exit, but the
 			// half-written state confused both runs). Keep waiting on the
-			// engine's own log instead; only an engine that never started
-			// (errStartBlocked) or definitively failed earns the escalation.
-			if errors.Is(err, errTimeout) {
+			// engine's own log instead; only an engine that definitively
+			// failed earns the escalation. errStartBlocked joins the extended
+			// wait too (0.4.21 review P2-3): the AV's real-time scan can hold
+			// the freshly-spawned engine past the 45s slow-start budget, and
+			// "slow" was misread as "never started" — the escalation then
+			// ran a second engine against a half-written install.
+			if errors.Is(err, errTimeout) || errors.Is(err, errStartBlocked) {
 				if werr := waitForEngineLog(explorerLog, time.Now().Add(5*time.Minute), 10*time.Minute); werr == nil {
 					return nil
 				}
@@ -448,6 +487,30 @@ func removeEventually(paths []string) {
 			}
 		}
 	}
+}
+
+// DrainCleanupSync synchronously removes every file the successful
+// install(s) left behind, retrying under a total time budget. The
+// unattended (update-waiter) path calls this before exiting: its process
+// teardown would kill the async goroutine and leak the 32MB engine.
+func (s *setupService) DrainCleanupSync(budget time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	deadline := time.Now().Add(budget)
+	for _, paths := range s.pendingCleanup {
+		for _, p := range paths {
+			for {
+				if err := os.Remove(p); err == nil || os.IsNotExist(err) {
+					break
+				}
+				if time.Now().After(deadline) {
+					break // pinned by AV — leave it, best-effort
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+		}
+	}
+	s.pendingCleanup = nil
 }
 
 // handoffScriptName is the double-click fallback the user runs when every

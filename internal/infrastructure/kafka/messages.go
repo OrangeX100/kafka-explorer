@@ -34,6 +34,13 @@ const (
 // returns them alongside its pooled client so a page uses the exact same
 // security configuration without re-reading the password.
 func (c *Client) BrowsePage(ctx context.Context, req domain.BrowseRequest) (domain.BrowsePage, error) {
+	// 组合预算（0.4.21 评审 P2-5）：wails 绑定 ctx 无 deadline，kgo 非
+	// group 请求各享 30s 重试预算——bounds 双请求 ~60s + browseMu 排队 +
+	// 页外 decode 曾叠出 120s+ 的"前端假死"。入口 15s 总预算封顶：一次
+	// 页 = bounds（缓存命中 0）+ 锚点解析 + 4s 轮询，正常远低于此；命中
+	// 即按 ErrUnavailable 返回可操作错误，而不是无限悬挂。
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	limit := clampLimit(req.Limit)
 	if req.Partition == nil {
 		return c.browseAllPartitions(ctx, req, limit)
@@ -54,13 +61,13 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 	timingLog("Browse %s-%d anchorResolve=%v anchor=%d", req.Topic, partition, time.Since(anchorT0), anchor)
 	browseT0 := time.Now()
 
-	pageCtx, cancel := context.WithTimeout(ctx, defaultPollTimeout)
-	defer cancel()
-
 	// Dedicated client per topic/partition: fetch responses buffered from
 	// another partition would otherwise be served as this partition's data
 	// (the "click A, see B" bug). The pool holds browseMu until the page
-	// is fully polled.
+	// is fully polled. pageCtx (0.4.21 review P2-4) is created AFTER the
+	// lock: waiting for another page's browseMu used to eat this page's
+	// whole 4s poll budget before the first PollRecords even ran, so a
+	// queued-then-expired page came back "empty and exhausted".
 	clientT0 := time.Now()
 	pc, unlock, err := c.BrowseClientFor(req.Topic, partition, anchor)
 	if err != nil {
@@ -68,6 +75,9 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 	}
 	defer unlock()
 	timingLog("Browse %s-%d client=%v", req.Topic, partition, time.Since(clientT0))
+
+	pageCtx, cancel := context.WithTimeout(ctx, defaultPollTimeout)
+	defer cancel()
 
 	// First-wave return: a GUI page does not need to be full. Polling until
 	// the limit filled made sparse partitions wait out the whole timeout
@@ -225,9 +235,14 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 		}
 		page.NextAnchor = &next
 	} else if len(records) == 0 {
-		// Zero records fetched (fully trimmed window): nothing to page in
-		// either direction — legacy conservative exhausted.
-		page.Exhausted = true
+		// Zero records fetched: a fully trimmed window (nothing to page in
+		// either direction) OR a deadline-eaten first round on a slow broker
+		// — only the former is a real "at the edge" verdict. When the flag
+		// says the deadline fired, stay conservative: an exhausted-empty page
+		// here used to render "已到底" at the anchor while records existed in
+		// the window, silently truncating rate scans and exports that treat
+		// exhausted as the data end (0.4.21 review P2-3).
+		page.Exhausted = !deadlineTruncated
 	} else {
 		// Short page: exhausted ONLY when the window provably touches the
 		// log's far edge in its own direction — zero records or a slow
@@ -381,8 +396,15 @@ func (c *Client) resolveAnchor(ctx context.Context, req domain.BrowseRequest, pa
 	if err != nil {
 		return 0, err
 	}
-	end := ends[partition]
-	start := starts[partition]
+	// 分区级瞬时错误（leader 迁移中 ListEndOffsets 分区失败）会让该分区从
+	// bounds 缺席——直接索引得 end=0，forward 分支 off>0 恒真 → anchor=0 →
+	// 预检"空且到底"，把基础设施故障渲染成业务结论（0.4.21 评审 P3-9）。
+	end, hasEnd := ends[partition]
+	start, hasStart := starts[partition]
+	if !hasEnd || !hasStart {
+		return 0, fmt.Errorf("分区 %s-%d 边界暂不可用（broker 可能正在迁移 leader），请稍后重试：%w",
+			req.Topic, partition, domain.ErrUnavailable)
+	}
 	shift := int64(limit) //nolint:gosec // limit is clamped ≤ 1000
 
 	switch {
@@ -437,19 +459,39 @@ func (c *Client) partitionBounds(ctx context.Context, topic string) (starts, end
 		c.boundsMu.Unlock()
 		return e.starts, e.ends, nil
 	}
+	// per-topic singleflight（0.4.21 评审 P2-5）：并发 miss 各自发两个 30s
+	// 重试风暴曾把同连接的后续页全部压在 browseMu 后面排队。后来者等待
+	// 在途 fetch 的结果而非自己再发一轮。
+	if ch, ok := c.boundsInflight[topic]; ok {
+		c.boundsMu.Unlock()
+		select {
+		case res := <-ch:
+			return res.starts, res.ends, res.err
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		}
+	}
+	ch := make(chan boundsResult, 1)
+	if c.boundsInflight == nil {
+		c.boundsInflight = map[string]chan boundsResult{}
+	}
+	c.boundsInflight[topic] = ch
 	c.boundsMu.Unlock()
 
 	starts, ends, err = c.fetchPartitionBounds(ctx, topic)
-	if err != nil {
-		return nil, nil, err
-	}
+	res := boundsResult{starts: starts, ends: ends, err: err}
 	c.boundsMu.Lock()
-	if c.boundsCache == nil {
-		c.boundsCache = map[string]boundsEntry{}
+	delete(c.boundsInflight, topic)
+	if err == nil {
+		if c.boundsCache == nil {
+			c.boundsCache = map[string]boundsEntry{}
+		}
+		c.boundsCache[topic] = boundsEntry{starts: starts, ends: ends, expires: time.Now().Add(5 * time.Second)}
 	}
-	c.boundsCache[topic] = boundsEntry{starts: starts, ends: ends, expires: time.Now().Add(5 * time.Second)}
 	c.boundsMu.Unlock()
-	return starts, ends, nil
+	ch <- res
+	close(ch)
+	return starts, ends, err
 }
 
 // fetchPartitionBounds issues the two list-offset round-trips.

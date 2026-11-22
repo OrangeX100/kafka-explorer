@@ -93,16 +93,31 @@ func cnCandidateURL(assetURL string) string {
 	return cnMirrorOrigin + "/releases/" + assetURL[i+1:]
 }
 
-// stripCNCandidates keeps the cn server OUT of manifest/sidecar fetches:
-// the github-fetched manifest is the integrity ANCHOR of the whole update
-// chain — whoever controlled the CN host could otherwise serve a fake
-// manifest paired with a fake digest and pass every gate. The CN server
-// only ever delivers installer BYTES that the github-side manifest
-// already digests.
-func stripCNCandidates(cands []string) []string {
+// stripUntrustedMirrors keeps manifest/sidecar fetches on channels we
+// control: github.com direct and our own CN server. The candidate set is
+// closed (direct / cn / the downloadMirrors prefixes), so dropping CN +
+// every accelerator prefix leaves exactly the github direct route in
+// production while passing unknown-prefix URLs (httptest fixtures)
+// through for unit tests. 0.4.21 review P1-1: the old filter stripped CN
+// but LEFT ghfast/gh-proxy in, so an accelerator could serve a fake
+// manifest paired with a fake digest and pass every gate. The manifest is
+// the integrity ANCHOR of the whole update chain — the CN server is
+// release-workflow-written and the accelerators only ever deliver
+// installer BYTES that the trusted manifest already digests.
+func stripUntrustedMirrors(cands []string) []string {
 	out := make([]string, 0, len(cands))
 	for _, c := range cands {
-		if !strings.HasPrefix(c, cnMirrorOrigin+"/") {
+		if strings.HasPrefix(c, cnMirrorOrigin+"/") {
+			continue
+		}
+		untrusted := false
+		for _, m := range downloadMirrors {
+			if strings.HasPrefix(c, m) {
+				untrusted = true
+				break
+			}
+		}
+		if !untrusted {
 			out = append(out, c)
 		}
 	}
@@ -337,7 +352,7 @@ func (s *UpdateService) StageUpdate(ctx context.Context, assetURL string, assetS
 		// treated as success and the TRUNCATED .part got renamed into the
 		// installer. routeErr carries tryRoute's real outcome — including
 		// errCancelled, which tryRoute now ALWAYS returns on cancellation.
-		_, routeErr := s.tryRoute(ctx, route, assetSize, part, manifestSHA, source, progress, cancelled)
+		_, routeErr := s.tryRoute(ctx, route, assetURL, assetSize, part, manifestSHA, source, progress, cancelled)
 		if routeErr == errCancelled || ctx.Err() != nil {
 			// Stop button: keep the .part + ledger — the next attempt
 			// resumes where this stopped instead of restarting.
@@ -427,7 +442,7 @@ const (
 // segAttempts times from its own progress offset; a segment watchdog
 // cancels an attempt that stops delivering for stallTimeout. The caller's
 // size + SHA gates still run on the merged file.
-func (s *UpdateService) downloadSegments(routeCtx context.Context, assetURL, part string, total int64, routeLabel string, progress func(Progress), cancelled <-chan struct{}) error {
+func (s *UpdateService) downloadSegments(routeCtx context.Context, assetURL, ledgerURL, part string, total int64, routeLabel string, progress func(Progress), cancelled <-chan struct{}) error {
 	segN := total / segMinSize
 	if segN > segConnections {
 		segN = segConnections
@@ -448,13 +463,16 @@ func (s *UpdateService) downloadSegments(routeCtx context.Context, assetURL, par
 	// Resume ledger: a previous route's completed segments stay on disk —
 	// pick them up instead of re-downloading (final digest gate anchors
 	// integrity; layout is derived from total/segN/segLen so it matches
-	// across routes).
+	// across routes). Ledger identity is the ORIGINAL github assetURL, NOT
+	// this route's URL: the whole point is resume ACROSS routes, and
+	// matching by route URL discarded the ledger on every failover
+	// (0.4.21 review P1-2).
 	statePath := segStatePath(part)
 	var partSz int64
 	if st, err := os.Stat(part); err == nil {
 		partSz = st.Size()
 	}
-	prev := loadSegState(statePath, assetURL, total, segN, segLen, partSz)
+	prev := loadSegState(statePath, ledgerURL, total, segN, segLen, partSz)
 	doneSeg := make([]bool, int(segN))
 	// segN is int64; make needs int — safe: segN ≤ segConnections
 	var resumed int64
@@ -471,7 +489,7 @@ func (s *UpdateService) downloadSegments(routeCtx context.Context, assetURL, par
 			}
 		}
 	}
-	ledger := &segState{URL: assetURL, Total: total, SegN: segN, SegLen: segLen, Done: doneSeg}
+	ledger := &segState{URL: ledgerURL, Total: total, SegN: segN, SegLen: segLen, Done: doneSeg}
 	var ledgerMu sync.Mutex
 	saveLedger := func() {
 		ledgerMu.Lock()
@@ -735,7 +753,7 @@ var (
 // tryRoute downloads one route into part (no rename). Errors are
 // classified for the fallback chain: start/cancel errors and stalls are
 // retryable on the next route.
-func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize int64, part string, manifestSHA string, source string, progress func(Progress), cancelled <-chan struct{}) (string, error) {
+func (s *UpdateService) tryRoute(ctx context.Context, assetURL, ledgerURL string, assetSize int64, part string, manifestSHA string, source string, progress func(Progress), cancelled <-chan struct{}) (string, error) {
 	// routeCtx is cancelled by the watchdog (stall/slow-start) and tears
 	// down the in-flight request; the deferred cancel cleans up after a
 	// healthy completion. The watchdog starts BEFORE the request: a dead
@@ -767,7 +785,7 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 			_ = os.Remove(segStatePath(part))
 			return "", fmt.Errorf("下载通道返回的大小与发布信息不一致（%d ≠ %d）", segTotal, assetSize)
 		}
-		if err := s.downloadSegments(routeCtx, assetURL, part, assetSize, routeLabel, progress, cancelled); err != nil {
+		if err := s.downloadSegments(routeCtx, assetURL, ledgerURL, part, assetSize, routeLabel, progress, cancelled); err != nil {
 			// KEEP part + ledger: the next candidate resumes the missing
 			// segments (2026-11-22 — the old unconditional Remove here is
 			// what restarted half-finished downloads from byte 0).
@@ -919,7 +937,7 @@ func (s *UpdateService) tryRoute(ctx context.Context, assetURL string, assetSize
 	// file through, and a missing checksum is not something to shrug off.
 	want := strings.ToLower(strings.TrimSpace(manifestSHA))
 	if want == "" {
-		sidecar, status := fetchExpectedChecksum(ctx, stripCNCandidates(downloadCandidates(assetURL+".sha256", source)))
+		sidecar, status := fetchExpectedChecksum(ctx, stripUntrustedMirrors(downloadCandidates(assetURL+".sha256", source)))
 		switch status {
 		case checksumOK:
 			want = sidecar

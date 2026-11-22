@@ -18,6 +18,24 @@ import (
 	"kafkaexplorer/internal/buildinfo"
 )
 
+// 锁 0.4.21 评审 P1-1 的完整性锚契约：manifest/sidecar 候选剥掉 CN 与全
+// 部第三方加速器，只留 github 直连（+ 测试夹具的未知前缀）。旧实现漏剥
+// 加速器——加速器可伪造 manifest 配对假 digest 过全门静默安装。
+func TestStripUntrustedMirrors(t *testing.T) {
+	gh := "https://github.com/OrangeX100/kafka-explorer/releases/download/v1.0.0/KafkaExplorer_Setup_1.0.0.exe"
+	cands := downloadCandidates(gh, DownloadSourceAuto)
+	got := stripUntrustedMirrors(cands)
+	want := []string{gh}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("manifest/sidecar chain must pin github direct: got %v", got)
+	}
+	// 非已知前缀（httptest 夹具）原样保留，单测才能走本地服务
+	fixture := "http://127.0.0.1:12345/a.exe"
+	if got2 := stripUntrustedMirrors([]string{fixture}); len(got2) != 1 || got2[0] != fixture {
+		t.Fatalf("unknown prefix must pass through for test fixtures: %v", got2)
+	}
+}
+
 // Locks the route-expansion rule: only GitHub release-download URLs get
 // mirror candidates (the accelerator path form is prefix + full URL);
 // anything else is used as-is.
@@ -89,9 +107,12 @@ func TestStageUpdateResumesAcrossRoutes(t *testing.T) {
 	dir := t.TempDir()
 	part := filepath.Join(dir, "KafkaExplorer_Setup_0.2.0.exe.part")
 
-	// 路由 1（失败）+ 路由 2（补完）：候选序直接构造，绕过 downloadCandidates
+	// 路由 1（失败）+ 路由 2（补完）：候选序直接构造，绕过 downloadCandidates。
+	// ledgerURL 是跨路由共享的"原始资产 URL"（生产=github 直连地址；0.4.21
+	// 评审 P1-2：按路由 URL 做账本身份会在每次 failover 弃账本重下）
+	const ledgerURL = "https://github.com/OrangeX100/kafka-explorer/releases/download/v0.0.0/KafkaExplorer_Setup_0.0.0.exe"
 	_ = route1
-	_, err1 := svc.tryRoute(context.Background(), route1.URL+"/a.exe", int64(len(payload)), part, manifestSHA, DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
+	_, err1 := svc.tryRoute(context.Background(), route1.URL+"/a.exe", ledgerURL, int64(len(payload)), part, manifestSHA, DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
 	if err1 == nil {
 		t.Fatal("route1 must fail (second segment aborted)")
 	}
@@ -103,7 +124,7 @@ func TestStageUpdateResumesAcrossRoutes(t *testing.T) {
 		t.Fatalf("route1 failure must keep the preallocated .part: %v", stErr)
 	}
 
-	_, err2 := svc.tryRoute(context.Background(), route2.URL+"/a.exe", int64(len(payload)), part, manifestSHA, DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
+	_, err2 := svc.tryRoute(context.Background(), route2.URL+"/a.exe", ledgerURL, int64(len(payload)), part, manifestSHA, DownloadSourceAuto, func(Progress) {}, make(chan struct{}))
 	if err2 != nil {
 		t.Fatalf("route2 resume failed: %v", err2)
 	}
@@ -115,8 +136,10 @@ func TestStageUpdateResumesAcrossRoutes(t *testing.T) {
 	if sha256.Sum256(got) != sha256.Sum256(payload) {
 		t.Fatal("resumed file digest mismatch")
 	}
-	if route2Fetch != 0 {
-		t.Fatalf("route2 must not re-fetch segment 0 (saw %d requests)", route2Fetch)
+	// 初值 0 是 P1-2 的教训：旧初值 -1 让"恰好重取一次"（-1+1=0）静默
+	// 放行，跨路由续传坏死被测试自身掩盖
+	if route2Fetch != -1 {
+		t.Fatalf("route2 must not re-fetch segment 0 (saw %d requests)", route2Fetch+1)
 	}
 	// 账本清理是 StageUpdate（rename 时）的职责，tryRoute 留着它正确——
 	// 这里只验账本记录了全段完成
@@ -169,7 +192,7 @@ func TestTryRouteAbandonsDeadRoute(t *testing.T) {
 	s := &UpdateService{}
 	cancelled := make(chan struct{})
 	started := time.Now()
-	_, err := s.tryRoute(context.Background(), srv.URL+"/asset.exe", 4, "unused.part", "", DownloadSourceAuto,
+	_, err := s.tryRoute(context.Background(), srv.URL+"/asset.exe", srv.URL+"/asset.exe", 4, "unused.part", "", DownloadSourceAuto,
 		func(Progress) {}, cancelled)
 	if err == nil {
 		t.Fatal("dead route was not abandoned")
@@ -201,7 +224,7 @@ func TestTryRouteCompletes(t *testing.T) {
 
 	s := &UpdateService{}
 	part := t.TempDir() + "/part"
-	_, err := s.tryRoute(context.Background(), srv.URL+"/asset.exe", int64(len(body)), part, "", DownloadSourceAuto,
+	_, err := s.tryRoute(context.Background(), srv.URL+"/asset.exe", srv.URL+"/asset.exe", int64(len(body)), part, "", DownloadSourceAuto,
 		func(Progress) {}, make(chan struct{}))
 	if err != nil {
 		t.Fatalf("healthy route failed: %v", err)
