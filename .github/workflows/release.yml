@@ -59,16 +59,23 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import xml.etree.ElementTree as ET
+          import sys, xml.etree.ElementTree as ET
+          # runner 的 Windows python stdout 是 cp1252——错误消息含中文会
+          # UnicodeEncodeError（0.4.21 首推实证，job 曾被门禁自身打红）
+          sys.stdout.reconfigure(encoding="utf-8", errors="replace")
           root = ET.parse("frontend/test-results/junit.xml").getroot()
           bad = []
           for suite in root.iter("testsuite"):
               name = suite.get("name", "")
-              skipped = int(suite.get("skipped", 0))
-              if name.startswith("cluster.spec") and skipped > 0:
-                  bad.append(f"{name}: skipped={skipped}")
+              tests = int(suite.get("tests", 0))
+              passed = tests - int(suite.get("skipped", 0)) - int(suite.get("failures", 0)) - int(suite.get("errors", 0))
+              # 覆盖下限的真判据：一条真跑的都没有（secret 失效=全 skip 才红）。
+              # cluster.spec 常态含永久 skip（compat-rollback 等，注释在案）——
+              # "零 skip" 判据曾把全绿的 run 误杀（0.4.21 首推实证）
+              if name.startswith("cluster.spec") and tests > 0 and passed == 0:
+                  bad.append(f"{name}: all {tests} tests skipped")
           if bad:
-              print("::error::release 门禁要求集群探针必须真跑：%s" % "; ".join(bad))
+              print("::error::release gate requires cluster probes to actually run: %s" % "; ".join(bad))
               raise SystemExit(1)
           print("coverage floor ok: cluster probes ran for real")
           PY
