@@ -155,6 +155,10 @@ func (s *ConnectionService) ImportConnections(ctx context.Context, path string) 
 			c.Tunnel.SecretRef = "conn-tunnel-" + c.ID
 			needTunnelPw = true
 		}
+		// HostKey 是机器本地信任状态：导入不剥的话，伪造的连接 JSON 可预植
+		// 指纹到新行，首次连隧道静默跳过 TOFU（导出侧本轮已剥，导入侧同族
+		// 漏网——0.4.21 二轮评审 P2-2）
+		c.Tunnel.HostKey = ""
 		if err := c.Validate(); err != nil {
 			result.Skipped++
 			continue

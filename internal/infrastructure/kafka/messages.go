@@ -153,8 +153,11 @@ func (c *Client) browsePartition(ctx context.Context, req domain.BrowseRequest, 
 			// 045 first cut) turned every trimmed-window visit into an
 			// empty "no messages" page. On dataLoss keep polling; the page
 			// deadline is the backstop (045 round-4 regression review).
+			// deadlineTruncated 判定对两个 break 统一生效：dataLoss 路径的
+			// 到期 break 此前漏置标志——幸存记录已证明窗口内有数据，到期
+			// 截断却被判 exhausted="已到底"（0.4.21 二轮评审 P2-1）。
+			deadlineTruncated = pageCtx.Err() != nil
 			if !dataLoss {
-				deadlineTruncated = pageCtx.Err() != nil
 				break
 			}
 			if pageCtx.Err() != nil {
@@ -477,6 +480,13 @@ func (c *Client) partitionBounds(ctx context.Context, topic string) (starts, end
 	}
 	c.boundsInflight[topic] = ch
 	c.boundsMu.Unlock()
+	// panic 时也清 inflight 条目：否则该 topic 永久 stale，后续每页都
+	// 等一个永远不会写入的 channel 直到 15s 总预算烧满（0.4.21 二轮 P3）
+	defer func() {
+		c.boundsMu.Lock()
+		delete(c.boundsInflight, topic)
+		c.boundsMu.Unlock()
+	}()
 
 	starts, ends, err = c.fetchPartitionBounds(ctx, topic)
 	res := boundsResult{starts: starts, ends: ends, err: err}

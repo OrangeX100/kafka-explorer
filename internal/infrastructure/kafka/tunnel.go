@@ -252,11 +252,18 @@ func (t *TunnelManager) handleLocalConn(local net.Conn, target string) {
 	case <-time.After(sshDialTimeout):
 		// Timed out waiting for the jump host: close the local leg so the
 		// kgo-side read fails immediately instead of hanging past its own
-		// deadlines; the goroutine's channel open (if it ever completes)
-		// is closed here.
+		// deadlines. The late channel open (if the jump host eventually
+		// answers) is reaped by a second bounded wait — an unbounded <-ch
+		// here would strand this goroutine forever on a blackholed target
+		// (0.4.21 二轮评审 P3).
 		local.Close()
-		if res := <-ch; res.conn != nil {
-			res.conn.Close()
+		select {
+		case res := <-ch:
+			if res.conn != nil {
+				res.conn.Close()
+			}
+		case <-time.After(30 * time.Second):
+			// goroutine 与 channel 一并放弃（泄漏面封顶为单个 goroutine）
 		}
 		return
 	}
