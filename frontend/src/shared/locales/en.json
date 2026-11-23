@@ -829,5 +829,10 @@
   "settings.source.direct": "GitHub direct only",
   "settings.pageSizeHint": "Max 5,000 per page; use Find to locate or Export to a file for more",
   "msg.compactedNote": "Compacted topic: old values were physically removed by Kafka per key — watermark {0} ≠ surviving records. This view shows what actually exists; no data was lost.",
-  "msg.gapNote": "{0} invisible records at this partition's tail: control records (txn commit/abort markers) are hidden from all consumers — no data was lost."
+  "msg.gapNote": "{0} invisible records at this partition's tail: control records (txn commit/abort markers) are hidden from all consumers — no data was lost.",
+  "config.expandErrEmpty": "Enter the target partition count",
+  "config.expandErrNotInt": "Target partition count must be an integer",
+  "config.expandErrTooLow": "Target must be greater than the current partition count — partitions can only grow, never shrink",
+  "config.expandErrTooHigh": "Target exceeds the upper limit (20000)",
+  "msg.gotoErrOffset": "Offset must be a non-negative integer"
 }

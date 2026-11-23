@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Pencil, Plus, Split, Undo2 } from "lucide-react";
-import { adminApi, friendlyError, topicsApi } from "../../shared/api.js";
+import { friendlyError, topicsApi } from "../../shared/api.js";
 import { useToast } from "../../state/stores.js";
 import { t } from "../../shared/i18n.js";
 import { configName, configDesc } from "../../shared/configLocale.js";
@@ -9,7 +9,7 @@ import { configHint } from "../../shared/humanize.js";
 import { clientToLayout, viewportW } from "../../shared/zoom.js";
 import { useContextMenu } from "../common/ContextMenu.js";
 import { confirmDialog } from "../common/ConfirmDialog.js";
-import { Modal } from "../common/Modal.js";
+import { ExpandPartitionsDialog } from "./TopicExpandDialog.js";
 import { useCopy } from "../../shared/useCopy.js";
 import { AddConfigDialog, ConfigEditDialog } from "./ConfigDialogs.js";
 import { TOPIC_CONFIG_DOCS } from "../../shared/topicConfigDocs.js";
@@ -69,7 +69,7 @@ export function TopicConfigs({
   const [expanding, setExpanding] = useState(false);
   const [filter, setFilter] = useState("");
   const tip = useHoverTip();
-  const toast = useToast();
+  const toast = useToast((s) => s.show);
   const copy = useCopy();
   const { open: openCtx, menu: ctxMenu } = useContextMenu();
 
@@ -91,10 +91,10 @@ export function TopicConfigs({
   const apply = async (name: string, value: string | null) => {
     try {
       await topicsApi.alterConfig({ connectionId, topic: detail.name, values: { [name]: value } });
-      toast.show(value === null ? t("config.revertedOk", name) : `${name} = ${value}`, "ok");
+      toast(value === null ? t("config.revertedOk", name) : `${name} = ${value}`, "ok");
       onReload();
     } catch (err) {
-      toast.show(friendlyError(err), "error");
+      toast(friendlyError(err), "error");
     }
   };
 
@@ -328,67 +328,3 @@ export function TopicConfigs({
   );
 }
 
-// ExpandPartitionsDialog: grow a topic's partition count. Kafka only allows
-// growing — the input floor is current+1 and the backend re-validates against
-// the live count. New partitions' replica assignment is broker-chosen.
-function ExpandPartitionsDialog({
-  connectionId,
-  topic,
-  current,
-  onClose,
-  onSaved,
-}: {
-  connectionId: string;
-  topic: string;
-  current: number;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [target, setTarget] = useState(String(current + 1));
-  const toast = { show: useToast((s) => s.show) };
-  const parsed = Number(target);
-  const valid = Number.isInteger(parsed) && parsed > current && parsed <= 20000;
-
-  const submit = async () => {
-    try {
-      await adminApi.increasePartitions(connectionId, topic, parsed);
-      toast.show(t("config.expandOk", String(parsed)), "ok");
-      onSaved();
-      onClose();
-    } catch (err) {
-      toast.show(friendlyError(err), "error");
-    }
-  };
-
-  return (
-    <Modal title={t("config.expandTitle", topic)} width={430} onClose={onClose}>
-      {(close) => (
-        <div className="space-y-2.5">
-          <p className="rounded bg-warn/10 border border-warn/40 px-2.5 py-1.5 text-11 text-ink-200">
-            {t("config.expandWarn", String(current))}
-          </p>
-          <label className="block">
-            <span className="mb-1 block text-11 text-ink-300">{t("config.expandTarget", String(current))}</span>
-            <input
-              className="field"
-              type="number"
-              min={current + 1}
-              max={20000}
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-            />
-          </label>
-          <div className="mt-3 flex items-center gap-2 border-t border-ink-700 pt-3">
-            <div className="flex-1" />
-            <button className="btn" onClick={close}>
-              {t("conn.cancel")}
-            </button>
-            <button className="btn btn-accent" disabled={!valid} onClick={() => void submit()}>
-              {t("config.expandSubmit")}
-            </button>
-          </div>
-        </div>
-      )}
-    </Modal>
-  );
-}

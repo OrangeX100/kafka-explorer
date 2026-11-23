@@ -39,6 +39,8 @@ export function GoToDialog({
   const [tsMs, setTsMs] = useState<number | null>(null);
   const closeRef = { current: onClose };
 
+  const offsetInvalid =
+    mode === "offset" && offset.trim() !== "" && (!Number.isFinite(Number(offset)) || Number(offset) < 0);
   const jump = () => {
     if (mode === "offset") {
       const off = Number(offset);
@@ -84,6 +86,9 @@ export function GoToDialog({
                   onChange={(e) => setOffset(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && offset !== "" && jump()}
                 />
+                {offsetInvalid && (
+                  <span className="mt-1 block text-10 text-danger">{t("msg.gotoErrOffset")}</span>
+                )}
               </label>
             ) : (
               <label className="block">
@@ -96,7 +101,7 @@ export function GoToDialog({
               <button className="btn" onClick={close}>{t("common.close")}</button>
               <button
                 className="btn btn-accent"
-                disabled={mode === "offset" ? offset === "" : tsMs === null}
+                disabled={mode === "offset" ? offset === "" || offsetInvalid : tsMs === null}
                 onClick={jump}
               >
                 {t("msg.gotoGo")}
