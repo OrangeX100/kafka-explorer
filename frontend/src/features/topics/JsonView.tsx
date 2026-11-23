@@ -14,7 +14,7 @@ export function JsonView({ text }: { text: string }) {
   }
   return (
     <div className="font-mono text-11 leading-relaxed selectable">
-      <Node label="" value={parsed} depth={0} />
+      <Node label="" value={parsed} depth={0} comma={false} />
     </div>
   );
 }
@@ -26,7 +26,17 @@ function Primitive({ v }: { v: unknown }) {
   return <span>{String(v)}</span>;
 }
 
-function Node({ label, value, depth }: { label: string; value: unknown; depth: number }) {
+function Node({
+  label,
+  value,
+  depth,
+  comma,
+}: {
+  label: string;
+  value: unknown;
+  depth: number;
+  comma?: boolean;
+}) {
   // Hooks BEFORE the isContainer early return: the root Node instance is
   // reused across selected messages, so a scalar body would change the hook
   // count 1→0 → React #300 white screen.
@@ -45,6 +55,7 @@ function Node({ label, value, depth }: { label: string; value: unknown; depth: n
       <div className="whitespace-pre-wrap break-all">
         {keyEl}
         <Primitive v={value} />
+        {comma ? "," : ""}
       </div>
     );
   }
@@ -84,7 +95,7 @@ function Node({ label, value, depth }: { label: string; value: unknown; depth: n
           </span>
         )}
       </button>
-      {open && <Entries value={value} isArray={isArray} depth={depth + 1} />}
+      {open && <Entries value={value} isArray={isArray} depth={depth + 1} comma={comma} />}
     </div>
   );
 }
@@ -92,18 +103,37 @@ function Node({ label, value, depth }: { label: string; value: unknown; depth: n
 // Entries is its own component so a COLLAPSED container never builds the
 // child entries array (a folded 100k-element array used to allocate its
 // full [k,v] tuple list on every render — 045 round-5 P2-7).
-function Entries({ value, isArray, depth }: { value: unknown; isArray: boolean; depth: number }) {
+function Entries({
+  value,
+  isArray,
+  depth,
+  comma,
+}: {
+  value: unknown;
+  isArray: boolean;
+  depth: number;
+  comma?: boolean;
+}) {
   const entries: [string, unknown][] = isArray
     ? (value as unknown[]).map((v, i) => [String(i), v])
     : Object.entries(value as Record<string, unknown>);
   return (
     <>
       <div className="pl-4">
-        {entries.map(([k, v]) => (
-          <Node key={k} label={isArray ? "" : k} value={v} depth={depth} />
+        {entries.map(([k, v], i) => (
+          <Node
+            key={k}
+            label={isArray ? "" : k}
+            value={v}
+            depth={depth}
+            // 逗号属条目分隔符：行尾、最后一个条目不带——此前无条件挂在
+            // 闭合括号上，root 闭合曾渲染成 "}," 让用户以为 JSON 非法
+            // （0.4.22 用户报告）
+            comma={i < entries.length - 1}
+          />
         ))}
       </div>
-      <div>{isArray ? "]" : "}"}{depth > 0 ? "," : ""}</div>
+      <div>{isArray ? "]" : "}"}{comma ? "," : ""}</div>
     </>
   );
 }
