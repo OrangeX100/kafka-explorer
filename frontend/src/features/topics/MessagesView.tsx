@@ -152,6 +152,9 @@ export function MessagesView({
   // flag, its tail reload wins the seq guard, and the table lands empty
   // forever (2026-11-21 CI: cross-partition jump → empty, 3/3 attempts).
   const pendingGotoTarget = useRef<GoToTarget | null>(null);
+  // 跳转 watchdog 定时器：跨分区跳转在途 45s 无响应即补发目标 tail
+  // （见 onJump 跨分区分支——"empty 120s" 的终极兜底，0.4.22）
+  const gotoWatchdog = useRef<number | null>(null);
   // Set when an effect re-fire was suppressed by an in-flight jump (user
   // changed pageSize/decodeOn mid-jump). Bumped via refireTick after the
   // flight so the effect re-runs with a FRESH closure — a direct loadPage
@@ -252,6 +255,11 @@ export function MessagesView({
         }
       } finally {
         if (goto) {
+          // 跳转完成（含 watchdog 补发的二次请求）：解除 watchdog
+          if (gotoWatchdog.current !== null) {
+            clearTimeout(gotoWatchdog.current);
+            gotoWatchdog.current = null;
+          }
           pendingGoto.current = false; // flight over: toggles work again
           // A suppressed pageSize/decodeOn re-fire gets its fresh-closure
           // reload now; a jump without concurrent changes stays single-shot.
@@ -570,6 +578,19 @@ export function MessagesView({
               setExhausted(false);
               setMessages([]);
               setLoading(true);
+              // watchdog（0.4.22）：后端 BrowsePage 15s 总预算内必有响应，
+              // 45s 仍 pending = 请求已死（wails IPC/未知路径）。失效在途
+              // seq 并补发目标分区 tail——"empty 120s" 的终极兜底（CI 实测
+              // 两次 attempt 皆 120s empty 而 retry 27s 全程过）。正常跳转
+              // 秒级落地，watchdog 不触发；补发与 catch 的 tail-retry 同形态。
+              if (gotoWatchdog.current !== null) clearTimeout(gotoWatchdog.current);
+              gotoWatchdog.current = window.setTimeout(() => {
+                gotoWatchdog.current = null;
+                if (!pendingGoto.current) return; // 跳转已正常完成
+                console.log("[goto-watchdog] 45s no response — reissuing target tail");
+                requestSeq.current++; // 失效在途请求
+                void loadPage("tail", { partition: target.partition }, true);
+              }, 45_000);
               setPartition(target.partition);
             }
             setCursor(target.offset !== undefined ? { offset: target.offset } : "tail");
