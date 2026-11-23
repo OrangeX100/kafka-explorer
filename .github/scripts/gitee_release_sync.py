@@ -58,9 +58,10 @@ def with_retries(label, fn):
 
 rel = api(f"{base}/releases/tags/v{ver}?{q}")
 if not isinstance(rel, dict) or "id" not in rel:
+    # target_commitish 指向 main：master 是 auto_init 陈枝（0.4.21 二轮 P2）
     body = json.dumps({
         "access_token": tok, "tag_name": f"v{ver}",
-        "name": f"Kafka Explorer {ver}", "target_commitish": "master",
+        "name": f"Kafka Explorer {ver}", "target_commitish": "main",
         "body": f"Kafka Explorer {ver} — 详见 GitHub Release 与仓库 README。",
     })
     rel = with_retries("create release",

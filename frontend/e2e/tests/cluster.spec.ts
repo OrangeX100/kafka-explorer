@@ -191,6 +191,9 @@ test("messages-paging：最早/最新/上一页/下一页→表内容与徽章�
   test.setTimeout(300_000); // 30 real produce-dialog cycles
   await openWorkspaceSection(page, "主题");
   console.log("[bc] section open", Date.now());
+  // 重试同构（0.4.21 二轮 P2）：retry 重跑同 topic 时 produce offset 从
+  // 上轮残留起步，toBe(i) 确定性必死、三次预算全烧——先删残留（与 goto 同款）
+  await deleteTopic(page, PAGING_TOPIC);
   await createTopic(page, PAGING_TOPIC, 1);
   console.log("[bc] topic created", Date.now());
   await openTopic(page, PAGING_TOPIC);
@@ -470,8 +473,16 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
       if (rs.length === 0) {
         if (!reentered && emptySince > 0 && Date.now() - emptySince > 45_000) {
           reentered = true;
-          console.log("[gt]", "empty 45s — bounded openTopic re-entry", Date.now());
-          await openTopic(page, GOTO_TOPIC);
+          console.log("[gt]", "empty 45s — bounded refresh re-entry", Date.now());
+          // openTopic 重点击已选中主题是空操作（setSelected 同值被 React
+          // bail-out，key 不变不重挂载——0.4.21 二轮评审 P3-2 实证）；
+          // 改点工具栏"刷新"：loadPage(cursor) 重载当前跳转窗口
+          await page
+            .getByRole("button", { name: "刷新" })
+            .locator("visible=true")
+            .first()
+            .click({ timeout: 5_000 })
+            .catch(() => {});
         }
         if (emptySince === 0) emptySince = Date.now();
         return "empty";

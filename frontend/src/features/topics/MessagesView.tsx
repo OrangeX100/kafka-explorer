@@ -84,16 +84,17 @@ export function MessagesView({
   const { widths: colWidths, startResize, resetCol } = useMessageColumnWidths();
   const updateSettings = useAppSettings((s) => s.update);
   const setPageSize = (n: number) => {
-    // 跳转在途时让路：直发的 tail 重载会用 seq 压掉跳转请求，再把 cursor
-    // 强制回 tail —— refire 补燃最终落在目标分区尾部而非用户要求的窗口
-    // （2026-11-22 评审 F1）。交给跳转 finally 的 refire 用同步后的锚点
-    // 窗口 + 新页大小重载。
-    if (pendingGoto.current) return;
     const cur = useAppSettings.getState().settings;
     if (!cur) return;
     const next = { ...cur, pageSize: n };
     updateSettings(next);
     void settingsApi.save(next).catch((err: unknown) => toast.show(friendlyError(err), "error"));
+    // 跳转在途时让路直发：store 已更新，[pageSize] effect 重燃后会被
+    // pendingGoto 抑制进 suppressedRefire，跳转 finally 用同步后的锚点
+    // 窗口 + 新页大小补燃——新值不丢、跳转窗口不被 tail 冲掉
+    // （2026-11-22 评审 F1；旧守卫连 updateSettings 一起 return，用户
+    // 选的新页大小曾被静默丢弃，注释宣称的重载并不存在）
+    if (pendingGoto.current) return;
     setCursor("tail");
     void loadPage("tail", undefined, true);
   };
@@ -153,8 +154,12 @@ export function MessagesView({
   // forever (2026-11-21 CI: cross-partition jump → empty, 3/3 attempts).
   const pendingGotoTarget = useRef<GoToTarget | null>(null);
   // 跳转 watchdog 定时器：跨分区跳转在途 45s 无响应即补发目标 tail
-  // （见 onJump 跨分区分支——"empty 120s" 的终极兜底，0.4.22）
+  // （见 onJump 跨分区分支——"empty 120s" 的终极兜底，0.4.22）。
+  // gotoFlight 是跳转代次：定时器回调与代次绑定——A/B 重叠跳转时 A 的
+  // finally 不得解除 B 的 watchdog（0.4.21 二轮评审 P1：无归属绑定曾让
+  // 二次跳转失去 45s 兜底并提前解除 pendingGoto 保护）
   const gotoWatchdog = useRef<number | null>(null);
+  const gotoFlight = useRef(0);
   // Set when an effect re-fire was suppressed by an in-flight jump (user
   // changed pageSize/decodeOn mid-jump). Bumped via refireTick after the
   // flight so the effect re-runs with a FRESH closure — a direct loadPage
@@ -163,7 +168,25 @@ export function MessagesView({
   const suppressedRefire = useRef(false);
   const [refireTick, setRefireTick] = useState(0);
 
+  // 组件卸载：解除 watchdog（僵尸定时器 45s 后会以死闭包发起一次真实
+  // browse——后端与 IPC 都白白消耗，0.4.21 二轮评审 P4）
+  useEffect(
+    () => () => {
+      if (gotoWatchdog.current !== null) {
+        clearTimeout(gotoWatchdog.current);
+        gotoWatchdog.current = null;
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
+    // 切主题/连接：解除可能残留的跳转 watchdog（否则 45s 内切主题后，
+    // watchdog 补发会以旧主题的闭包发起 browse——旧主题行注入新主题视图）
+    if (gotoWatchdog.current !== null) {
+      clearTimeout(gotoWatchdog.current);
+      gotoWatchdog.current = null;
+    }
     void topicsApi
       .detail(connectionId, topic)
       .then(setDetail)
@@ -248,18 +271,19 @@ export function MessagesView({
               setExhausted(result.exhausted);
               setSelected(null);
               // the retry lands on goto.partition's TAIL — anchor the cursor
-              // there or refresh/paging would replay the failed jump's window
-              if (msgs.length > 0) setCursor({ offset: msgs[msgs.length - 1].offset });
+              // at the window's LOWEST offset or refresh would start from the
+              // NEXT window (升序后 msgs[0] 即窗口起点；旧值 msgs[last] 是
+              // sort 引入前的化石语义——0.4.21 二轮评审 P2-1)
+              if (msgs.length > 0) setCursor({ offset: msgs[0].offset });
             } catch { /* the toast above already told the user */ }
           }
         }
       } finally {
         if (goto) {
-          // 跳转完成（含 watchdog 补发的二次请求）：解除 watchdog
-          if (gotoWatchdog.current !== null) {
-            clearTimeout(gotoWatchdog.current);
-            gotoWatchdog.current = null;
-          }
+          // watchdog 不在此解除：finally 属于发起它的那次 flight——A 的
+          // 响应晚到清掉 B 的 watchdog 曾让二次跳转失去兜底（P1）。timer
+          // 由下一次 onJump 清旧起新；到期自检（flight 不匹配或跳转已完成
+          // 即 return）保证误触发无副作用
           pendingGoto.current = false; // flight over: toggles work again
           // A suppressed pageSize/decodeOn re-fire gets its fresh-closure
           // reload now; a jump without concurrent changes stays single-shot.
@@ -560,6 +584,7 @@ export function MessagesView({
             // decodeOn — would send a duplicate tail reload that wins the
             // seq guard and erases the target window.
             pendingGoto.current = true;
+            gotoFlight.current++; // 新代次：watchdog 回调以此归属归属校验
             if (target.partition === partition) {
               // Same partition: setPartition is a no-op, the effect below
               // never fires — fire the request here as before.
@@ -583,10 +608,13 @@ export function MessagesView({
               // seq 并补发目标分区 tail——"empty 120s" 的终极兜底（CI 实测
               // 两次 attempt 皆 120s empty 而 retry 27s 全程过）。正常跳转
               // 秒级落地，watchdog 不触发；补发与 catch 的 tail-retry 同形态。
+              const myFlight = gotoFlight.current;
               if (gotoWatchdog.current !== null) clearTimeout(gotoWatchdog.current);
               gotoWatchdog.current = window.setTimeout(() => {
                 gotoWatchdog.current = null;
-                if (!pendingGoto.current) return; // 跳转已正常完成
+                // flight 归属校验：已被更新的跳转（新代次）接管则退让；
+                // 跳转已完成（pendingGoto 复位）同样退让
+                if (gotoFlight.current !== myFlight || !pendingGoto.current) return;
                 console.log("[goto-watchdog] 45s no response — reissuing target tail");
                 requestSeq.current++; // 失效在途请求
                 void loadPage("tail", { partition: target.partition }, true);

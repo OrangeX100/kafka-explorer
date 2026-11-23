@@ -134,8 +134,8 @@ export function classifyError(err: unknown): { key: string; detail: string } {
   if (/error code: 422\d\d|Invalid schema|invalid version/i.test(detail)) return { key: "error.regInvalidSchema", detail };
   if (/连接被拒绝|actively refused|refused/i.test(detail)) return { key: "error.refused", detail };
   if (/连接超时|timed?\s?out|deadline/i.test(detail)) return { key: "error.timeout", detail };
-  if (/无法解析主机|no such host|could not resolve|lookup/i.test(detail)) return { key: "error.dns", detail };
-  if (/TLS 握手|certificate|x509|handshake|tls:/i.test(detail)) return { key: "error.tls", detail };
+  if (/无法解析主机|no such host|could not resolve|lookup/i.test(detail)) return { key: "error.dns", detail };
+  if (/TLS 握手|certificate|x509|handshake|tls:/i.test(detail)) return { key: "error.tls", detail };
   if (/name is required/i.test(detail)) return { key: "error.nameRequired", detail };
   if (/is not host:port|bootstrap entry/i.test(detail)) return { key: "error.badBootstrap", detail };
   if (/组正在被消费|NON_EMPTY_GROUP/i.test(detail)) return { key: "error.groupNotEmpty", detail };

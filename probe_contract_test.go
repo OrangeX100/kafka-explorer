@@ -45,8 +45,11 @@ func TestNoBareTestFixmeInProbes(t *testing.T) {
 			// 跳过整个 spec——2026-11-21 两次乌龙（全族 6 skipped / 0 tests
 			// discovered）。环境闸（test.skip(!KAFKA...)）是合法的文件级
 			// 设计，不在此列；test 体内的合法 skip 都有缩进。
-			trimmed := strings.TrimSpace(line)
-			if skipTrue := regexp.MustCompile(`^test\.skip\(\s*true`); skipTrue.MatchString(trimmed) {
+			// 列 0 匹配原始行（不 TrimSpace）：文件级 skip 无缩进、test
+			// 体内的合法 skip（cluster.spec 两处）有缩进——TrimSpace 会把
+			// 两者混为一谈误杀合法体内 skip。0x08 死字节曾让本守卫自落地
+			// 起从未匹配过任何行（二轮评审 P1：正则内嵌 Backspace）。
+			if skipTrue := regexp.MustCompile(`^test\.skip\(\s*true`); skipTrue.MatchString(line) {
 				t.Errorf("%s:%s: FILE-LEVEL unconditional test.skip(true) found — "+
 					"a file-level skip silently skips the WHOLE spec (2026-11-21 "+
 					"double incident). Move the skip inside the test body. Line: %s",
