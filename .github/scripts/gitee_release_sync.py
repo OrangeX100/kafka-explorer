@@ -10,7 +10,8 @@ Gitee 附件下载强制登录（2026-11-22 实证）——这不是更新器的
   简单起见每个附件独立请求，天然无共享会话）；
 - 每附件 3 次重试 + 退避；
 - 附件成功后按 GitHub Release 的正文 PATCH 中文说明（Gitee PATCH 只认
-  form-urlencoded，不认 JSON body——400 "body is missing" 实证）。
+  form-urlencoded，不认 JSON body——400 "body is missing" 实证；且
+  tag_name/name/body 三个字段缺一不可，缺 name 同样 400）。
 """
 import json
 import os
