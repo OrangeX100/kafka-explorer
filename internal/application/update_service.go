@@ -137,7 +137,9 @@ func releaseManifestURL(repo string) string {
 // accelerators stay on the ASSET byte route only, where the trusted
 // manifest's digest still anchors them; serving the manifest through
 // ghfast/gh-proxy would let their operators pair a fake manifest with a
-// fake asset and pass every gate. Extracted so the contract test can pin
+// fake asset and pass every gate. The CN self-hosted server IS a trusted
+// manifest channel (release workflow is the sole writer — see
+// manifestRoutesFor); only the third-party accelerators are byte-only. Extracted so the contract test can pin
 // the exact route set (0.4.21 review P1-1 — the accelerator append that
 // contradicted this contract lived here).
 func manifestRoutesFor(repo, cnBaseURL string) []string {

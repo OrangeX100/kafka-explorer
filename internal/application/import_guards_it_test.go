@@ -87,6 +87,20 @@ func TestITImportGuards(t *testing.T) {
 		}
 	})
 
+	t.Run("negative partition beyond the -1 auto sentinel is rejected", func(t *testing.T) {
+		// 0.4.21 外部评审：-2/-3… 既非 -1 哨兵也过不了上界检查——曾穿透到
+		// Produce 落在自动分区，导入报告成功但数据去了别的分区
+		_, err := svc.Import(ctx, input(`{"value":"x","partition":-2}`))
+		if err == nil {
+			t.Fatal("负分区 -2 应当被逐行守卫拦下（非 -1 哨兵）")
+		}
+		for _, want := range []string{"line 1", "分区 -2 不存在"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("错误应含 %q，实得：%s", want, err.Error())
+			}
+		}
+	})
+
 	t.Run("valid lines land (partition + auto)", func(t *testing.T) {
 		res, err := svc.Import(ctx, input("{\"value\":\"a\",\"partition\":1}\n\n{\"value\":\"b\"}\n"))
 		if err != nil {

@@ -357,6 +357,13 @@ func (s *MessageIOService) Import(ctx context.Context, in domain.GenerateInput) 
 			// 明确报错（静默吞任意负数会掩盖 payload 错误）。
 			rec.Partition = nil
 		}
+		// 其余负数（-2/-3…）不是 -1 哨兵也过不了上界检查——曾穿透到
+		// Produce 落在自动分区，粘贴导入报告成功但数据去了别的分区
+		// （0.4.21 外部评审：ImportFromFile 修了，这条粘贴路径漏网）
+		if rec.Partition != nil && *rec.Partition < -1 {
+			return domain.GenerateResult{Produced: count, FirstOffset: first, ElapsedMs: time.Since(start).Milliseconds()},
+				importPartitionGuard(i+1, *rec.Partition, maxPartition)
+		}
 		if rec.Partition != nil && *rec.Partition > maxPartition {
 			return domain.GenerateResult{Produced: count, FirstOffset: first, ElapsedMs: time.Since(start).Milliseconds()},
 				importPartitionGuard(i+1, *rec.Partition, maxPartition)

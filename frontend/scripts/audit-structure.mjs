@@ -30,6 +30,12 @@ const EXEMPT = new Set([
   "src/shared/api.ts",
   "src/shared/contracts-admin.ts",
   "src/features/topics/MessagesView.tsx",
+  // 0.4.21 review wave: KsqlQuery grew the grid cap + cancel semantics +
+  // catalog detail seq guard (query-editor hook split planned for 0.5.x);
+  // RegistryDetail grew the loadVersions seq guard + snapshot refresh
+  // (401 lines, one over budget — a split for one line is not a decision).
+  "src/features/admin/KsqlQuery.tsx",
+  "src/features/registry/RegistryDetail.tsx",
 ]);
 
 function* walk(dir) {

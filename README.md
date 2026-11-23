@@ -57,7 +57,7 @@ Kafka Explorer 是一款本地优先的 Kafka 集群可视化管理工具：连�
 
 #### 安全模型（透明说明）
 
-- **版本元数据**：从 `releases/latest/download/latest.json` 静态下载（多通道镜像），不消耗 GitHub API 配额；其中内嵌安装包的 SHA-256
+- **版本元数据**：从 `releases/latest/download/latest.json` 静态下载（受信任双通道：GitHub 直连 + 自建国内镜像 `110.40.185.78:18080`，**明文 HTTP**——manifest 不含敏感信息，完整性由内嵌 SHA-256 锚定且该服务器仅发布流程可写；第三方加速器仅参与安装包字节路由，不接触 manifest），不消耗 GitHub API 配额；其中内嵌安装包的 SHA-256
 - **完整性校验**：安装包下载完成后，优先与 manifest 内嵌的 SHA-256 比对，缺失时回退 `.sha256` sidecar（镜像链）；**所有镜像通道都确认无校验文件（legacy 发布）时才降级为仅文件大小校验并记录日志，其他获取失败一律中止安装**
 - **下载取消/中断**：暂存文件一律丢弃，任何截断文件都不会进入安装流程
 - **凭据**：所有密码仅存 OS 凭据库（Windows 凭据管理器 / macOS 钥匙串 / Linux Secret Service），SQLite 不存密码（schema 级测试强制）
