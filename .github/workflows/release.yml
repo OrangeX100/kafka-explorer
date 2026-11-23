@@ -229,7 +229,7 @@ jobs:
           CN_SSH_USER: ${{ secrets.CN_SSH_USER }}
           CN_SSH_PASSWORD: ${{ secrets.CN_MIRROR_SSH_PASSWORD }}
         run: |
-          python -m pip install --quiet paramiko==3.11.0  # 钉版：该步骤运行在持有 CN_SSH_* secrets 的 env（0.4.21 P3-7）
+          python -m pip install --quiet paramiko==3.5.1  # 钉版：该步骤运行在持有 CN_SSH_* secrets 的 env（0.4.21 P3-7；3.11.0 是不存在的版本号，曾秒挂 CN 同步）
           python .github/scripts/cn_mirror_sync.py
 
       # Gitee release sync (dual publishing): human fallback mirror —

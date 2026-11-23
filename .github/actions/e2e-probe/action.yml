@@ -123,7 +123,7 @@ runs:
         CN_SSH_USER: ${{ inputs.cn-ssh-user }}
         CN_SSH_PASSWORD: ${{ inputs.cn-ssh-password }}
       run: |
-        python -m pip install --quiet paramiko==3.11.0  # 钉版：该步骤运行在持有 CN_SSH_* secrets 的 env（0.4.21 P3-7）
+        python -m pip install --quiet paramiko==3.5.1  # 钉版：该步骤运行在持有 CN_SSH_* secrets 的 env（0.4.21 P3-7；3.11.0 是不存在的版本号，曾秒挂 CN 同步）
         python - <<'PY'
         import os, paramiko
         pw = os.environ.get("CN_SSH_PASSWORD", "")
