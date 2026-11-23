@@ -9,6 +9,9 @@ export interface GoToTarget {
   partition: number;
   offset?: number;
   timestamp?: number; // unix ms
+  /** 跳转代次（onJump 构造 goto 时附带）：loadPage finally 以此做归属
+   *  校验——晚到的旧响应不得解除更新代次的 pendingGoto/watchdog */
+  flight?: number;
 }
 
 // GoToDialog: jump to an offset or a timestamp (the classic Go To dialog).

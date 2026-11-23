@@ -476,9 +476,11 @@ test("goto-cross-partition：跨分区跳转→统一升序→badge A–B（A<B�
           console.log("[gt]", "empty 45s — bounded refresh re-entry", Date.now());
           // openTopic 重点击已选中主题是空操作（setSelected 同值被 React
           // bail-out，key 不变不重挂载——0.4.21 二轮评审 P3-2 实证）；
-          // 改点工具栏"刷新"：loadPage(cursor) 重载当前跳转窗口
+          // 改点工具栏"刷新"（title=msg.refreshHint 全局唯一锚——裸"刷新"
+          // 曾命中主题列表窗格的 icon-only 刷新按钮，0.4.21 二轮深审 P2-1）：
+          // loadPage(cursor) 重载当前跳转窗口
           await page
-            .getByRole("button", { name: "刷新" })
+            .locator('button[title*="重新加载当前窗口"], button[title*="Reload the current window"]')
             .locator("visible=true")
             .first()
             .click({ timeout: 5_000 })

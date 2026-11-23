@@ -58,10 +58,12 @@ def with_retries(label, fn):
 
 rel = api(f"{base}/releases/tags/v{ver}?{q}")
 if not isinstance(rel, dict) or "id" not in rel:
-    # target_commitish 指向 main：master 是 auto_init 陈枝（0.4.21 二轮 P2）
+    # target_commitish=master：Gitee 侧 master 是镜像 live 分支
+    # （gitee-mirror.yml 推 origin/main:master）——0.4.21 二轮 P2-2 曾误改
+    # "main"，但 Gitee 从不接收 main 引用，create 会 400/挂空枝
     body = json.dumps({
         "access_token": tok, "tag_name": f"v{ver}",
-        "name": f"Kafka Explorer {ver}", "target_commitish": "main",
+        "name": f"Kafka Explorer {ver}", "target_commitish": "master",
         "body": f"Kafka Explorer {ver} — 详见 GitHub Release 与仓库 README。",
     })
     rel = with_retries("create release",

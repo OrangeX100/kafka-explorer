@@ -280,11 +280,18 @@ export function MessagesView({
         }
       } finally {
         if (goto) {
-          // watchdog 不在此解除：finally 属于发起它的那次 flight——A 的
-          // 响应晚到清掉 B 的 watchdog 曾让二次跳转失去兜底（P1）。timer
-          // 由下一次 onJump 清旧起新；到期自检（flight 不匹配或跳转已完成
-          // 即 return）保证误触发无副作用
-          pendingGoto.current = false; // flight over: toggles work again
+          // flight 归属校验：仅最新代次的 flight 才解除 pendingGoto 保护
+          // 与 watchdog——被取代跳转的晚到响应曾无条件清掉新一轮跳转的
+          // 保护（0.4.21 二轮深审 P2-3 残洞：B 的 watchdog 守卫半边被瓦
+          // 解）。watchdog 定时器由归属方清：新 onJump 清旧起新、回调
+          // flight 自检、finally 归属清——三路一致。
+          if (goto.flight === gotoFlight.current) {
+            if (gotoWatchdog.current !== null) {
+              clearTimeout(gotoWatchdog.current);
+              gotoWatchdog.current = null;
+            }
+            pendingGoto.current = false; // flight over: toggles work again
+          }
           // A suppressed pageSize/decodeOn re-fire gets its fresh-closure
           // reload now; a jump without concurrent changes stays single-shot.
           if (suppressedRefire.current) {
