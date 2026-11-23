@@ -1,4 +1,4 @@
-// UI zoom bridge: 界面字号 scales the whole body via CSS zoom, which puts
+// UI zoom bridge: 视口坐标 ⇆ 布局坐标换算的公共 seam。
 // NOTE: these are IDENTITY transforms today — the body-zoom scheme was
 // replaced by the html font-size/rem typography (state/settings.ts). They
 // stay as seams so a future zoom feature has one place to hook.
